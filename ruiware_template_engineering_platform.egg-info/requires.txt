@@ -1,0 +1,9 @@
+fastapi<1,>=0.115
+uvicorn[standard]<1,>=0.34
+pydantic<3,>=2.10
+cadquery-ocp<8,>=7.8
+numpy<3,>=1.26
+
+[test]
+pytest<9,>=8
+httpx<1,>=0.28

@@ -46,7 +46,9 @@ import {
   Variable,
   X,
 } from "lucide-react";
-import { api } from "./api";
+import { api, toErrorNotice } from "./api";
+import type { ErrorNotice } from "./api/errors";
+import { WorkspaceShell } from "./components/layout/WorkspaceShell";
 import type {
   CompileResult,
   Draft,
@@ -4700,7 +4702,7 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ErrorNotice | null>(null);
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
@@ -4761,8 +4763,8 @@ export default function App() {
     }
   }
   function showError(e: unknown) {
-    setError(e instanceof Error ? e.message : String(e));
-    setTimeout(() => setError(""), 7000);
+    setError(toErrorNotice(e));
+    setTimeout(() => setError(null), 7000);
   }
   function change(next: Draft) {
     setDraft(next);
@@ -4963,115 +4965,31 @@ export default function App() {
   const overall = Math.round((completeCount / 7) * 100);
   const currentStage = STAGES[stageIndex];
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">RW</div>
-          <div>
-            <strong>单体零部件模板平台</strong>
-            <span>Monolithic Part Template Studio</span>
-          </div>
-        </div>
-        <div className="draft-switcher">
-          <span>模板</span>
-          <select
-            value={draft.id}
-            onChange={(e) => {
-              const d = drafts.find((x) => x.id === e.target.value);
-              if (d) chooseDraft(d);
-            }}
-          >
-            {drafts.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.code} · {d.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="icon-btn"
-            onClick={createDraft}
-            title="新建单体零部件模板"
-          >
-            <Plus size={17} />
-          </button>
-        </div>
-        <div className="top-actions">
-          <span className="schema-pill">元模型 {draft.schemaVersion}</span>
-          <span className={`status-pill ${draft.lifecycleStatus}`}>
-            {draft.lifecycleStatus === "published"
-              ? "已发布"
-              : "草稿 R" + draft.revision}
-          </span>
-          <button className="ghost-btn" onClick={duplicate}>
-            <Copy size={15} />
-            副本
-          </button>
-          <button className="ghost-btn danger" onClick={archive}>
-            <Archive size={15} />
-            归档
-          </button>
-          <button
-            className="primary-btn"
-            disabled={!dirty || !!busy}
-            onClick={() => void save()}
-          >
-            {busy === "save" ? (
-              <LoaderCircle className="spin" size={16} />
-            ) : (
-              <Save size={16} />
-            )}
-            保存修订
-          </button>
-        </div>
-      </header>
-
-      <aside className="stage-sidebar">
-        <div className="progress-block">
-          <div>
-            <span>工程完整度</span>
-            <strong>{overall}%</strong>
-          </div>
-          <div className="progress-track">
-            <i style={{ width: `${overall}%` }} />
-          </div>
-          <small>{completeCount} / 7 阶段通过</small>
-        </div>
-        <nav>
-          {STAGES.map((item) => {
-            const Icon = item.icon;
-            const state = draft.stageStatus[item.id];
-            return (
-              <button
-                key={item.id}
-                className={`stage-link ${stage === item.id ? "active" : ""}`}
-                onClick={() => setStage(item.id)}
-              >
-                <span className={`stage-number ${state}`}>
-                  {state === "complete" ? <Check size={13} /> : item.number}
-                </span>
-                <Icon size={17} />
-                <div>
-                  <strong>{item.title}</strong>
-                  <small>{item.caption}</small>
-                </div>
-                <ChevronRight size={14} />
-              </button>
-            );
-          })}
-        </nav>
-        <div className="package-card">
-          <PackageCheck size={19} />
-          <div>
-            <strong>单体零部件模板包</strong>
-            <span>参数 · 几何 · 规则 · STEP</span>
-          </div>
-          <a href={api.sourcePackageUrl(draft.id!)} title="下载 .rwpart">
-            <Download size={16} />
-          </a>
-        </div>
-      </aside>
-
-      <main className="workspace">
+    <WorkspaceShell
+      draft={draft}
+      drafts={drafts}
+      stage={stage}
+      overall={overall}
+      completeCount={completeCount}
+      busy={busy}
+      dirty={dirty}
+      notice={notice}
+      error={error}
+      onSelectDraft={(draftId) => {
+        const selected = drafts.find((item) => item.id === draftId);
+        if (selected) chooseDraft(selected);
+      }}
+      onSelectStage={setStage}
+      onCreateDraft={createDraft}
+      onDuplicateDraft={duplicate}
+      onArchiveDraft={archive}
+      onSave={() => void save()}
+      onDismissToast={() => {
+        setError(null);
+        setNotice("");
+      }}
+      sourcePackageUrl={api.sourcePackageUrl(draft.id!)}
+    >
         <div className="stage-heading">
           <div>
             <span>工作流 {currentStage.number} / 07</span>
@@ -5192,21 +5110,7 @@ export default function App() {
             </div>
           </aside>
         </div>
-      </main>
-      {(notice || error) && (
-        <div className={`toast ${error ? "error" : ""}`}>
-          {error || notice}
-          <button
-            onClick={() => {
-              setError("");
-              setNotice("");
-            }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-      )}
-    </div>
+    </WorkspaceShell>
   );
 }
 
