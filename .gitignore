@@ -5,6 +5,12 @@ __pycache__/
 .pytest_cache/
 *.pyc
 *.log
+*.tsbuildinfo
+*.egg-info/
+.idea/
+.npm-cache/
+.tmp/
+.vite/
 data/*.db
 ruiware.db
 artifacts/*

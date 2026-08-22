@@ -18,6 +18,8 @@
 
 ## 启动
 
+Windows 用户可以直接双击项目根目录下的 `start-dev.bat`，脚本会后台启动 API 和前端，并自动打开工作台。
+
 ```powershell
 cd G:\2026年科研\货架项目开发\RuiWare\template-engineering-platform
 .\start-dev.ps1
