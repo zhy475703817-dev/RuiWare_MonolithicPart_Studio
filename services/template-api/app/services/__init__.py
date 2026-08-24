@@ -1,4 +1,34 @@
-from .compile import run_cad_worker, write_source_package
+from .compile import run_cad_worker
 from .context import build_stage_context, material_sample_contexts, nominal_material_context, validate_stage_with_context
+from .operations import (
+    ALLOWED_ATTACHMENT_EXTENSIONS,
+    AttachmentUpdateRequestBody,
+    apply_template_proposal,
+    archive_template_draft,
+    compile_preview,
+    compile_template_draft,
+    complete_template_stage,
+    create_blank_template_draft,
+    create_material_binding,
+    create_template_draft,
+    download_source_package,
+    evaluate_template_draft,
+    get_template_draft,
+    latest_compile_run,
+    list_published_versions,
+    list_template_revisions,
+    material_sources,
+    next_template_code,
+    publish_template,
+    preview_template_proposal,
+    remove_template_attachment,
+    resolve_material_binding,
+    restore_template_draft,
+    restore_template_revision,
+    search_materials,
+    update_template_attachment,
+    update_template_draft,
+    validate_template_stage,
+    write_source_package,
+)
 from .proposal import apply_structured_proposal, sync_sketch_seed_coordinates
-

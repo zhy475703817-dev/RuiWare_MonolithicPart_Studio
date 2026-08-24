@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,27 @@ SUPPLY_FORM_LABELS = {
     "tube": "管材", "bar": "棒材", "wire": "线材", "engineeringPlastic": "工程塑料",
     "externalModel": "外部模型", "standardPart": "标准件", "other": "其他",
 }
+
+SEARCHABLE_COLUMNS = (
+    "code",
+    "name",
+    "type",
+    "category_group",
+    "data_kind",
+    "grade",
+    "color",
+    "drawing_color",
+    "surface",
+    "standard",
+    "supplier",
+    "status",
+    "remark",
+    "thickness",
+    "length",
+    "width",
+    "height",
+    "price",
+)
 
 
 def effective_thickness_domain(requirement: MaterialRequirement) -> dict[str, Any]:
@@ -127,10 +149,12 @@ class RuiWareMaterialLibrary:
     def list(self, search: str = "", limit: int = 100) -> list[dict[str, Any]]:
         where = ""
         parameters: list[Any] = []
-        if search.strip():
-            where = "WHERE code LIKE ? OR name LIKE ? OR type LIKE ? OR grade LIKE ?"
-            term = f"%{search.strip()}%"
-            parameters.extend([term, term, term, term])
+        terms = [term for term in re.split(r"[\s,，;；/|]+", search.strip()) if term]
+        if terms:
+            column_clause = " OR ".join(f"COALESCE(CAST({column} AS TEXT), '') LIKE ?" for column in SEARCHABLE_COLUMNS)
+            where = "WHERE " + " AND ".join(f"({column_clause})" for _ in terms)
+            for term in terms:
+                parameters.extend([f"%{term}%"] * len(SEARCHABLE_COLUMNS))
         parameters.append(max(1, min(limit, 500)))
         query = f"SELECT {','.join(MATERIAL_COLUMNS)} FROM materials {where} ORDER BY type, code LIMIT ?"
         with self._connect() as connection:

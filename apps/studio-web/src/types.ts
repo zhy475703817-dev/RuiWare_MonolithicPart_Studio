@@ -106,6 +106,8 @@ export type ParameterDefinition = {
   source: "user" | "formula" | "material" | "lookup";
   sourceDefinition?: ParameterSource | null;
   scope?: "template" | "partInstance" | "component" | "product" | "projectZone";
+  declaredInRuleStage?: boolean;
+  contractReady?: boolean;
   description?: string;
 };
 export type VariantDefinition = {

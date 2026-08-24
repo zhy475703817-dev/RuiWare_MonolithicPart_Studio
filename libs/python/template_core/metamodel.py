@@ -131,6 +131,8 @@ class ParameterDefinition(BaseModel):
     source: Literal["user", "formula", "material", "lookup"] = "user"
     sourceDefinition: ParameterSource | None = None
     scope: Literal["template", "partInstance", "component", "product", "projectZone"] = "partInstance"
+    declaredInRuleStage: bool = False
+    contractReady: bool = True
     description: str = ""
 
     @model_validator(mode="after")

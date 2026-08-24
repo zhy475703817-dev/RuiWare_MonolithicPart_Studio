@@ -6,6 +6,8 @@ from template_core.material import material_requirement_mismatches
 from template_core.metamodel import MaterialRequirement
 from template_core.models import MaterialValidationSample, TemplateDraft
 from template_core.stages import validate_material
+from app.repository import Repository
+from app.services.operations import search_materials
 
 
 def test_ruiware_library_is_read_only_and_normalized(tmp_path) -> None:
@@ -122,3 +124,32 @@ def test_draft_synchronizes_material_thickness_parameter_contract() -> None:
     assert parameter.allowedValues == [1.5,2.0]
     assert parameter.minimum == 1.5 and parameter.maximum == 2.0
     assert parameter.sourceDefinition.reference == "material.thickness"
+
+
+def test_material_search_matches_multiple_fields_and_tokens(tmp_path) -> None:
+    path = tmp_path / "materials.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE materials (
+                id INTEGER PRIMARY KEY, code TEXT, name TEXT, type TEXT, category_group TEXT,
+                data_kind TEXT, length TEXT, width TEXT, height TEXT, thickness TEXT, grade TEXT,
+                color TEXT, drawing_color TEXT, price TEXT, surface TEXT, standard TEXT,
+                stock_qty REAL, available_qty REAL, supplier TEXT, status TEXT,
+                updated_at TEXT, remark TEXT
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO materials VALUES (1,'OMEGA-01','Ω型立柱原料','型材','openProfile','raw','6000','120',NULL,'2.0','Q355B','灰','蓝',NULL,'镀锌','GB/T 6728',10,8,'华北钢厂','已发布','2026-08-01','立柱材料')"
+        )
+    library = RuiWareMaterialLibrary(path)
+    repository = Repository(tmp_path / "local.db", library)
+
+    rows = library.list("Q355B 镀锌")
+    assert rows and rows[0]["code"] == "OMEGA-01"
+    assert library.list("6728")[0]["code"] == "OMEGA-01"
+
+    requirement = MaterialRequirement(supplyForm="openProfile", thickness={"minimum": 1.5, "maximum": 2.5}, reviewed=True)
+    result = search_materials(library, repository, "Q355B 镀锌", 100, requirement=requirement)
+    assert result[0]["requirementMatch"]["compatible"] is True

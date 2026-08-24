@@ -42,9 +42,37 @@ from template_core.sketch_solver import solve_semantic_sketch  # noqa: E402
 from .repository import DuplicateCodeError, Repository, RevisionConflictError  # noqa: E402
 from .ai_actions import AIModelProposal, ProposalError, apply_proposal, proposal_diff  # noqa: E402
 from .errors import api_error, http_exception_handler, validation_exception_handler  # noqa: E402
-from .services.compile import run_cad_worker as run_cad_worker_service, write_source_package as write_source_package_service  # noqa: E402
-from .services.context import build_stage_context as build_stage_context_service, material_sample_contexts as material_sample_contexts_service, nominal_material_context as nominal_material_context_service, validate_stage_with_context as validate_stage_with_context_service  # noqa: E402
-from .services.proposal import apply_structured_proposal as apply_structured_proposal_service, sync_sketch_seed_coordinates as sync_sketch_seed_coordinates_service  # noqa: E402
+from .services.operations import (  # noqa: E402
+    AttachmentUpdateRequestBody,
+    apply_template_proposal as apply_template_proposal_service,
+    archive_template_draft as archive_template_draft_service,
+    compile_preview as compile_preview_service,
+    compile_template_draft as compile_template_draft_service,
+    complete_template_stage as complete_template_stage_service,
+    create_blank_template_draft as create_blank_template_draft_service,
+    create_material_binding as create_material_binding_service,
+    create_template_draft as create_template_draft_service,
+    duplicate_template_draft as duplicate_template_draft_service,
+    download_source_package as download_source_package_service,
+    evaluate_template_draft as evaluate_template_draft_service,
+    get_template_draft as get_template_draft_service,
+    latest_compile_run as latest_compile_run_service,
+    list_published_versions as list_published_versions_service,
+    list_template_revisions as list_template_revisions_service,
+    material_sources as material_sources_service,
+    publish_template as publish_template_service,
+    preview_template_proposal as preview_template_proposal_service,
+    remove_template_attachment as remove_template_attachment_service,
+    resolve_material_binding as resolve_material_binding_service,
+    restore_template_draft as restore_template_draft_service,
+    restore_template_revision as restore_template_revision_service,
+    search_materials as search_materials_service,
+    upload_template_attachment as upload_template_attachment_service,
+    update_template_attachment as update_template_attachment_service,
+    update_template_draft as update_template_draft_service,
+    validate_template_stage as validate_template_stage_service,
+    write_source_package as write_source_package_service,
+)  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -153,22 +181,6 @@ def _draft(draft_id: str) -> TemplateDraft:
         raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
 
 
-def _material_sample_contexts(draft: TemplateDraft) -> list[dict]:
-    return material_sample_contexts_service(repository, draft)
-
-
-def _nominal_material_context(draft: TemplateDraft) -> dict | None:
-    return nominal_material_context_service(repository, draft)
-
-
-def _stage_context(draft: TemplateDraft) -> tuple[list[dict], CompileResult | None, str | None]:
-    return build_stage_context_service(repository, draft)
-
-
-def _validate(stage: StageName, draft: TemplateDraft) -> StageValidation:
-    return validate_stage_with_context_service(repository, stage, draft)
-
-
 @app.get("/api/v1/health")
 def health() -> dict[str, object]:
     return {
@@ -181,36 +193,17 @@ def health() -> dict[str, object]:
 
 @app.get("/api/v1/material-sources")
 def material_sources() -> list[dict[str, object]]:
-    return [{
-        "id": material_library.source_id, "name": "RuiWare 已有材料库",
-        "kind": "sqlite-readonly", "available": MATERIAL_DATABASE.exists(),
-        "capabilities": ["reference", "copy"],
-    }]
+    return material_sources_service(material_library, available=MATERIAL_DATABASE.exists())
 
 
 @app.get("/api/v1/materials")
 def materials(search: str = Query(default="", max_length=80), limit: int = 100, draft_id: str | None = None):
-    try:
-        rows = material_library.list(search=search, limit=limit)
-        if not draft_id:
-            return rows
-        draft = _draft(draft_id)
-        requirement = draft.materialRequirements[0] if draft.materialRequirements else None
-        return [{**row, "requirementMatch": {"compatible": not (reasons := material_requirement_mismatches(requirement, row)), "reasons": reasons}} for row in rows]
-    except (sqlite3.Error, OSError) as error:
-        raise api_error("MATERIAL_LIBRARY_UNAVAILABLE", status_code=503, message=str(error), context={"reason": str(error)}) from error
+    return search_materials_service(material_library, repository, search, limit, draft_id)
 
 
 @app.post("/api/v1/materials/search")
 def search_materials(request: MaterialSearchRequest):
-    """Match against the unsaved requirement currently being edited in the UI."""
-    try:
-        rows = material_library.list(search=request.search, limit=request.limit)
-        if request.requirement is None:
-            return rows
-        return [{**row, "requirementMatch": {"compatible": not (reasons := material_requirement_mismatches(request.requirement, row)), "reasons": reasons}} for row in rows]
-    except (sqlite3.Error, OSError) as error:
-        raise api_error("MATERIAL_LIBRARY_UNAVAILABLE", status_code=503, message=str(error), context={"reason": str(error)}) from error
+    return search_materials_service(material_library, repository, request.search, request.limit, requirement=request.requirement)
 
 
 @app.get("/api/v1/material-bindings")
@@ -220,27 +213,17 @@ def material_bindings():
 
 @app.post("/api/v1/material-bindings", status_code=201)
 def create_material_binding(request: BindingRequest):
-    try:
-        return repository.create_binding(request.sourceRecordId, request.mode)
-    except KeyError as error:
-        raise api_error("MATERIAL_NOT_FOUND", status_code=404, context={"sourceRecordId": request.sourceRecordId}) from error
+    return create_material_binding_service(repository, request.sourceRecordId, request.mode)
 
 
 @app.get("/api/v1/material-bindings/{binding_id}/resolved")
 def resolve_material_binding(binding_id: str):
-    try:
-        material, provenance = repository.resolve_binding(binding_id)
-    except KeyError as error:
-        raise api_error("MATERIAL_BINDING_NOT_FOUND", status_code=404, context={"bindingId": binding_id}) from error
-    return {"material": material, "provenance": provenance}
+    return resolve_material_binding_service(repository, binding_id)
 
 
 @app.post("/api/v1/template-drafts/blank", response_model=TemplateDraft, status_code=201)
 def create_blank_template_draft(request: NewDraftRequest):
-    draft = TemplateDraft(
-        code=_next_template_code(), name=request.name.strip() or "未命名零部件模板",
-    )
-    return repository.save_draft(draft, reason="create")
+    return create_blank_template_draft_service(repository, request.name)
 
 
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])
@@ -250,89 +233,53 @@ def list_template_drafts(includeArchived: bool = False):
 
 @app.post("/api/v1/template-drafts", response_model=TemplateDraft, status_code=201)
 def create_template_draft(draft: TemplateDraft):
-    if draft.id and repository.get_draft_optional(draft.id, include_archived=True):
-        raise api_error("DRAFT_ID_DUPLICATE", status_code=409, context={"draftId": draft.id})
-    return _save(draft.model_copy(update={"id": None}), reason="create")
+    return create_template_draft_service(repository, draft)
 
 
 @app.get("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
 def get_template_draft(draft_id: str):
-    return _draft(draft_id)
+    return get_template_draft_service(repository, draft_id)
 
 
 @app.put("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
 def update_template_draft(draft_id: str, draft: TemplateDraft):
-    if draft.id not in (None, draft_id):
-        raise api_error("DRAFT_ID_MISMATCH", status_code=409, context={"pathId": draft_id, "draftId": draft.id})
-    _draft(draft_id)
-    candidate = draft.model_copy(update={"id": draft_id})
-    solve = solve_semantic_sketch(candidate)
-    candidate = _sync_sketch_seed_coordinates(candidate, solve)
-    return _save(candidate, reason="manual-save")
+    return update_template_draft_service(repository, draft_id, draft)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/duplicate", response_model=TemplateDraft, status_code=201)
 def duplicate_template_draft(draft_id: str):
-    try:
-        return repository.duplicate_draft(draft_id)
-    except KeyError as error:
-        raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
+    return duplicate_template_draft_service(repository, draft_id)
 
 
 @app.delete("/api/v1/template-drafts/{draft_id}", status_code=204)
 def archive_template_draft(draft_id: str):
-    try:
-        repository.archive_draft(draft_id)
-    except KeyError as error:
-        raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
+    archive_template_draft_service(repository, draft_id)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/restore", response_model=TemplateDraft)
 def restore_template_draft(draft_id: str):
-    try:
-        return repository.restore_draft(draft_id)
-    except KeyError as error:
-        raise api_error("DRAFT_ARCHIVED_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
-    except DuplicateCodeError as error:
-        raise api_error("DRAFT_CODE_DUPLICATE", status_code=409, message=str(error), context={"code": str(error)}) from error
+    return restore_template_draft_service(repository, draft_id)
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/revisions")
 def list_template_revisions(draft_id: str):
-    try:
-        return repository.list_revisions(draft_id)
-    except KeyError as error:
-        raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
+    return list_template_revisions_service(repository, draft_id)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/revisions/{revision}/restore", response_model=TemplateDraft)
 def restore_template_revision(draft_id: str, revision: int):
-    try:
-        return repository.restore_revision(draft_id, revision)
-    except KeyError as error:
-        raise api_error("DRAFT_REVISION_NOT_FOUND", status_code=404, context={"draftId": draft_id, "revision": revision}) from error
+    return restore_template_revision_service(repository, draft_id, revision)
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/stages/{stage}/validate", response_model=StageValidation)
 def validate_template_stage(draft_id: str, stage: StageName):
-    return _validate(stage, _draft(draft_id))
+    return validate_template_stage_service(repository, stage, get_template_draft_service(repository, draft_id))
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
 def complete_template_stage(draft_id: str, stage: StageName):
-    draft = _draft(draft_id)
-    index = STAGE_ORDER.index(stage)
-    if index > 0 and getattr(draft.stageStatus, STAGE_ORDER[index - 1]) != "complete":
-        raise api_error("STAGE_PREREQUISITE_INCOMPLETE", status_code=409, context={"requiredStage": STAGE_ORDER[index - 1]})
-    validation = _validate(stage, draft)
-    if not validation.complete:
-        return StageActionResult(draft=draft, validation=validation)
-    stage_status = draft.stageStatus.model_copy(update={stage: "complete"})
-    completed = _save(draft.model_copy(update={"stageStatus": stage_status}), reason=f"complete-{stage}")
-    return StageActionResult(draft=completed, validation=validation)
-
-
-ALLOWED_ATTACHMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".dxf", ".dwg", ".step", ".stp", ".txt", ".csv"}
+    draft, validation = complete_template_stage_service(repository, stage, draft_id)
+    return StageActionResult(draft=draft, validation=validation)
 
 
 class AttachmentUpdateRequest(BaseModel):
@@ -346,198 +293,80 @@ async def upload_template_attachment(
     filename: str = Query(min_length=1, max_length=180),
     kind: Literal["referenceImage", "drawing", "specification", "other"] = "other",
 ):
-    draft = _draft(draft_id)
-    safe_name = Path(filename).name
-    if Path(safe_name).suffix.lower() not in ALLOWED_ATTACHMENT_EXTENSIONS:
-        raise api_error("ATTACHMENT_UNSUPPORTED_TYPE", status_code=415, context={"filename": safe_name})
     content = await request.body()
-    if not content:
-        raise api_error("ATTACHMENT_EMPTY", status_code=422, context={"filename": safe_name})
-    if len(content) > 20 * 1024 * 1024:
-        raise api_error("ATTACHMENT_TOO_LARGE", status_code=413, context={"filename": safe_name, "size": len(content)})
-    digest = hashlib.sha256(content).hexdigest()
-    directory = ATTACHMENT_ROOT / digest
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / safe_name
-    if not target.exists():
-        target.write_bytes(content)
-    attachment = SourceAttachment(
-        id=f"asset-{uuid.uuid4().hex[:12]}", filename=safe_name,
-        mediaType=request.headers.get("content-type", "application/octet-stream").split(";")[0],
+    return upload_template_attachment_service(
+        repository,
+        draft_id,
+        filename=filename,
+        content_type=request.headers.get("content-type", "application/octet-stream"),
+        body=content,
         kind=kind,
-        size=len(content), sha256=digest,
-        url=f"/uploads/{digest}/{safe_name}", createdAt=_now(),
     )
-    attachments = [item for item in draft.attachments if item.sha256 != digest] + [attachment]
-    return _save(draft.model_copy(update={"attachments": attachments}), reason="add-attachment")
 
 
 @app.patch("/api/v1/template-drafts/{draft_id}/attachments/{attachment_id}", response_model=TemplateDraft)
 def update_template_attachment(draft_id: str, attachment_id: str, request: AttachmentUpdateRequest):
-    draft = _draft(draft_id)
-    found = False
-    attachments: list[SourceAttachment] = []
-    for item in draft.attachments:
-        if item.id != attachment_id:
-            attachments.append(item)
-            continue
-        found = True
-        attachments.append(item.model_copy(update={
-            "description": request.description.strip(),
-            "kind": request.kind or item.kind,
-        }))
-    if not found:
-        raise api_error("ATTACHMENT_NOT_FOUND", status_code=404, context={"attachmentId": attachment_id})
-    return _save(draft.model_copy(update={"attachments": attachments}), reason="update-attachment-metadata")
+    return update_template_attachment_service(repository, draft_id, attachment_id, AttachmentUpdateRequestBody(request.description, request.kind))
 
 
 @app.delete("/api/v1/template-drafts/{draft_id}/attachments/{attachment_id}", response_model=TemplateDraft)
 def remove_template_attachment(draft_id: str, attachment_id: str):
-    draft = _draft(draft_id)
-    attachments = [item for item in draft.attachments if item.id != attachment_id]
-    if len(attachments) == len(draft.attachments):
-        raise api_error("ATTACHMENT_NOT_FOUND", status_code=404, context={"attachmentId": attachment_id})
-    return _save(draft.model_copy(update={"attachments": attachments}), reason="remove-attachment")
+    return remove_template_attachment_service(repository, draft_id, attachment_id)
 
 
 def _write_source_package(draft: TemplateDraft) -> Path:
-    return write_source_package_service(draft, repository, ARTIFACT_ROOT, ATTACHMENT_ROOT)
+    return write_source_package_service(repository, draft, ARTIFACT_ROOT, ATTACHMENT_ROOT)
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/source-package")
 def download_source_package(draft_id: str):
-    target = _write_source_package(_draft(draft_id))
+    target = download_source_package_service(repository, draft_id)
     return FileResponse(target, media_type="application/octet-stream", filename=target.name)
-
-
-def _run_worker(plan) -> CompileResult:
-    return run_cad_worker_service(plan, ARTIFACT_ROOT)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)
 def compile_template_draft(draft_id: str):
-    draft = _draft(draft_id)
-    required = STAGE_ORDER[:5]
-    missing = [stage for stage in required if getattr(draft.stageStatus, stage) != "complete"]
-    if missing:
-        raise api_error("STAGE_PREREQUISITE_INCOMPLETE", status_code=409, context={"missingStages": missing})
-    nominal = _nominal_material_context(draft)
-    if nominal is None:
-        raise api_error("COMPILE_MISSING_MATERIAL", status_code=422)
-    result = _run_worker(lower_to_plan(draft, {"record": nominal["material"], "provenance": nominal["provenance"]}))
-    repository.record_compile(draft.id, result.model_dump())
-    return result
+    return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/evaluate", response_model=TemplateEvaluation)
 def evaluate_template_draft(draft_id: str, request: EvaluationRequest):
-    draft = _draft(draft_id)
-    context = {
-        "material": request.material, "product": request.product, "component": request.component,
-        "projectZone": request.projectZone,
-    }
-    return evaluate_template(
-        draft.parameterDefinitions, draft.featureRules, request.overrides, context,
-        semantic_faces=draft.geometryRecipe.semanticFaces,
-        interfaces=draft.interfaces,
+    return evaluate_template_draft_service(
+        get_template_draft_service(repository, draft_id),
+        request.overrides,
+        request.material,
+        request.product,
+        request.component,
+        request.projectZone,
     )
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/compile-runs/latest", response_model=CompileResult | None)
 def latest_compile_run(draft_id: str):
-    _draft(draft_id)
-    return repository.latest_compile(draft_id)
+    return latest_compile_run_service(repository, draft_id)
 
 
 @app.post("/api/v1/compile-preview", response_model=CompileResult)
 def compile_preview(request: CompileRequest):
-    return _run_worker(lower_to_plan(request.draft, request.materialSnapshot))
+    return compile_preview_service(request.draft, request.materialSnapshot, ARTIFACT_ROOT)
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/versions", response_model=list[PublishedVersion])
 def list_published_versions(draft_id: str):
-    _draft(draft_id)
-    return repository.list_versions(draft_id)
-
-
-def _proposal_candidate(draft: TemplateDraft, request: ProposalPreviewRequest) -> tuple[TemplateDraft, list[Any]]:
-    try:
-        return apply_structured_proposal_service(draft, request.proposal, request.selectedCommandIds)
-    except ProposalError as error:
-        raise api_error("PROPOSAL_INVALID", status_code=422, message=str(error)) from error
-    except ValueError as error:
-        raise api_error("PROPOSAL_INVALID", status_code=422, message=f"提案命令数据不符合模板元模型：{error}") from error
-
-
-def _sync_sketch_seed_coordinates(
-    candidate: TemplateDraft, solve: dict[str, Any],
-) -> TemplateDraft:
-    return sync_sketch_seed_coordinates_service(candidate, solve)
+    return list_published_versions_service(repository, draft_id)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/proposals/preview")
 def preview_proposal(draft_id: str, request: ProposalPreviewRequest):
-    draft = _draft(draft_id)
-    candidate, commands = _proposal_candidate(draft, request)
-    solve = solve_semantic_sketch(candidate)
-    candidate = _sync_sketch_seed_coordinates(candidate, solve)
-    validation = _validate("baseSketch", candidate)
-    return {
-        "proposal": request.proposal.model_dump(),
-        "candidate": candidate.model_dump(),
-        "diff": proposal_diff(draft, candidate, commands),
-        "solve": solve,
-        "validation": validation.model_dump(),
-        "canAccept": bool(commands) and bool(solve.get("valid")),
-    }
+    return preview_template_proposal_service(repository, draft_id, request.proposal, request.selectedCommandIds)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/proposals/apply", response_model=TemplateDraft)
 def apply_template_proposal(draft_id: str, request: ProposalApplyRequest):
-    draft = _draft(draft_id)
-    candidate, commands = _proposal_candidate(draft, request)
-    if not commands:
-        raise api_error("PROPOSAL_EMPTY", status_code=422)
-    solve = solve_semantic_sketch(candidate)
-    if not solve.get("valid"):
-        raise api_error("PROPOSAL_PREVIEW_FAILED", status_code=422, context={"diagnostics": solve.get("diagnostics", [])})
-    candidate = _sync_sketch_seed_coordinates(candidate, solve)
-    audit = {
-        "id": request.proposal.id,
-        "stage": "baseSketch",
-        "summary": request.proposal.summary,
-        "confidence": request.proposal.confidence,
-        "operations": [
-            {
-                "action": "replace" if command.type.startswith("set") or command.type.startswith("upsert") else "remove",
-                "path": f"{command.type}/{command.targetId}",
-                "value": command.payload,
-            }
-            for command in commands
-        ],
-        "affectedObjects": [command.targetId for command in commands if command.targetId],
-        "risks": request.proposal.assumptions,
-        "requiredConfirmations": request.proposal.requiredConfirmations,
-        "status": "accepted",
-    }
-    candidate.aiProposals = [item for item in candidate.aiProposals if item.id != request.proposal.id]
-    candidate.aiProposals.append(AIProposal.model_validate(audit))
-    return _save(candidate, reason=f"proposal-apply-{request.proposal.taskType}")
+    return apply_template_proposal_service(repository, draft_id, request.proposal, request.selectedCommandIds)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
 def publish_template(draft_id: str):
-    draft = _draft(draft_id)
-    if draft.lifecycleStatus == "published" and draft.stageStatus.admission == "complete":
-        raise api_error("PUBLISH_ALREADY_PUBLISHED", status_code=409)
-    validation = _validate("admission", draft)
-    if not validation.complete:
-        raise api_error("PUBLISH_VALIDATION_FAILED", status_code=422, fields=[check.model_dump() for check in validation.checks if not check.passed])
-    latest = repository.latest_compile(draft_id)
-    if latest is None:
-        raise api_error("COMPILE_RECORD_MISSING", status_code=422)
-    status = draft.stageStatus.model_copy(update={"admission": "complete"})
-    released = _save(draft.model_copy(update={"stageStatus": status, "lifecycleStatus": "published"}), reason="publish")
-    package = _write_source_package(released)
-    version = repository.publish(released, latest, f"/artifacts/packages/{package.name}")
+    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT)
     return PublishResult(draft=released, version=version, validation=validation)

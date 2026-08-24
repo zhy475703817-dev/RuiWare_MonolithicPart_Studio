@@ -195,6 +195,10 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
     except RuleEvaluationError:
         dependency_ok = False
     sources_complete = all(item.sourceDefinition is not None for item in draft.parameterDefinitions)
+    contract_ready = all(
+        not item.declaredInRuleStage or item.contractReady
+        for item in draft.parameterDefinitions
+    )
     geometry_references: set[str] = set()
     geometry_expressions_valid = True
     for operation in draft.geometryRecipe.operations:
@@ -211,6 +215,7 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="variant-ids", label="变体标识唯一", passed=len(variant_ids) == len(set(variant_ids)), severity="error", path="variants", message="变体标识不能重复。"),
         StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= set(ids), severity="error", path="variants", message="变体只能覆盖已声明参数。"),
         StageCheck(id="parameter-sources", label="参数来源完整", passed=sources_complete, severity="error", path="parameterDefinitions", message="每个参数必须声明用户输入、材料属性、公式、查表或外部配置来源。"),
+        StageCheck(id="parameter-contract-ready", label="规则预声明参数已补全契约", passed=contract_ready, severity="error", path="parameterDefinitions", message="规则页预声明的参数需要在契约页补全后，才能进入试算、验证与发布。"),
         StageCheck(id="parameter-dependency", label="参数依赖图有效", passed=dependency_ok, severity="error", path="parameterDefinitions", message="参数存在未知依赖或循环依赖。"),
     ]
     return _validation("variants", checks)

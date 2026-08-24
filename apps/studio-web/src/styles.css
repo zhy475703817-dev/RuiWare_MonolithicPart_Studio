@@ -757,6 +757,11 @@ code {
 .compatible-filter input {
   width: auto;
 }
+.compatible-filter-note {
+  color: #8a6d1b;
+  font-size: 7px;
+  margin-left: 6px;
+}
 .material-search-head .search-row {
   width: 48%;
 }
@@ -3091,6 +3096,26 @@ code {
 .parameter-source-note strong {
   color: #246d83;
   white-space: nowrap;
+}
+.parameter-contract-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 10px;
+  border: 1px solid #e2c97d;
+  border-radius: 6px;
+  background: #fff9e7;
+  padding: 8px 10px;
+  color: #80601d;
+  font-size: 7px;
+  line-height: 1.45;
+}
+.parameter-contract-banner strong {
+  color: #6d4d13;
+}
+.parameter-contract-banner.warning {
+  border-color: #e2c97d;
+  background: #fff9e7;
 }
 .field-error {
   display: block;
