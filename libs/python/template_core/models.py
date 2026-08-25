@@ -115,6 +115,7 @@ class SemanticSketchEntity(BaseModel):
     radius: float | None = Field(default=None, gt=0)
     startAngle: float | None = None
     endAngle: float | None = None
+    largeArc: bool | None = None
     points: list[tuple[float, float]] = Field(default_factory=list)
 
 

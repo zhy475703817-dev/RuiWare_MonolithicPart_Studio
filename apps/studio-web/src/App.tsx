@@ -26,6 +26,7 @@ import {
   Layers3,
   Link2,
   LoaderCircle,
+  Magnet,
   MessageSquareText,
   MousePointer2,
   Move,
@@ -49,6 +50,32 @@ import {
 import { api, toErrorNotice } from "./api";
 import type { ErrorNotice } from "./api/errors";
 import { WorkspaceShell } from "./components/layout/WorkspaceShell";
+import {
+  buildLineSnapCoincidentConstraints,
+  DEFAULT_SKETCH_SNAP_OPTIONS,
+  isNearestSnapKind,
+  isTangentSnapKind,
+  resolveSketchSnap,
+  sketchDrawPointFromSnap,
+  sketchPointTooClose,
+  type SketchDrawPoint,
+  type SketchSnapHit,
+} from "./features/sketch/sketchObjectSnap";
+import {
+  accumulateCenterArcSweep,
+  arcFromCenterEndpoints,
+  arcFromEntity,
+  arcFromThreePoints,
+  arcPreviewFromPending,
+  arcSvgPath,
+  arcSweepDegrees,
+  arcWithSweep,
+  pointAngleDegrees,
+  projectPointOntoCircle,
+  signedAngleDelta,
+  toggleArcDirection,
+  type ArcDrawMode,
+} from "./features/sketch/sketchArc";
 import type {
   CompileResult,
   Draft,
@@ -1047,6 +1074,7 @@ const entitiesToPrimitives = (entities: Draft["sketch"]["entities"]) =>
     radius: item.radius || undefined,
     startAngle: item.startAngle,
     endAngle: item.endAngle,
+    largeArc: item.largeArc,
     points: item.points.map(([x, y]) => ({ x, y })),
   }));
 
@@ -1061,6 +1089,7 @@ const alignEntitiesToPrimitives = (
     radius?: number;
     startAngle?: number | null;
     endAngle?: number | null;
+    largeArc?: boolean | null;
     points?: { x: number; y: number }[];
   }[],
 ) => {
@@ -1085,6 +1114,8 @@ const alignEntitiesToPrimitives = (
         primitive.startAngle != null ? primitive.startAngle : entity.startAngle,
       endAngle:
         primitive.endAngle != null ? primitive.endAngle : entity.endAngle,
+      largeArc:
+        primitive.largeArc != null ? primitive.largeArc : entity.largeArc,
       points: primitive.points?.length
         ? primitive.points.map(
             (point) => [point.x, point.y] as [number, number],
@@ -1653,6 +1684,8 @@ function ParametricSketchCanvas({
   viewCommand,
   onCursorChange,
   orthogonalLock,
+  objectSnapEnabled,
+  arcDrawMode,
 }: {
   draft: Draft;
   solution: SketchSolveResult | null;
@@ -1671,10 +1704,57 @@ function ParametricSketchCanvas({
   viewCommand: SketchViewCommand;
   onCursorChange: (point: { x: number; y: number } | null) => void;
   orthogonalLock: boolean;
+  objectSnapEnabled: boolean;
+  arcDrawMode: ArcDrawMode;
 }) {
   const solved = solution?.cases.find((entry) => entry.case === caseName);
   const draftPrimitives = entitiesToPrimitives(draft.sketch.entities);
-  const [pending, setPending] = useState<{ x: number; y: number }[]>([]);
+  const [pending, setPending] = useState<SketchDrawPoint[]>([]);
+  const snapOptions = useMemo(
+    () => ({
+      enabled: objectSnapEnabled,
+      toleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.toleranceMm,
+      lineToleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.lineToleranceMm,
+      kinds: DEFAULT_SKETCH_SNAP_OPTIONS.kinds,
+    }),
+    [objectSnapEnabled],
+  );
+  const resolvePointerSnap = (worldPoint: { x: number; y: number }) => {
+    const pendingPoints = pendingRef.current;
+    const tangentFromCenter =
+      (tool === "circle" && pendingPoints.length === 1) ||
+      (tool === "arc" &&
+        arcDrawMode === "centerEndpoints" &&
+        pendingPoints.length === 1)
+        ? { x: pendingPoints[0].x, y: pendingPoints[0].y }
+        : null;
+    return resolveSketchSnap(worldPoint, draft.sketch.entities, {
+      ...snapOptions,
+      tangentFromCenter,
+    });
+  };
+  const snapPreviewHitRef = useRef<SketchSnapHit | null>(null);
+  const snapIndicatorRef = useRef<SVGCircleElement | null>(null);
+  const snapRubberBandRef = useRef<SVGLineElement | null>(null);
+  const circlePreviewRef = useRef<SVGCircleElement | null>(null);
+  const arcPreviewRef = useRef<SVGPathElement | null>(null);
+  const rectPreviewRef = useRef<SVGPathElement | null>(null);
+  const pendingRef = useRef<SketchDrawPoint[]>([]);
+  const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
+  const centerArcDragRef = useRef<{
+    sweep: number;
+    endAngle: number;
+  } | null>(null);
+  pendingRef.current = pending;
+  pendingAnchorRef.current = pending.length === 1 ? pending[0] : null;
+  useEffect(() => {
+    setPending([]);
+    centerArcDragRef.current = null;
+    arcPreviewRef.current?.setAttribute("visibility", "hidden");
+    circlePreviewRef.current?.setAttribute("visibility", "hidden");
+    rectPreviewRef.current?.setAttribute("visibility", "hidden");
+  }, [tool, arcDrawMode]);
+  const [hoveredCircleId, setHoveredCircleId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
     id: string;
     handle: "start" | "end" | "center" | "body";
@@ -1724,6 +1804,18 @@ function ParametricSketchCanvas({
   }, [draft.sketch.entities]);
   useEffect(() => {
     setPending([]);
+    snapPreviewHitRef.current = null;
+    setHoveredCircleId(null);
+    const indicator = snapIndicatorRef.current;
+    const rubber = snapRubberBandRef.current;
+    const circlePreview = circlePreviewRef.current;
+    const arcPreview = arcPreviewRef.current;
+    const rectPreview = rectPreviewRef.current;
+    indicator?.setAttribute("visibility", "hidden");
+    rubber?.setAttribute("visibility", "hidden");
+    circlePreview?.setAttribute("visibility", "hidden");
+    arcPreview?.setAttribute("visibility", "hidden");
+    rectPreview?.setAttribute("visibility", "hidden");
   }, [tool]);
   const viewportKey = `${draft.id}|${draft.sketch.profileMode}|${draft.sketch.entities.map((item) => item.id).join("|")}`;
   const initialViewport = () => {
@@ -1809,20 +1901,192 @@ function ParametricSketchCanvas({
     x: cx + point.x * scale,
     y: cy - point.y * scale,
   });
-  const clientToWorld = (clientX: number, clientY: number, svg: SVGSVGElement) => {
-    const rect = svg.getBoundingClientRect();
+  const paintDrawCursor = (hit: SketchSnapHit | null) => {
+    snapPreviewHitRef.current = hit;
+    const indicator = snapIndicatorRef.current;
+    const rubber = snapRubberBandRef.current;
+    const circlePreview = circlePreviewRef.current;
+    const arcPreview = arcPreviewRef.current;
+    const rectPreview = rectPreviewRef.current;
+    if (!indicator) return;
+    if (!hit || tool === "select" || caseName !== "nominal") {
+      indicator.setAttribute("visibility", "hidden");
+      rubber?.setAttribute("visibility", "hidden");
+      circlePreview?.setAttribute("visibility", "hidden");
+      arcPreview?.setAttribute("visibility", "hidden");
+      rectPreview?.setAttribute("visibility", "hidden");
+      return;
+    }
     const math = viewMathRef.current;
+    const screenPoint = {
+      x: math.cx + hit.point[0] * math.scale,
+      y: math.cy - hit.point[1] * math.scale,
+    };
+    indicator.setAttribute("visibility", "visible");
+    indicator.setAttribute("cx", String(screenPoint.x));
+    indicator.setAttribute("cy", String(screenPoint.y));
+    indicator.setAttribute("r", hit.target ? "6" : "4");
+    indicator.setAttribute(
+      "class",
+      `snap-indicator ${
+        hit.target
+          ? isNearestSnapKind(hit.target.kind)
+            ? "active line-nearest"
+            : isTangentSnapKind(hit.target.kind)
+              ? "active tangent"
+              : "active"
+          : ""
+      }`.trim(),
+    );
+    const anchor = pendingAnchorRef.current;
+    if (rubber && tool === "line" && anchor) {
+      const start = {
+        x: math.cx + anchor.x * math.scale,
+        y: math.cy - anchor.y * math.scale,
+      };
+      rubber.setAttribute("visibility", "visible");
+      rubber.setAttribute("x1", String(start.x));
+      rubber.setAttribute("y1", String(start.y));
+      rubber.setAttribute("x2", String(screenPoint.x));
+      rubber.setAttribute("y2", String(screenPoint.y));
+    } else {
+      rubber?.setAttribute("visibility", "hidden");
+    }
+    if (circlePreview && tool === "circle" && anchor) {
+      const center = {
+        x: math.cx + anchor.x * math.scale,
+        y: math.cy - anchor.y * math.scale,
+      };
+      const radius = Math.hypot(
+        screenPoint.x - center.x,
+        screenPoint.y - center.y,
+      );
+      circlePreview.setAttribute("visibility", radius > 0.5 ? "visible" : "hidden");
+      circlePreview.setAttribute("cx", String(center.x));
+      circlePreview.setAttribute("cy", String(center.y));
+      circlePreview.setAttribute("r", String(radius));
+    } else if (
+      circlePreview &&
+      tool === "arc" &&
+      arcDrawMode === "centerEndpoints" &&
+      pendingRef.current.length >= 1
+    ) {
+      const centerWorld = pendingRef.current[0];
+      const center = {
+        x: math.cx + centerWorld.x * math.scale,
+        y: math.cy - centerWorld.y * math.scale,
+      };
+      const radiusWorld =
+        pendingRef.current.length >= 2
+          ? Math.hypot(
+              pendingRef.current[1].x - centerWorld.x,
+              pendingRef.current[1].y - centerWorld.y,
+            )
+          : Math.hypot(hit.point[0] - centerWorld.x, hit.point[1] - centerWorld.y);
+      const radius = radiusWorld * math.scale;
+      circlePreview.setAttribute("visibility", radius > 0.5 ? "visible" : "hidden");
+      circlePreview.setAttribute("cx", String(center.x));
+      circlePreview.setAttribute("cy", String(center.y));
+      circlePreview.setAttribute("r", String(radius));
+    } else {
+      circlePreview?.setAttribute("visibility", "hidden");
+    }
+    if (arcPreview && tool === "arc") {
+      const cursor = { x: hit.point[0], y: hit.point[1] };
+      let centerSweep: number | null = null;
+      if (
+        arcDrawMode === "centerEndpoints" &&
+        pendingRef.current.length === 2
+      ) {
+        const center = pendingRef.current[0];
+        const start = pendingRef.current[1];
+        const radius = Math.hypot(start.x - center.x, start.y - center.y);
+        if (radius >= 0.1) {
+          const startAngle = pointAngleDegrees(
+            [center.x, center.y],
+            [start.x, start.y],
+          );
+          const endAngle = pointAngleDegrees(
+            [center.x, center.y],
+            projectPointOntoCircle([center.x, center.y], radius, cursor),
+          );
+          const drag = centerArcDragRef.current;
+          if (!drag) {
+            centerSweep = signedAngleDelta(startAngle, endAngle);
+            centerArcDragRef.current = { sweep: centerSweep, endAngle };
+          } else {
+            centerSweep = accumulateCenterArcSweep(
+              drag.sweep,
+              drag.endAngle,
+              endAngle,
+            );
+            centerSweep = Math.max(-359.99, Math.min(359.99, centerSweep));
+            centerArcDragRef.current = { sweep: centerSweep, endAngle };
+          }
+        }
+      } else {
+        centerArcDragRef.current = null;
+      }
+      const preview = arcPreviewFromPending(
+        arcDrawMode,
+        pendingRef.current,
+        cursor,
+        centerSweep,
+      );
+      if (preview) {
+        const path = arcSvgPath(preview, (point) => ({
+          x: math.cx + point.x * math.scale,
+          y: math.cy - point.y * math.scale,
+        }), math.scale);
+        arcPreview.setAttribute("visibility", "visible");
+        arcPreview.setAttribute("d", path);
+      } else {
+        arcPreview.setAttribute("visibility", "hidden");
+      }
+    } else {
+      arcPreview?.setAttribute("visibility", "hidden");
+    }
+    if (rectPreview && tool === "rectangle" && pendingRef.current.length === 1) {
+      const a = pendingRef.current[0];
+      const bx = hit.point[0];
+      const by = hit.point[1];
+      const corners = [
+        { x: a.x, y: a.y },
+        { x: bx, y: a.y },
+        { x: bx, y: by },
+        { x: a.x, y: by },
+      ];
+      const screenCorners = corners.map((point) => ({
+        x: math.cx + point.x * math.scale,
+        y: math.cy - point.y * math.scale,
+      }));
+      const degenerate =
+        Math.abs(bx - a.x) < 0.01 || Math.abs(by - a.y) < 0.01;
+      if (degenerate) {
+        rectPreview.setAttribute("visibility", "hidden");
+      } else {
+        const d = `M${screenCorners[0].x},${screenCorners[0].y} L${screenCorners[1].x},${screenCorners[1].y} L${screenCorners[2].x},${screenCorners[2].y} L${screenCorners[3].x},${screenCorners[3].y} Z`;
+        rectPreview.setAttribute("visibility", "visible");
+        rectPreview.setAttribute("d", d);
+      }
+    } else {
+      rectPreview?.setAttribute("visibility", "hidden");
+    }
+  };
+  const clientToWorld = (clientX: number, clientY: number, svg: SVGSVGElement) => {
+    // Use the live screen CTM so letterboxing from preserveAspectRatio
+    // (canvas is width:100% × fixed height, viewBox 460×330) maps X/Y uniformly.
+    const ctm = svg.getScreenCTM();
+    const math = viewMathRef.current;
+    if (!ctm) {
+      return { x: 0, y: 0 };
+    }
+    const inverse = ctm.inverse();
+    const viewX = inverse.a * clientX + inverse.c * clientY + inverse.e;
+    const viewY = inverse.b * clientX + inverse.d * clientY + inverse.f;
     return {
-      x:
-        Math.round(
-          ((((clientX - rect.left) * 460) / rect.width - math.cx) / math.scale) *
-            100,
-        ) / 100,
-      y:
-        Math.round(
-          ((math.cy - ((clientY - rect.top) * 330) / rect.height) / math.scale) *
-            100,
-        ) / 100,
+      x: Math.round(((viewX - math.cx) / math.scale) * 100) / 100,
+      y: Math.round(((math.cy - viewY) / math.scale) * 100) / 100,
     };
   };
   const world = (event: { clientX: number; clientY: number; currentTarget: EventTarget }) => {
@@ -1874,7 +2138,8 @@ function ParametricSketchCanvas({
         onSelect("");
       return;
     }
-    const point = world(event);
+    const point = resolvePointerSnap(world(event));
+    const drawPoint = sketchDrawPointFromSnap(point);
     if (tool === "point") {
       addEntity({
         id: uid("point"),
@@ -1882,7 +2147,7 @@ function ParametricSketchCanvas({
         geometryType: "point",
         parameterRefs: [],
         construction: true,
-        start: [point.x, point.y],
+        start: [drawPoint.x, drawPoint.y],
         end: null,
         center: null,
         radius: null,
@@ -1893,15 +2158,25 @@ function ParametricSketchCanvas({
       return;
     }
     const needed = tool === "arc" ? 3 : 2;
-    const next = [...pending, point];
+    const next = [...pending, drawPoint];
     if (next.length < needed) {
+      if (
+        tool === "arc" &&
+        arcDrawMode === "centerEndpoints" &&
+        next.length === 2
+      ) {
+        centerArcDragRef.current = null;
+      }
       setPending(next);
       return;
     }
     setPending([]);
-    if (tool === "line")
-      addEntity({
-        id: uid("edge"),
+    paintDrawCursor(null);
+    if (tool === "line") {
+      if (sketchPointTooClose(next[0], next[1])) return;
+      const lineId = uid("edge");
+      const entity: Draft["sketch"]["entities"][number] = {
+        id: lineId,
         role: "section.edge",
         geometryType: "line",
         parameterRefs: [],
@@ -1913,42 +2188,81 @@ function ParametricSketchCanvas({
         startAngle: null,
         endAngle: null,
         points: [],
+      };
+      const entities = [...draft.sketch.entities, entity];
+      const snapConstraints = buildLineSnapCoincidentConstraints(
+        lineId,
+        next[0].snapTarget,
+        next[1].snapTarget,
+        entities,
+        draft.sketch.constraints,
+        () => uid("constraint.snap"),
+      );
+      beginEdit();
+      onSketch({
+        ...draft.sketch,
+        entities,
+        constraints: [...draft.sketch.constraints, ...snapConstraints],
+        constraintsReviewed: false,
       });
+      onSelect(lineId);
+      return;
+    }
     if (tool === "rectangle") {
-      const [a, b] = next,
-        base = uid("rectangle"),
-        corners: [
-          [number, number],
-          [number, number],
-          [number, number],
-          [number, number],
-        ] = [
-          [a.x, a.y],
-          [b.x, a.y],
-          [b.x, b.y],
-          [a.x, b.y],
-        ],
-        entities = corners.map((start, index) => ({
-          id: `${base}.${index + 1}`,
-          role: `section.rectangle.edge.${index + 1}`,
-          geometryType: "line" as const,
-          parameterRefs: [],
-          construction: false,
-          start,
-          end: corners[(index + 1) % 4],
-          center: null,
-          radius: null,
-          startAngle: null,
-          endAngle: null,
-          points: [],
-        }));
+      const [a, b] = next;
+      if (Math.abs(b.x - a.x) < 0.01 || Math.abs(b.y - a.y) < 0.01) return;
+      const base = uid("rectangle");
+      const corners: [
+        [number, number],
+        [number, number],
+        [number, number],
+        [number, number],
+      ] = [
+        [a.x, a.y],
+        [b.x, a.y],
+        [b.x, b.y],
+        [a.x, b.y],
+      ];
+      const entities = corners.map((start, index) => ({
+        id: `${base}.${index + 1}`,
+        role: `section.rectangle.edge.${index + 1}`,
+        geometryType: "line" as const,
+        parameterRefs: [],
+        construction: false,
+        start,
+        end: corners[(index + 1) % 4],
+        center: null,
+        radius: null,
+        startAngle: null,
+        endAngle: null,
+        points: [],
+      }));
+      const jointConstraints = entities.map((edge, index) => {
+        const nextEdge = entities[(index + 1) % entities.length];
+        const edgeName = edge.role || edge.id;
+        const nextName = nextEdge.role || nextEdge.id;
+        return {
+          id: uid(`${base}.joint.${index + 1}`),
+          label: `重合 · ${edgeName}终点 ↔ ${nextName}起点`,
+          constraintType: "coincident" as const,
+          entityRefs: [edge.id, nextEdge.id],
+          endpointRefs: ["end" as const, "start" as const],
+          expression: null,
+          parameterId: null,
+          value: null,
+          driverMode: null,
+          enabled: true,
+          driving: true,
+        };
+      });
       beginEdit();
       onSketch({
         ...draft.sketch,
         entities: [...draft.sketch.entities, ...entities],
+        constraints: [...draft.sketch.constraints, ...jointConstraints],
         constraintsReviewed: false,
       });
-      onSelect(entities[0].id);
+      onSelect(entities.map((item) => item.id));
     }
     if (tool === "circle") {
       const radius = Math.hypot(next[1].x - next[0].x, next[1].y - next[0].y);
@@ -1968,31 +2282,30 @@ function ParametricSketchCanvas({
       });
     }
     if (tool === "arc") {
-      const [a, m, b] = next;
-      const d = 2 * (a.x * (m.y - b.y) + m.x * (b.y - a.y) + b.x * (a.y - m.y));
-      if (Math.abs(d) < 1e-6) return;
-      const ux =
-          ((a.x * a.x + a.y * a.y) * (m.y - b.y) +
-            (m.x * m.x + m.y * m.y) * (b.y - a.y) +
-            (b.x * b.x + b.y * b.y) * (a.y - m.y)) /
-          d,
-        uy =
-          ((a.x * a.x + a.y * a.y) * (b.x - m.x) +
-            (m.x * m.x + m.y * m.y) * (a.x - b.x) +
-            (b.x * b.x + b.y * b.y) * (m.x - a.x)) /
-          d;
+      const geometry =
+        arcDrawMode === "centerEndpoints"
+          ? arcFromCenterEndpoints(
+              next[0],
+              next[1],
+              next[2],
+              centerArcDragRef.current?.sweep ?? null,
+            )
+          : arcFromThreePoints(next[0], next[1], next[2]);
+      centerArcDragRef.current = null;
+      if (!geometry) return;
       addEntity({
         id: uid("arc"),
         role: "section.arc",
         geometryType: "arc",
         parameterRefs: [],
         construction: false,
-        start: [a.x, a.y],
-        end: [b.x, b.y],
-        center: [ux, uy],
-        radius: Math.hypot(a.x - ux, a.y - uy),
-        startAngle: (Math.atan2(a.y - uy, a.x - ux) * 180) / Math.PI,
-        endAngle: (Math.atan2(b.y - uy, b.x - ux) * 180) / Math.PI,
+        start: geometry.start,
+        end: geometry.end,
+        center: geometry.center,
+        radius: geometry.radius,
+        startAngle: geometry.startAngle,
+        endAngle: geometry.endAngle,
+        largeArc: geometry.largeArc,
         points: [],
       });
     }
@@ -2083,10 +2396,29 @@ function ParametricSketchCanvas({
     svgRef.current?.setPointerCapture(event.pointerId);
   };
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
-    onCursorChange(world(event));
+    const pointerWorld = world(event);
+    onCursorChange(pointerWorld);
     const active = dragRef.current;
-    if (!active) return;
-    const current = world(event);
+    if (!active) {
+      if (tool !== "select" && caseName === "nominal" && !pendingConflict) {
+        paintDrawCursor(
+          objectSnapEnabled
+            ? resolvePointerSnap(pointerWorld)
+            : {
+                point: [
+                  Math.round(pointerWorld.x * 100) / 100,
+                  Math.round(pointerWorld.y * 100) / 100,
+                ],
+                target: null,
+              },
+        );
+      } else {
+        paintDrawCursor(null);
+      }
+      return;
+    }
+    paintDrawCursor(null);
+    const current = pointerWorld;
     let dx = current.x - active.origin.x,
       dy = current.y - active.origin.y;
     ({ dx, dy } = applyOrthogonalDelta(
@@ -2340,15 +2672,11 @@ function ParametricSketchCanvas({
           cy={p.y}
           r={active ? 6 : 4}
           onPointerDown={(event) => {
+            if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
+              return;
+            }
             event.stopPropagation();
-            if (
-              tool === "select" &&
-              caseName === "nominal" &&
-              !pendingConflict &&
-              active &&
-              !event.shiftKey &&
-              !event.ctrlKey
-            ) {
+            if (active && !event.shiftKey && !event.ctrlKey) {
               startDrag(event, primitive.id, "start");
               return;
             }
@@ -2361,9 +2689,10 @@ function ParametricSketchCanvas({
       const a = screen(primitive.start),
         b = screen(primitive.end);
       const beginBodyDrag = (event: React.PointerEvent) => {
-        event.stopPropagation();
-        if (tool !== "select" || caseName !== "nominal" || pendingConflict)
+        if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
           return;
+        }
+        event.stopPropagation();
         if (event.shiftKey || event.ctrlKey) {
           onSelect(primitive.id, true);
           return;
@@ -2410,23 +2739,27 @@ function ParametricSketchCanvas({
     }
     if (primitive.type === "circle" && primitive.center) {
       const c = screen(primitive.center);
+      const radiusPx = (primitive.radius || 0) * scale;
+      const showCenter =
+        hoveredCircleId === primitive.id ||
+        (drag?.id === primitive.id &&
+          (drag.handle === "center" || drag.handle === "body"));
       const beginCircleDrag = (event: React.PointerEvent) => {
-        event.stopPropagation();
         if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-          select(event);
           return;
         }
+        event.stopPropagation();
         if (event.shiftKey || event.ctrlKey) {
           onSelect(primitive.id, true);
           return;
         }
         if (event.altKey) {
           if (!selected.includes(primitive.id)) onSelect(primitive.id);
-          startDrag(event, primitive.id, "center");
+          startDrag(event, primitive.id, "body");
           return;
         }
         if (active) {
-          startDrag(event, primitive.id, "center");
+          startDrag(event, primitive.id, "body");
           return;
         }
         select(event);
@@ -2435,55 +2768,120 @@ function ParametricSketchCanvas({
         <g
           key={primitive.id}
           className={`solver-segment ${active ? "selected" : ""} ${primitive.construction ? "construction" : ""}`}
-          onPointerDown={beginCircleDrag}
         >
           <circle
             className="curve-hit-target"
             cx={c.x}
             cy={c.y}
-            r={(primitive.radius || 0) * scale}
+            r={radiusPx}
+            onPointerDown={beginCircleDrag}
           />
           <circle
-            className="sketch-circle"
+            className={`sketch-circle ${active ? "selected" : ""} ${primitive.construction ? "construction" : ""}`}
             cx={c.x}
             cy={c.y}
-            r={(primitive.radius || 0) * scale}
+            r={radiusPx}
           />
-          {active && selected.length === 1 && (
+          <g
+            onPointerEnter={() => setHoveredCircleId(primitive.id)}
+            onPointerLeave={(event) => {
+              const next = event.relatedTarget as Node | null;
+              if (next && event.currentTarget.contains(next)) return;
+              setHoveredCircleId((current) =>
+                current === primitive.id ? null : current,
+              );
+            }}
+          >
             <circle
-              className="drag-handle"
+              className="curve-hit-target circle-interior-hit"
               cx={c.x}
               cy={c.y}
-              r="5"
-              onPointerDown={(e) => startDrag(e, primitive.id, "center")}
+              r={Math.max(0, radiusPx - 1)}
+              onPointerDown={(event) => {
+                if (
+                  tool !== "select" ||
+                  caseName !== "nominal" ||
+                  pendingConflict
+                ) {
+                  return;
+                }
+                event.stopPropagation();
+                if (event.shiftKey || event.ctrlKey) {
+                  onSelect(primitive.id, true);
+                  return;
+                }
+                if (!selected.includes(primitive.id)) onSelect(primitive.id);
+                startDrag(event, primitive.id, "center");
+              }}
             />
-          )}
+            {showCenter && (
+              <circle
+                className="circle-center-mark"
+                cx={c.x}
+                cy={c.y}
+                r="4"
+                onPointerDown={(event) => {
+                  if (
+                    tool !== "select" ||
+                    caseName !== "nominal" ||
+                    pendingConflict
+                  ) {
+                    return;
+                  }
+                  event.stopPropagation();
+                  startDrag(event, primitive.id, "center");
+                }}
+              />
+            )}
+          </g>
         </g>
       );
     }
     if (primitive.type === "arc" && primitive.center && primitive.radius) {
-      const start = ((primitive.startAngle || 0) * Math.PI) / 180,
-        end = ((primitive.endAngle || 0) * Math.PI) / 180,
-        a = screen({
-          x: primitive.center.x + primitive.radius * Math.cos(start),
-          y: primitive.center.y + primitive.radius * Math.sin(start),
-        }),
-        b = screen({
-          x: primitive.center.x + primitive.radius * Math.cos(end),
-          y: primitive.center.y + primitive.radius * Math.sin(end),
-        }),
-        large =
-          Math.abs((primitive.endAngle || 0) - (primitive.startAngle || 0)) >
-          180
-            ? 1
-            : 0;
+      const startAngle = primitive.startAngle || 0;
+      const endAngle = primitive.endAngle || 0;
+      const largeArc =
+        primitive.largeArc != null
+          ? !!primitive.largeArc
+          : Math.abs(endAngle - startAngle) > 180;
+      const geometry = {
+        center: [primitive.center.x, primitive.center.y] as [number, number],
+        radius: primitive.radius,
+        start: [
+          primitive.center.x +
+            primitive.radius * Math.cos((startAngle * Math.PI) / 180),
+          primitive.center.y +
+            primitive.radius * Math.sin((startAngle * Math.PI) / 180),
+        ] as [number, number],
+        end: [
+          primitive.center.x +
+            primitive.radius * Math.cos((endAngle * Math.PI) / 180),
+          primitive.center.y +
+            primitive.radius * Math.sin((endAngle * Math.PI) / 180),
+        ] as [number, number],
+        startAngle,
+        endAngle,
+        largeArc,
+        sweep: 0,
+      };
+      const fromEntity = arcFromEntity({
+        center: geometry.center,
+        start: geometry.start,
+        end: geometry.end,
+        radius: geometry.radius,
+        startAngle,
+        endAngle,
+        largeArc,
+      });
+      const arcPath = arcSvgPath(fromEntity || geometry, screen, scale);
+      const a = screen({ x: geometry.start[0], y: geometry.start[1] });
+      const b = screen({ x: geometry.end[0], y: geometry.end[1] });
       const c = screen(primitive.center);
       const beginArcDrag = (event: React.PointerEvent) => {
-        event.stopPropagation();
         if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-          select(event);
           return;
         }
+        event.stopPropagation();
         if (event.shiftKey || event.ctrlKey) {
           onSelect(primitive.id, true);
           return;
@@ -2501,13 +2899,10 @@ function ParametricSketchCanvas({
       };
       return (
         <g key={primitive.id} onPointerDown={beginArcDrag}>
-          <path
-            className="curve-hit-target"
-            d={`M${a.x},${a.y} A${primitive.radius * scale},${primitive.radius * scale} 0 ${large} 0 ${b.x},${b.y}`}
-          />
+          <path className="curve-hit-target" d={arcPath} />
           <path
             className={`sketch-arc ${active ? "selected" : ""} ${primitive.construction ? "construction" : ""}`}
-            d={`M${a.x},${a.y} A${primitive.radius * scale},${primitive.radius * scale} 0 ${large} 0 ${b.x},${b.y}`}
+            d={arcPath}
           />
           {active && selected.length === 1 && caseName === "nominal" && (
             <>
@@ -2550,12 +2945,14 @@ function ParametricSketchCanvas({
       ref={svgRef}
       className={`semantic-sketch-canvas tool-${tool}`}
       viewBox="0 0 460 330"
+      preserveAspectRatio="xMidYMid meet"
       onPointerDown={click}
       onPointerMove={move}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
       onPointerLeave={() => {
         onCursorChange(null);
+        paintDrawCursor(null);
       }}
     >
       <defs>
@@ -2584,17 +2981,52 @@ function ParametricSketchCanvas({
       </text>
       {primitives.map(drawPrimitive)}
       {pending.map((point, index) => {
-        const item = screen(point);
+        const item = screen({ x: point.x, y: point.y });
         return (
           <circle
             key={index}
             cx={item.x}
             cy={item.y}
             r="5"
-            className="pending-point"
+            className={`pending-point ${point.snapTarget ? "snapped" : ""}`}
           />
         );
       })}
+      <line
+        ref={snapRubberBandRef}
+        className="snap-preview-line"
+        visibility="hidden"
+        pointerEvents="none"
+      />
+      <circle
+        ref={circlePreviewRef}
+        className="sketch-circle draw-preview"
+        visibility="hidden"
+        pointerEvents="none"
+        fill="none"
+        r="0"
+      />
+      <path
+        ref={arcPreviewRef}
+        className="sketch-arc draw-preview"
+        visibility="hidden"
+        pointerEvents="none"
+        fill="none"
+      />
+      <path
+        ref={rectPreviewRef}
+        className="sketch-rectangle draw-preview"
+        visibility="hidden"
+        pointerEvents="none"
+        fill="none"
+      />
+      <circle
+        ref={snapIndicatorRef}
+        className="snap-indicator"
+        visibility="hidden"
+        pointerEvents="none"
+        r="4"
+      />
       <text x="12" y="20" className="solver-label">
         {caseName.toUpperCase()} · {solved?.valid ? "SOLVED" : "EDITING"} ·{" "}
         {selected.length ? `${selected.length} SELECTED` : tool.toUpperCase()}
@@ -3126,6 +3558,7 @@ function SketchIntentEditor({
     Draft["sketch"]["constraints"][number]["constraintType"]
   >("distance");
   const [parameterCreator, setParameterCreator] = useState(false);
+  const [constraintTypeFilter, setConstraintTypeFilter] = useState<string>("");
   const [parameterError, setParameterError] = useState("");
   const [parameterRenameErrors, setParameterRenameErrors] = useState<
     Record<string, string>
@@ -3485,6 +3918,20 @@ function SketchIntentEditor({
     (item) =>
       !DIMENSION_CONSTRAINTS.some((type) => type[0] === item.constraintType),
   );
+  const constraintFilterOptions = useMemo(() => {
+    const types = new Set(constraintList.map((item) => item.constraintType));
+    return [...types].sort((a, b) =>
+      constraintLabel(a, draft.sketch.plane).localeCompare(
+        constraintLabel(b, draft.sketch.plane),
+        "zh-CN",
+      ),
+    );
+  }, [constraintList, draft.sketch.plane]);
+  const filteredConstraintList = constraintTypeFilter
+    ? constraintList.filter(
+        (item) => item.constraintType === constraintTypeFilter,
+      )
+    : constraintList;
   const dimensions = draft.sketch.constraints.filter((item) =>
     DIMENSION_CONSTRAINTS.some((type) => type[0] === item.constraintType),
   );
@@ -3542,6 +3989,26 @@ function SketchIntentEditor({
       )}
     </div>
   );
+  const renderCompactEntityRefs = (refs: string[]) =>
+    refs.length ? (
+      <div className="constraint-entities-compact">
+        {refs.map((id) => (
+          <button
+            key={id}
+            type="button"
+            title={id}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(id);
+            }}
+          >
+            {entityName(id)}
+          </button>
+        ))}
+      </div>
+    ) : (
+      <span className="constraint-entities-empty">未绑定图元</span>
+    );
   return (
     <div className="panel sketch-intent-panel">
       <PanelTitle
@@ -3705,20 +4172,46 @@ function SketchIntentEditor({
               </small>
             </div>
           ) : null}
-          <div className="intent-list">
-            {constraintList.map((constraint) => {
+          <div className="constraint-filter-bar">
+            <label>
+              <span>约束类型</span>
+              <select
+                value={constraintTypeFilter}
+                onChange={(event) => setConstraintTypeFilter(event.target.value)}
+              >
+                <option value="">
+                  全部（{constraintList.length}）
+                </option>
+                {constraintFilterOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {constraintLabel(type, draft.sketch.plane)}（
+                    {
+                      constraintList.filter((item) => item.constraintType === type)
+                        .length
+                    }
+                    ）
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="intent-list constraint-list-compact">
+            {filteredConstraintList.map((constraint) => {
               const index = draft.sketch.constraints.indexOf(constraint);
               const endpointHandles =
                 constraint.endpointRefs && constraint.endpointRefs.length >= 2
                   ? constraint.endpointRefs
                   : (["end", "start"] as Array<"start" | "end">);
+              const showCoincidentEndpoints =
+                constraint.constraintType === "coincident" &&
+                constraint.entityRefs.length === 2;
               return (
                 <div
                   className={`constraint-card ${constraint.enabled ? "" : "disabled"}`}
                   key={constraint.id}
                 >
-                  <div className="constraint-card-head">
-                    <label>
+                  <div className="constraint-card-row constraint-card-row-main">
+                    <label className="constraint-enable" title="启用约束">
                       <input
                         type="checkbox"
                         checked={constraint.enabled}
@@ -3728,16 +4221,29 @@ function SketchIntentEditor({
                           })
                         }
                       />
-                      <strong>
-                        {constraintLabel(
-                          constraint.constraintType,
-                          draft.sketch.plane,
-                        )}
-                      </strong>
                     </label>
-                    <span>{constraint.id}</span>
+                    {renderCompactEntityRefs(constraint.entityRefs)}
+                    <span
+                      className="constraint-type-badge"
+                      title={constraint.id}
+                    >
+                      {constraintLabel(
+                        constraint.constraintType,
+                        draft.sketch.plane,
+                      )}
+                    </span>
+                    <input
+                      className="constraint-name-input"
+                      value={constraint.label || ""}
+                      placeholder={constraint.id}
+                      title={`约束名称 · ${constraint.id}`}
+                      onChange={(event) =>
+                        editConstraint(index, { label: event.target.value })
+                      }
+                    />
                     <button
                       className="delete-icon"
+                      title="删除约束"
                       onClick={() =>
                         setSketch({
                           constraints: draft.sketch.constraints.filter(
@@ -3749,65 +4255,70 @@ function SketchIntentEditor({
                       <Trash2 size={14} />
                     </button>
                   </div>
-                  {renderRefs(constraint.entityRefs)}
-                  {constraint.constraintType === "coincident" &&
-                  constraint.entityRefs.length === 2 ? (
-                    <div className="coincident-endpoint-edit">
-                      {constraint.entityRefs.map((ref, slot) => {
-                        const entity = draft.sketch.entities.find(
-                          (item) => item.id === ref,
-                        );
-                        return (
-                          <label key={`${constraint.id}-${ref}`}>
-                            <span>{entity?.role || ref}</span>
-                            <select
-                              value={endpointHandles[slot] || "end"}
-                              onChange={(event) => {
-                                const handle = event.target
-                                  .value as "start" | "end";
-                                const next: Array<"start" | "end"> = [
-                                  endpointHandles[0] || "end",
-                                  endpointHandles[1] || "start",
-                                ];
-                                next[slot] = handle;
-                                const left =
-                                  draft.sketch.entities.find(
-                                    (item) =>
-                                      item.id === constraint.entityRefs[0],
-                                  )?.role || constraint.entityRefs[0];
-                                const right =
-                                  draft.sketch.entities.find(
-                                    (item) =>
-                                      item.id === constraint.entityRefs[1],
-                                  )?.role || constraint.entityRefs[1];
-                                editConstraint(index, {
-                                  endpointRefs: next,
-                                  label: `重合 · ${left}${endpointLabel(next[0])} ↔ ${right}${endpointLabel(next[1])}`,
-                                });
-                              }}
-                            >
-                              <option value="start">起点</option>
-                              <option value="end">终点</option>
-                            </select>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <button
-                    className="selection-apply"
-                    disabled={!selected.length}
-                    onClick={() => assignSelection(index)}
-                  >
-                    <MousePointer2 size={13} />
-                    用当前选择替换作用图元
-                  </button>
+                  <div className="constraint-card-row constraint-card-row-sub">
+                    {showCoincidentEndpoints ? (
+                      <div className="coincident-endpoint-edit compact">
+                        {constraint.entityRefs.map((ref, slot) => {
+                          const entity = draft.sketch.entities.find(
+                            (item) => item.id === ref,
+                          );
+                          return (
+                            <label key={`${constraint.id}-${ref}`}>
+                              <span>{entity?.role || ref}</span>
+                              <select
+                                value={endpointHandles[slot] || "end"}
+                                onChange={(event) => {
+                                  const handle = event.target
+                                    .value as "start" | "end";
+                                  const next: Array<"start" | "end"> = [
+                                    endpointHandles[0] || "end",
+                                    endpointHandles[1] || "start",
+                                  ];
+                                  next[slot] = handle;
+                                  const left =
+                                    draft.sketch.entities.find(
+                                      (item) =>
+                                        item.id === constraint.entityRefs[0],
+                                    )?.role || constraint.entityRefs[0];
+                                  const right =
+                                    draft.sketch.entities.find(
+                                      (item) =>
+                                        item.id === constraint.entityRefs[1],
+                                    )?.role || constraint.entityRefs[1];
+                                  editConstraint(index, {
+                                    endpointRefs: next,
+                                    label: `重合 · ${left}${endpointLabel(next[0])} ↔ ${right}${endpointLabel(next[1])}`,
+                                  });
+                                }}
+                              >
+                                <option value="start">起点</option>
+                                <option value="end">终点</option>
+                              </select>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <button
+                      className="selection-apply compact"
+                      disabled={!selected.length}
+                      onClick={() => assignSelection(index)}
+                    >
+                      <MousePointer2 size={13} />
+                      用当前选择替换作用图元
+                    </button>
+                  </div>
                 </div>
               );
             })}
             {!constraintList.length && (
               <div className="empty-note">
                 先在画布中选择图元，再点击上方约束，无需输入图元 ID。
+              </div>
+            )}
+            {constraintList.length > 0 && !filteredConstraintList.length && (
+              <div className="empty-note">
+                当前筛选下没有约束，请切换约束类型或清除筛选。
               </div>
             )}
           </div>
@@ -6221,8 +6732,26 @@ function GeometryStage({
   const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const cursorPointRef = useRef<{ x: number; y: number } | null>(null);
+  const cursorRafRef = useRef(0);
+  const publishCursorPoint = (point: { x: number; y: number } | null) => {
+    cursorPointRef.current = point;
+    if (cursorRafRef.current) return;
+    cursorRafRef.current = window.requestAnimationFrame(() => {
+      cursorRafRef.current = 0;
+      setCursorPoint(cursorPointRef.current);
+    });
+  };
+  useEffect(
+    () => () => {
+      if (cursorRafRef.current) window.cancelAnimationFrame(cursorRafRef.current);
+    },
+    [],
+  );
   const [moveOffset, setMoveOffset] = useState({ horizontal: 10, vertical: 0 });
   const [orthogonalLock, setOrthogonalLock] = useState(false);
+  const [arcDrawMode, setArcDrawMode] = useState<ArcDrawMode>("centerEndpoints");
+  const [objectSnapEnabled, setObjectSnapEnabled] = useState(true);
   const [thinwallOffset, setThinwallOffset] = useState({
     side1: 1,
     side2: 1,
@@ -6983,6 +7512,27 @@ function GeometryStage({
                   {label}
                 </button>
               ))}
+              {tool === "arc" ? (
+                <>
+                  <span className="toolbar-divider" />
+                  <button
+                    className={
+                      arcDrawMode === "centerEndpoints" ? "active" : ""
+                    }
+                    onClick={() => setArcDrawMode("centerEndpoints")}
+                    title="先选圆心，再选两个端点"
+                  >
+                    圆心+端点
+                  </button>
+                  <button
+                    className={arcDrawMode === "threePoint" ? "active" : ""}
+                    onClick={() => setArcDrawMode("threePoint")}
+                    title="通过三个点确定圆弧"
+                  >
+                    三点
+                  </button>
+                </>
+              ) : null}
               <span className="toolbar-spacer" />
               <button
                 disabled={!history.length}
@@ -7036,6 +7586,14 @@ function GeometryStage({
                 删除
               </button>
               <button
+                className={objectSnapEnabled ? "active" : ""}
+                onClick={() => setObjectSnapEnabled((value) => !value)}
+                title="对象捕捉：绘制时可吸附端点／最近点／相切点；仅直线端点吸附会自动添加重合约束"
+              >
+                <Magnet size={14} />
+                捕捉
+              </button>
+              <button
                 className={orthogonalLock ? "active" : ""}
                 onClick={() => setOrthogonalLock((value) => !value)}
                 title="锁定正交拖动（与按住 Shift 取并集）"
@@ -7083,7 +7641,7 @@ function GeometryStage({
               <MousePointer2 size={13} />
               <span>
                 选中后可拖动整体移动（多选一起移）；端点手柄改端点。Alt+拖动复制，Shift
-                或「正交」锁定水平／竖直。Ctrl+C 复制，Ctrl+V 粘贴，Ctrl+Z／Y
+                或「正交」锁定水平／竖直。开启「捕捉」后可吸附端点（自动重合）或靠近线段（仅定位）。Ctrl+C 复制，Ctrl+V 粘贴，Ctrl+Z／Y
                 撤销重做。
               </span>
               <b>
@@ -7166,8 +7724,10 @@ function GeometryStage({
               pendingConflict={sketchEditConflict}
               beginEdit={beginSketchEdit}
               viewCommand={viewCommand}
-              onCursorChange={setCursorPoint}
+              onCursorChange={publishCursorPoint}
               orthogonalLock={orthogonalLock}
+              objectSnapEnabled={objectSnapEnabled}
+              arcDrawMode={arcDrawMode}
             />
             <div className="sketch-coordinate-bar" aria-live="polite">
               <span>草图平面 {draft.sketch.plane}</span>
@@ -7345,52 +7905,140 @@ function GeometryStage({
                 </label>
                 {selected.start && (
                   <div className="coordinate-grid">
-                    <Field label={`起点 ${planeAxes.horizontal}`}>
+                    <Field
+                      label={
+                        selected.geometryType === "arc"
+                          ? `圆弧起点 ${planeAxes.horizontal}`
+                          : `起点 ${planeAxes.horizontal}`
+                      }
+                    >
                       <NumberInput
                         value={selected.start[0]}
                         step={0.01}
-                        onChange={(value) =>
-                          editEntity(draft.sketch.entities.indexOf(selected), {
-                            start: [value, selected.start![1]],
-                          })
-                        }
+                        onChange={(value) => {
+                          const start: [number, number] = [
+                            value,
+                            selected.start![1],
+                          ];
+                          const patch: Partial<Draft["sketch"]["entities"][number]> =
+                            { start };
+                          if (
+                            selected.geometryType === "arc" &&
+                            selected.center
+                          ) {
+                            patch.startAngle = pointAngleDegrees(
+                              selected.center,
+                              start,
+                            );
+                          }
+                          editEntity(
+                            draft.sketch.entities.indexOf(selected),
+                            patch,
+                          );
+                        }}
                       />
                     </Field>
-                    <Field label={`起点 ${planeAxes.vertical}`}>
+                    <Field
+                      label={
+                        selected.geometryType === "arc"
+                          ? `圆弧起点 ${planeAxes.vertical}`
+                          : `起点 ${planeAxes.vertical}`
+                      }
+                    >
                       <NumberInput
                         value={selected.start[1]}
                         step={0.01}
-                        onChange={(value) =>
-                          editEntity(draft.sketch.entities.indexOf(selected), {
-                            start: [selected.start![0], value],
-                          })
-                        }
+                        onChange={(value) => {
+                          const start: [number, number] = [
+                            selected.start![0],
+                            value,
+                          ];
+                          const patch: Partial<Draft["sketch"]["entities"][number]> =
+                            { start };
+                          if (
+                            selected.geometryType === "arc" &&
+                            selected.center
+                          ) {
+                            patch.startAngle = pointAngleDegrees(
+                              selected.center,
+                              start,
+                            );
+                          }
+                          editEntity(
+                            draft.sketch.entities.indexOf(selected),
+                            patch,
+                          );
+                        }}
                       />
                     </Field>
                     {selected.end && (
                       <>
-                        <Field label={`终点 ${planeAxes.horizontal}`}>
+                        <Field
+                          label={
+                            selected.geometryType === "arc"
+                              ? `圆弧终点 ${planeAxes.horizontal}`
+                              : `终点 ${planeAxes.horizontal}`
+                          }
+                        >
                           <NumberInput
                             value={selected.end[0]}
                             step={0.01}
-                            onChange={(value) =>
+                            onChange={(value) => {
+                              const end: [number, number] = [
+                                value,
+                                selected.end![1],
+                              ];
+                              const patch: Partial<
+                                Draft["sketch"]["entities"][number]
+                              > = { end };
+                              if (
+                                selected.geometryType === "arc" &&
+                                selected.center
+                              ) {
+                                patch.endAngle = pointAngleDegrees(
+                                  selected.center,
+                                  end,
+                                );
+                              }
                               editEntity(
                                 draft.sketch.entities.indexOf(selected),
-                                { end: [value, selected.end![1]] },
-                              )
-                            }
+                                patch,
+                              );
+                            }}
                           />
                         </Field>
-                        <Field label={`终点 ${planeAxes.vertical}`}>
+                        <Field
+                          label={
+                            selected.geometryType === "arc"
+                              ? `圆弧终点 ${planeAxes.vertical}`
+                              : `终点 ${planeAxes.vertical}`
+                          }
+                        >
                           <NumberInput
                             value={selected.end[1]}
                             step={0.01}
-                            onChange={(value) =>
+                            onChange={(value) => {
+                              const end: [number, number] = [
+                                selected.end![0],
+                                value,
+                              ];
+                              const patch: Partial<
+                                Draft["sketch"]["entities"][number]
+                              > = { end };
+                              if (
+                                selected.geometryType === "arc" &&
+                                selected.center
+                              ) {
+                                patch.endAngle = pointAngleDegrees(
+                                  selected.center,
+                                  end,
+                                );
+                              }
                               editEntity(
                                 draft.sketch.entities.indexOf(selected),
-                                { end: [selected.end![0], value] },
-                              )
-                            }
+                                patch,
+                              );
+                            }}
                           />
                         </Field>
                       </>
@@ -7464,26 +8112,70 @@ function GeometryStage({
                   )}
                 {selected.center && (
                   <div className="coordinate-grid">
-                    <Field label={`圆心 ${planeAxes.horizontal}`}>
+                    <Field
+                      label={
+                        selected.geometryType === "arc"
+                          ? `圆心 ${planeAxes.horizontal}`
+                          : `圆心 ${planeAxes.horizontal}`
+                      }
+                    >
                       <NumberInput
                         value={selected.center[0]}
                         step={0.01}
-                        onChange={(value) =>
-                          editEntity(draft.sketch.entities.indexOf(selected), {
-                            center: [value, selected.center![1]],
-                          })
-                        }
+                        onChange={(value) => {
+                          const center: [number, number] = [
+                            value,
+                            selected.center![1],
+                          ];
+                          const patch: Partial<Draft["sketch"]["entities"][number]> =
+                            { center };
+                          if (selected.geometryType === "arc") {
+                            const geometry = arcFromEntity({
+                              ...selected,
+                              center,
+                            });
+                            if (geometry) {
+                              patch.start = geometry.start;
+                              patch.end = geometry.end;
+                              patch.startAngle = geometry.startAngle;
+                              patch.endAngle = geometry.endAngle;
+                            }
+                          }
+                          editEntity(
+                            draft.sketch.entities.indexOf(selected),
+                            patch,
+                          );
+                        }}
                       />
                     </Field>
                     <Field label={`圆心 ${planeAxes.vertical}`}>
                       <NumberInput
                         value={selected.center[1]}
                         step={0.01}
-                        onChange={(value) =>
-                          editEntity(draft.sketch.entities.indexOf(selected), {
-                            center: [selected.center![0], value],
-                          })
-                        }
+                        onChange={(value) => {
+                          const center: [number, number] = [
+                            selected.center![0],
+                            value,
+                          ];
+                          const patch: Partial<Draft["sketch"]["entities"][number]> =
+                            { center };
+                          if (selected.geometryType === "arc") {
+                            const geometry = arcFromEntity({
+                              ...selected,
+                              center,
+                            });
+                            if (geometry) {
+                              patch.start = geometry.start;
+                              patch.end = geometry.end;
+                              patch.startAngle = geometry.startAngle;
+                              patch.endAngle = geometry.endAngle;
+                            }
+                          }
+                          editEntity(
+                            draft.sketch.entities.indexOf(selected),
+                            patch,
+                          );
+                        }}
                       />
                     </Field>
                     {selected.radius != null && (
@@ -7492,14 +8184,88 @@ function GeometryStage({
                           value={selected.radius}
                           step={0.01}
                           min={0.01}
-                          onChange={(radius) =>
-                            editEntity(draft.sketch.entities.indexOf(selected), {
-                              radius,
-                            })
-                          }
+                          onChange={(radius) => {
+                            const patch: Partial<
+                              Draft["sketch"]["entities"][number]
+                            > = { radius };
+                            if (selected.geometryType === "arc") {
+                              const geometry = arcFromEntity({
+                                ...selected,
+                                radius,
+                              });
+                              if (geometry) {
+                                patch.start = geometry.start;
+                                patch.end = geometry.end;
+                                patch.startAngle = geometry.startAngle;
+                                patch.endAngle = geometry.endAngle;
+                              }
+                            }
+                            editEntity(
+                              draft.sketch.entities.indexOf(selected),
+                              patch,
+                            );
+                          }}
                         />
                       </Field>
                     )}
+                    {selected.geometryType === "arc" &&
+                    selected.startAngle != null &&
+                    selected.endAngle != null ? (
+                      <>
+                        <Field
+                          label="圆弧角度（自起点）"
+                          hint="以起点为基准，沿逆时针方向量取圆弧张角"
+                        >
+                          <NumberInput
+                            value={arcSweepDegrees(
+                              selected.startAngle,
+                              selected.endAngle,
+                              selected.largeArc ?? false,
+                            )}
+                            unit="°"
+                            step={0.01}
+                            min={0.01}
+                            onChange={(sweep) => {
+                              const geometry = arcFromEntity(selected);
+                              if (!geometry) return;
+                              const next = arcWithSweep(geometry, sweep);
+                              editEntity(
+                                draft.sketch.entities.indexOf(selected),
+                                {
+                                  end: next.end,
+                                  endAngle: next.endAngle,
+                                  largeArc: next.largeArc,
+                                },
+                              );
+                            }}
+                          />
+                        </Field>
+                        <div className="arc-reverse-row">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const geometry = arcFromEntity(selected);
+                              if (!geometry) return;
+                              const next = toggleArcDirection(geometry);
+                              editEntity(
+                                draft.sketch.entities.indexOf(selected),
+                                {
+                                  end: next.end,
+                                  endAngle: next.endAngle,
+                                  largeArc: next.largeArc,
+                                },
+                              );
+                            }}
+                          >
+                            <RefreshCw size={14} />
+                            反转圆弧
+                          </button>
+                          <small>
+                            在两种可能的弧段之间切换（小于 180° 与大于 180°）
+                          </small>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 )}
                 <button

@@ -2377,12 +2377,15 @@ code {
 }
 .semantic-sketch-canvas {
   width: 100%;
-  height: 350px;
+  aspect-ratio: 460 / 330;
+  height: auto;
+  max-height: min(420px, 55vh);
   border: 1px solid #dfe4e7;
   border-radius: 7px;
   background: #fbfcfc;
   touch-action: none;
   overscroll-behavior: contain;
+  display: block;
 }
 .solver-axis {
   stroke: #91a8b6;
@@ -2413,10 +2416,25 @@ code {
   pointer-events: stroke;
   vector-effect: non-scaling-stroke;
 }
-.solver-segment circle {
+.curve-hit-target.circle-interior-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: fill;
+}
+.solver-segment .drag-handle {
   fill: #fff;
   stroke: #9c5a0c;
   stroke-width: 1.5;
+}
+.solver-segment .circle-center-mark {
+  fill: #fff;
+  stroke: #1e7895;
+  stroke-width: 1.5;
+  pointer-events: auto;
+  cursor: move;
+}
+.solver-segment.construction .circle-center-mark {
+  stroke: #91a8b6;
 }
 .solver-segment:hover .segment-visible,
 .solver-segment.selected .segment-visible {
@@ -2608,12 +2626,48 @@ code {
 }
 .sketch-circle,
 .sketch-arc {
-  fill: none;
+  fill: none !important;
   stroke: #dd861d;
   stroke-width: 2.25;
   cursor: pointer;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
+}
+.sketch-circle.draw-preview {
+  stroke: #e85d04;
+  stroke-dasharray: 5 4;
+  stroke-width: 1.5;
+  opacity: 0.9;
+}
+.sketch-arc.draw-preview {
+  stroke: #1e7895;
+  stroke-dasharray: none;
+  stroke-width: 3.5;
+  opacity: 1;
+  fill: none;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.sketch-rectangle.draw-preview {
+  stroke: #1e7895;
+  stroke-dasharray: none;
+  stroke-width: 3.5;
+  opacity: 1;
+  fill: none;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.arc-reverse-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.arc-reverse-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
 }
 .sketch-circle.selected,
 .sketch-arc.selected {
@@ -3243,7 +3297,6 @@ code {
 .region-visual-card {
   border: 1px solid #e0e5e8;
   border-radius: 7px;
-  padding: 9px;
   background: #fff;
 }
 .intent-card {
@@ -3251,6 +3304,7 @@ code {
   align-items: center;
   gap: 10px;
   cursor: pointer;
+  padding: 9px;
 }
 .intent-card.selected {
   border-color: #1e7895;
@@ -3291,6 +3345,137 @@ code {
 .constraint-card.disabled {
   opacity: 0.5;
   background: #f7f8f9;
+}
+.constraint-list-compact {
+  gap: 5px;
+}
+.constraint-card {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.constraint-card-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.25fr) auto minmax(64px, 0.85fr) 22px;
+  gap: 7px;
+  align-items: center;
+}
+.constraint-card-row-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding-left: 22px;
+}
+.constraint-enable {
+  display: flex;
+  align-items: center;
+}
+.constraint-enable input {
+  margin: 0;
+}
+.constraint-entities-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+.constraint-entities-compact button {
+  border: 0;
+  border-radius: 8px;
+  background: #e9f2f5;
+  color: #1e5f75;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.constraint-entities-empty {
+  font-size: 6px;
+  color: #929ca3;
+}
+.constraint-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #145a72;
+  background: #e3f2f7;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+.constraint-name-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 6px;
+  padding: 2px 5px;
+  border: 1px solid #e4e9ec;
+  border-radius: 4px;
+  background: #fafbfc;
+  color: #5f6b74;
+}
+.constraint-name-input:focus {
+  outline: none;
+  border-color: #1e7895;
+}
+.constraint-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+.constraint-filter-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 7px;
+  color: #5f6b74;
+}
+.constraint-filter-bar select {
+  min-width: 140px;
+  font-size: 7px;
+  padding: 3px 5px;
+}
+.coincident-endpoint-edit.compact {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  gap: 4px 8px;
+  font-size: 6px;
+  color: #6e7c85;
+}
+.coincident-endpoint-edit.compact label {
+  gap: 4px;
+  font-size: 6px;
+}
+.coincident-endpoint-edit.compact label > span {
+  font-size: 6px;
+  font-weight: 500;
+  color: #78858e;
+}
+.coincident-endpoint-edit.compact select {
+  min-width: 56px;
+  font-size: 6px;
+  padding: 1px 3px;
+}
+.constraint-card > .selection-apply.compact,
+.constraint-card-row-sub > .selection-apply.compact {
+  margin: 0;
+  padding: 1px 5px;
+  font-size: 6px;
+  gap: 2px;
+  color: #6e7c85;
+}
+.constraint-card-row-sub > .selection-apply.compact svg {
+  width: 11px;
+  height: 11px;
 }
 .constraint-card-head {
   display: grid;
@@ -3354,6 +3539,7 @@ code {
   grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.9fr) minmax(112px, 0.75fr) minmax(150px, 1fr) auto 24px;
   gap: 9px;
   align-items: center;
+  padding: 9px;
 }
 .dimension-card > div:first-child {
   display: flex;
@@ -3442,6 +3628,38 @@ code {
 .thinwall-offset-note {
   margin: 0;
 }
+.snap-indicator {
+  fill: rgba(232, 93, 4, 0.18);
+  stroke: #e85d04;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.snap-indicator.active {
+  fill: rgba(232, 93, 4, 0.35);
+  stroke-width: 2;
+}
+.snap-indicator.active.line-nearest {
+  fill: rgba(30, 120, 149, 0.28);
+  stroke: #1e7895;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+.snap-indicator.active.tangent {
+  fill: rgba(232, 93, 4, 0.35);
+  stroke: #e85d04;
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+.snap-preview-line {
+  stroke: #e85d04;
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.pending-point.snapped {
+  fill: #e85d04;
+  stroke: #fff;
+}
 .region-guidance > div {
   display: flex;
   flex-direction: column;
@@ -3465,6 +3683,7 @@ code {
   grid-template-columns: 10px 1fr 110px auto 24px;
   gap: 9px;
   align-items: center;
+  padding: 9px;
 }
 .region-visual-card > div {
   display: flex;

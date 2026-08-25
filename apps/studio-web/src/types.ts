@@ -163,6 +163,7 @@ export type SketchPrimitive = {
   radius?: number;
   startAngle?: number | null;
   endAngle?: number | null;
+  largeArc?: boolean | null;
   points?: SketchPoint[];
 };
 export type SketchSolveCase = {
@@ -409,6 +410,7 @@ export type Draft = {
       radius?: number | null;
       startAngle?: number | null;
       endAngle?: number | null;
+      largeArc?: boolean | null;
       points: [number, number][];
     }[];
     constraints: {

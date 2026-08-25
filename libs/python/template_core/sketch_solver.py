@@ -374,7 +374,11 @@ def _case(draft: TemplateDraft, case: str, overrides: dict[str, float] | None) -
             radius = geometry["radius"]
             item.update(center={"x": geometry["center"][0], "y": geometry["center"][1]}, radius=radius)
             if entity.geometryType == "arc":
-                item.update(startAngle=math.degrees(geometry["startAngle"]), endAngle=math.degrees(geometry["endAngle"]))
+                item.update(
+                    startAngle=math.degrees(geometry["startAngle"]),
+                    endAngle=math.degrees(geometry["endAngle"]),
+                    largeArc=entity.largeArc,
+                )
             all_points.extend([(geometry["center"][0] - radius, geometry["center"][1] - radius), (geometry["center"][0] + radius, geometry["center"][1] + radius)])
             if radius <= TOLERANCE:
                 diagnostics.append({"severity": "error", "code": "SKETCH_RADIUS_DEGENERATE", "path": f"sketch.entities.{entity.id}", "message": f"图元 {entity.id} 的半径必须大于0。"})

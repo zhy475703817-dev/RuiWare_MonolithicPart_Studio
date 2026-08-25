@@ -111,8 +111,22 @@ def _primitive_edge(primitive, plane: str = "XY", scale: float = 1.0, offset: fl
         center, radius = primitive["center"], primitive["radius"]
         start_angle = math.radians(primitive.get("startAngle") or 0)
         end_angle = math.radians(primitive.get("endAngle") or 90)
-        middle_angle = (start_angle + end_angle) / 2
-        points = [_point_3d((center["x"] + radius * math.cos(angle)) * scale, (center["y"] + radius * math.sin(angle)) * scale, plane, offset) for angle in (start_angle, middle_angle, end_angle)]
+        ccw = (end_angle - start_angle) % (2 * math.pi)
+        if ccw == 0:
+            ccw = 2 * math.pi
+        large_arc = primitive.get("largeArc")
+        if large_arc is None:
+            large_arc = ccw > math.pi
+        # Midpoint of the selected arc (minor/major), traveling CCW when that path matches.
+        travels_ccw = (ccw > math.pi) if large_arc else (ccw < math.pi or abs(ccw - math.pi) < 1e-9)
+        if travels_ccw:
+            middle_angle = start_angle + ccw / 2
+        else:
+            middle_angle = start_angle - (2 * math.pi - ccw) / 2
+        points = [
+            _point_3d((center["x"] + radius * math.cos(angle)) * scale, (center["y"] + radius * math.sin(angle)) * scale, plane, offset)
+            for angle in (start_angle, middle_angle, end_angle)
+        ]
         return BRepBuilderAPI_MakeEdge(GC_MakeArcOfCircle(*points).Value()).Edge()
     if kind == "circle":
         center = primitive["center"]
