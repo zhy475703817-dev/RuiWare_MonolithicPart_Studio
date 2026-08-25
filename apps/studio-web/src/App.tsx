@@ -76,6 +76,10 @@ import {
   toggleArcDirection,
   type ArcDrawMode,
 } from "./features/sketch/sketchArc";
+import {
+  panSketchViewport,
+  type SketchViewportBounds,
+} from "./features/sketch/sketchViewport";
 import type {
   CompileResult,
   Draft,
@@ -1773,11 +1777,23 @@ function ParametricSketchCanvas({
   } | null>(null);
   const [dragTick, setDragTick] = useState(0);
   const [viewRevision, setViewRevision] = useState(0);
+  const [isPanning, setIsPanning] = useState(false);
   const [settlePrimitives, setSettlePrimitives] = useState<
     ReturnType<typeof entitiesToPrimitives> | null
   >(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewMathRef = useRef({ scale: 1, cx: 0, cy: 0, viewportKey: "" });
+  const panRef = useRef<{
+    pointerId: number;
+    originClientX: number;
+    originClientY: number;
+    originViewX: number;
+    originViewY: number;
+    bounds: SketchViewportBounds;
+    scale: number;
+    hasMoved: boolean;
+    startedOnBackground: boolean;
+  } | null>(null);
   const dragEntitiesRef = useRef<Draft["sketch"]["entities"] | null>(null);
   const dragRef = useRef<typeof drag>(null);
   dragRef.current = drag;
@@ -2089,6 +2105,19 @@ function ParametricSketchCanvas({
       y: Math.round(((math.cy - viewY) / math.scale) * 100) / 100,
     };
   };
+  const clientToView = (
+    clientX: number,
+    clientY: number,
+    svg: SVGSVGElement,
+  ) => {
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const inverse = ctm.inverse();
+    return {
+      x: inverse.a * clientX + inverse.c * clientY + inverse.e,
+      y: inverse.b * clientX + inverse.d * clientY + inverse.f,
+    };
+  };
   const world = (event: { clientX: number; clientY: number; currentTarget: EventTarget }) => {
     const target = event.currentTarget as SVGElement;
     const svg = (
@@ -2310,6 +2339,77 @@ function ParametricSketchCanvas({
       });
     }
   };
+  const startPan = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0 || dragRef.current || panRef.current) return;
+    const origin = clientToView(
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    panRef.current = {
+      pointerId: event.pointerId,
+      originClientX: event.clientX,
+      originClientY: event.clientY,
+      originViewX: origin.x,
+      originViewY: origin.y,
+      bounds: { ...viewport.current.bounds },
+      scale: viewMathRef.current.scale,
+      hasMoved: false,
+      startedOnBackground:
+        event.target === event.currentTarget ||
+        event.target instanceof SVGRectElement,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+    event.preventDefault();
+  };
+  const panToClientPosition = (
+    clientX: number,
+    clientY: number,
+    pointerId: number,
+    svg: SVGSVGElement,
+  ) => {
+    const activePan = panRef.current;
+    if (!activePan || activePan.pointerId !== pointerId) return false;
+    const clientDistance = Math.hypot(
+      clientX - activePan.originClientX,
+      clientY - activePan.originClientY,
+    );
+    if (!activePan.hasMoved && clientDistance < 3) return true;
+    activePan.hasMoved = true;
+    const current = clientToView(clientX, clientY, svg);
+    viewport.current = {
+      key: viewMathRef.current.viewportKey,
+      bounds: panSketchViewport(
+        activePan.bounds,
+        current.x - activePan.originViewX,
+        current.y - activePan.originViewY,
+        activePan.scale,
+      ),
+    };
+    setViewRevision((value) => value + 1);
+    return true;
+  };
+  useEffect(() => {
+    const continuePan = (event: PointerEvent) => {
+      const svg = svgRef.current;
+      if (svg) panToClientPosition(event.clientX, event.clientY, event.pointerId, svg);
+    };
+    const clearAbandonedPan = (event: PointerEvent) => {
+      const activePan = panRef.current;
+      if (!activePan || activePan.pointerId !== event.pointerId) return;
+      panRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener("pointermove", continuePan, true);
+    window.addEventListener("pointerup", clearAbandonedPan);
+    window.addEventListener("pointercancel", clearAbandonedPan);
+    return () => {
+      window.removeEventListener("pointermove", continuePan, true);
+      window.removeEventListener("pointerup", clearAbandonedPan);
+      window.removeEventListener("pointercancel", clearAbandonedPan);
+    };
+  }, []);
   const applyOrthogonalDelta = (
     dx: number,
     dy: number,
@@ -2324,7 +2424,13 @@ function ParametricSketchCanvas({
     id: string,
     handle: "start" | "end" | "center" | "body",
   ) => {
-    if (tool !== "select" || caseName !== "nominal" || pendingConflict) return;
+    if (
+      panRef.current ||
+      tool !== "select" ||
+      caseName !== "nominal" ||
+      pendingConflict
+    )
+      return;
     event.stopPropagation();
     event.preventDefault();
     // Seed from the geometry currently on screen (draft in nominal, solved otherwise).
@@ -2398,6 +2504,17 @@ function ParametricSketchCanvas({
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
     const pointerWorld = world(event);
     onCursorChange(pointerWorld);
+    const activePan = panRef.current;
+    if (activePan?.pointerId === event.pointerId) {
+      paintDrawCursor(null);
+      panToClientPosition(
+        event.clientX,
+        event.clientY,
+        event.pointerId,
+        event.currentTarget,
+      );
+      return;
+    }
     const active = dragRef.current;
     if (!active) {
       if (tool !== "select" && caseName === "nominal" && !pendingConflict) {
@@ -2655,6 +2772,35 @@ function ParametricSketchCanvas({
     beginEdit();
     onGeometryEdit({ sketch });
     clearDragState();
+  };
+  const finishPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragRef.current) {
+      finishDrag();
+      return;
+    }
+    const activePan = panRef.current;
+    if (!activePan || activePan.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    panRef.current = null;
+    setIsPanning(false);
+    if (activePan.hasMoved) return;
+    if (tool !== "select") {
+      click(event);
+    } else if (activePan.startedOnBackground) {
+      onSelect("");
+    }
+  };
+  const cancelPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragRef.current) finishDrag();
+    const activePan = panRef.current;
+    if (!activePan || activePan.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    panRef.current = null;
+    setIsPanning(false);
   };
   const drawPrimitive = (primitive: (typeof primitives)[number]) => {
     const active = selected.includes(primitive.id),
@@ -2943,13 +3089,15 @@ function ParametricSketchCanvas({
   return (
     <svg
       ref={svgRef}
-      className={`semantic-sketch-canvas tool-${tool}`}
+      className={`semantic-sketch-canvas tool-${tool}${
+        isPanning ? " panning" : ""
+      }`}
       viewBox="0 0 460 330"
       preserveAspectRatio="xMidYMid meet"
-      onPointerDown={click}
+      onPointerDownCapture={startPan}
       onPointerMove={move}
-      onPointerUp={finishDrag}
-      onPointerCancel={finishDrag}
+      onPointerUp={finishPointer}
+      onPointerCancel={cancelPointer}
       onPointerLeave={() => {
         onCursorChange(null);
         paintDrawCursor(null);

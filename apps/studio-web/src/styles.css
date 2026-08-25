@@ -2386,6 +2386,13 @@ code {
   touch-action: none;
   overscroll-behavior: contain;
   display: block;
+  cursor: grab;
+}
+.semantic-sketch-canvas.panning {
+  cursor: grabbing;
+}
+.semantic-sketch-canvas.panning * {
+  cursor: grabbing !important;
 }
 .solver-axis {
   stroke: #91a8b6;
