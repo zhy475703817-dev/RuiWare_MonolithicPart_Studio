@@ -41,6 +41,7 @@ import {
   Save,
   Search,
   Settings2,
+  Spline,
   Trash2,
   Undo2,
   Upload,
@@ -53,6 +54,8 @@ import { WorkspaceShell } from "./components/layout/WorkspaceShell";
 import {
   buildLineSnapCoincidentConstraints,
   DEFAULT_SKETCH_SNAP_OPTIONS,
+  endpointSnapToleranceMm,
+  isEndpointSnapKind,
   isNearestSnapKind,
   isTangentSnapKind,
   resolveSketchSnap,
@@ -80,6 +83,11 @@ import {
   panSketchViewport,
   type SketchViewportBounds,
 } from "./features/sketch/sketchViewport";
+import {
+  advanceSketchPolyline,
+  terminateSketchPolyline,
+  type SketchPolylineSession,
+} from "./features/sketch/sketchPolyline";
 import type {
   CompileResult,
   Draft,
@@ -512,9 +520,19 @@ function CadViewer({ result }: { result: CompileResult | null }) {
   );
 }
 
-type SketchTool = "select" | "point" | "line" | "rectangle" | "circle" | "arc";
+type SketchTool =
+  | "select"
+  | "point"
+  | "line"
+  | "polyline"
+  | "rectangle"
+  | "circle"
+  | "arc";
 type SketchViewCommand =
   | { id: number; type: "zoomIn" | "zoomOut" | "fit" }
+  | null;
+type SketchPolylineCommand =
+  | { id: number; type: "finish" | "cancel" }
   | null;
 const cloneSketchEntities = (entities: Draft["sketch"]["entities"]) =>
   entities.map((item) => ({
@@ -1686,6 +1704,7 @@ function ParametricSketchCanvas({
   pendingConflict,
   beginEdit,
   viewCommand,
+  polylineCommand,
   onCursorChange,
   orthogonalLock,
   objectSnapEnabled,
@@ -1706,6 +1725,7 @@ function ParametricSketchCanvas({
   pendingConflict: SketchEditConflict | null;
   beginEdit: () => void;
   viewCommand: SketchViewCommand;
+  polylineCommand: SketchPolylineCommand;
   onCursorChange: (point: { x: number; y: number } | null) => void;
   orthogonalLock: boolean;
   objectSnapEnabled: boolean;
@@ -1714,10 +1734,13 @@ function ParametricSketchCanvas({
   const solved = solution?.cases.find((entry) => entry.case === caseName);
   const draftPrimitives = entitiesToPrimitives(draft.sketch.entities);
   const [pending, setPending] = useState<SketchDrawPoint[]>([]);
+  const pendingRef = useRef<SketchDrawPoint[]>([]);
+  const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
+  const polylineSessionRef = useRef<SketchPolylineSession | null>(null);
+  const latestSketchRef = useRef(draft.sketch);
   const snapOptions = useMemo(
     () => ({
       enabled: objectSnapEnabled,
-      toleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.toleranceMm,
       lineToleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.lineToleranceMm,
       kinds: DEFAULT_SKETCH_SNAP_OPTIONS.kinds,
     }),
@@ -1732,19 +1755,19 @@ function ParametricSketchCanvas({
         pendingPoints.length === 1)
         ? { x: pendingPoints[0].x, y: pendingPoints[0].y }
         : null;
-    return resolveSketchSnap(worldPoint, draft.sketch.entities, {
+    return resolveSketchSnap(worldPoint, latestSketchRef.current.entities, {
       ...snapOptions,
+      toleranceMm: endpointSnapToleranceMm(viewMathRef.current.scale),
       tangentFromCenter,
     });
   };
   const snapPreviewHitRef = useRef<SketchSnapHit | null>(null);
   const snapIndicatorRef = useRef<SVGCircleElement | null>(null);
+  const snapHintRef = useRef<SVGTextElement | null>(null);
   const snapRubberBandRef = useRef<SVGLineElement | null>(null);
   const circlePreviewRef = useRef<SVGCircleElement | null>(null);
   const arcPreviewRef = useRef<SVGPathElement | null>(null);
   const rectPreviewRef = useRef<SVGPathElement | null>(null);
-  const pendingRef = useRef<SketchDrawPoint[]>([]);
-  const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
   const centerArcDragRef = useRef<{
     sweep: number;
     endAngle: number;
@@ -1753,11 +1776,23 @@ function ParametricSketchCanvas({
   pendingAnchorRef.current = pending.length === 1 ? pending[0] : null;
   useEffect(() => {
     setPending([]);
+    polylineSessionRef.current = null;
     centerArcDragRef.current = null;
     arcPreviewRef.current?.setAttribute("visibility", "hidden");
     circlePreviewRef.current?.setAttribute("visibility", "hidden");
     rectPreviewRef.current?.setAttribute("visibility", "hidden");
   }, [tool, arcDrawMode]);
+  useEffect(() => {
+    latestSketchRef.current = draft.sketch;
+    const lastLineId = polylineSessionRef.current?.lastLineId;
+    if (
+      lastLineId &&
+      !draft.sketch.entities.some((entity) => entity.id === lastLineId)
+    ) {
+      polylineSessionRef.current = null;
+      setPending([]);
+    }
+  }, [draft.sketch]);
   const [hoveredCircleId, setHoveredCircleId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
     id: string;
@@ -1828,6 +1863,7 @@ function ParametricSketchCanvas({
     const arcPreview = arcPreviewRef.current;
     const rectPreview = rectPreviewRef.current;
     indicator?.setAttribute("visibility", "hidden");
+    snapHintRef.current?.setAttribute("visibility", "hidden");
     rubber?.setAttribute("visibility", "hidden");
     circlePreview?.setAttribute("visibility", "hidden");
     arcPreview?.setAttribute("visibility", "hidden");
@@ -1880,8 +1916,12 @@ function ParametricSketchCanvas({
     };
   };
   const viewport = useRef({ key: viewportKey, bounds: initialViewport() });
-  if (viewport.current.key !== viewportKey)
-    viewport.current = { key: viewportKey, bounds: initialViewport() };
+  if (viewport.current.key !== viewportKey) {
+    viewport.current =
+      tool === "polyline" && polylineSessionRef.current?.segmentIds.length
+        ? { key: viewportKey, bounds: viewport.current.bounds }
+        : { key: viewportKey, bounds: initialViewport() };
+  }
   useEffect(() => {
     if (!viewCommand) return;
     if (viewCommand.type === "fit") {
@@ -1920,6 +1960,7 @@ function ParametricSketchCanvas({
   const paintDrawCursor = (hit: SketchSnapHit | null) => {
     snapPreviewHitRef.current = hit;
     const indicator = snapIndicatorRef.current;
+    const hint = snapHintRef.current;
     const rubber = snapRubberBandRef.current;
     const circlePreview = circlePreviewRef.current;
     const arcPreview = arcPreviewRef.current;
@@ -1927,6 +1968,7 @@ function ParametricSketchCanvas({
     if (!indicator) return;
     if (!hit || tool === "select" || caseName !== "nominal") {
       indicator.setAttribute("visibility", "hidden");
+      hint?.setAttribute("visibility", "hidden");
       rubber?.setAttribute("visibility", "hidden");
       circlePreview?.setAttribute("visibility", "hidden");
       arcPreview?.setAttribute("visibility", "hidden");
@@ -1946,7 +1988,9 @@ function ParametricSketchCanvas({
       "class",
       `snap-indicator ${
         hit.target
-          ? isNearestSnapKind(hit.target.kind)
+          ? isEndpointSnapKind(hit.target.kind)
+            ? "active endpoint"
+            : isNearestSnapKind(hit.target.kind)
             ? "active line-nearest"
             : isTangentSnapKind(hit.target.kind)
               ? "active tangent"
@@ -1954,8 +1998,16 @@ function ParametricSketchCanvas({
           : ""
       }`.trim(),
     );
+    if (hint && hit.target && isEndpointSnapKind(hit.target.kind)) {
+      hint.setAttribute("visibility", "visible");
+      hint.setAttribute("x", String(screenPoint.x + 10));
+      hint.setAttribute("y", String(screenPoint.y - 10));
+      hint.textContent = `端点 · ${hit.target.handle === "start" ? "起点" : "终点"}`;
+    } else {
+      hint?.setAttribute("visibility", "hidden");
+    }
     const anchor = pendingAnchorRef.current;
-    if (rubber && tool === "line" && anchor) {
+    if (rubber && (tool === "line" || tool === "polyline") && anchor) {
       const start = {
         x: math.cx + anchor.x * math.scale,
         y: math.cy - anchor.y * math.scale,
@@ -2169,6 +2221,33 @@ function ParametricSketchCanvas({
     }
     const point = resolvePointerSnap(world(event));
     const drawPoint = sketchDrawPointFromSnap(point);
+    if (tool === "polyline") {
+      // The second pointer-up in a double-click ends the session; it must not
+      // also create a tiny duplicate segment.
+      if (event.detail > 1) return;
+      const segmentNumber =
+        (polylineSessionRef.current?.segmentIds.length || 0) + 1;
+      let constraintNumber = 0;
+      const result = advanceSketchPolyline(
+        polylineSessionRef.current,
+        drawPoint,
+        latestSketchRef.current,
+        () => uid(`polyline.edge.${segmentNumber}`),
+        () =>
+          uid(
+            `constraint.polyline.${segmentNumber}.${++constraintNumber}`,
+          ),
+      );
+      polylineSessionRef.current = result.session;
+      setPending(result.session ? [result.session.lastPoint] : []);
+      paintDrawCursor(null);
+      if (!result.accepted || !result.createdLineId) return;
+      if (result.beginUndo) beginEdit();
+      latestSketchRef.current = result.sketch;
+      onSketch(result.sketch);
+      onSelect(result.createdLineId);
+      return;
+    }
     if (tool === "point") {
       addEntity({
         id: uid("point"),
@@ -2802,6 +2881,16 @@ function ParametricSketchCanvas({
     panRef.current = null;
     setIsPanning(false);
   };
+  const terminatePolyline = (reason: "finish" | "cancel") => {
+    const result = terminateSketchPolyline(polylineSessionRef.current, reason);
+    polylineSessionRef.current = result.session;
+    setPending([]);
+    paintDrawCursor(null);
+  };
+  useEffect(() => {
+    if (tool !== "polyline" || !polylineCommand) return;
+    terminatePolyline(polylineCommand.type);
+  }, [polylineCommand?.id]);
   const drawPrimitive = (primitive: (typeof primitives)[number]) => {
     const active = selected.includes(primitive.id),
       select = (e: React.PointerEvent) => {
@@ -3098,6 +3187,18 @@ function ParametricSketchCanvas({
       onPointerMove={move}
       onPointerUp={finishPointer}
       onPointerCancel={cancelPointer}
+      onDoubleClick={(event) => {
+        if (tool !== "polyline") return;
+        event.preventDefault();
+        event.stopPropagation();
+        terminatePolyline("finish");
+      }}
+      onContextMenu={(event) => {
+        if (tool !== "polyline") return;
+        event.preventDefault();
+        event.stopPropagation();
+        terminatePolyline("finish");
+      }}
       onPointerLeave={() => {
         onCursorChange(null);
         paintDrawCursor(null);
@@ -3174,6 +3275,12 @@ function ParametricSketchCanvas({
         visibility="hidden"
         pointerEvents="none"
         r="4"
+      />
+      <text
+        ref={snapHintRef}
+        className="snap-hint"
+        visibility="hidden"
+        pointerEvents="none"
       />
       <text x="12" y="20" className="solver-label">
         {caseName.toUpperCase()} · {solved?.valid ? "SOLVED" : "EDITING"} ·{" "}
@@ -6877,6 +6984,8 @@ function GeometryStage({
   const [future, setFuture] = useState<Draft["sketch"][]>([]);
   const [solving, setSolving] = useState(false);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
+  const [polylineCommand, setPolylineCommand] =
+    useState<SketchPolylineCommand>(null);
   const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -7426,10 +7535,18 @@ function GeometryStage({
       ) {
         event.preventDefault();
         redo();
+      } else if (tool === "polyline" && event.key === "Enter") {
+        event.preventDefault();
+        setPolylineCommand({ id: Date.now(), type: "finish" });
       } else if (event.key === "Escape") {
         if (sketchEditConflict) {
           event.preventDefault();
           setSketchEditConflict(null);
+          return;
+        }
+        if (tool === "polyline") {
+          event.preventDefault();
+          setPolylineCommand({ id: Date.now(), type: "cancel" });
           return;
         }
         setSelectedEntities([]);
@@ -7446,6 +7563,7 @@ function GeometryStage({
     future,
     sketchEditConflict,
     sketchClipboard,
+    tool,
   ]);
   return (
     <>
@@ -7645,6 +7763,7 @@ function GeometryStage({
                   ["select", MousePointer2, "选择"],
                   ["point", CircleDot, "点"],
                   ["line", Link2, "直线"],
+                  ["polyline", Spline, "连续折线"],
                   ["rectangle", Box, "矩形"],
                   ["circle", CircleDot, "圆"],
                   ["arc", RefreshCw, "圆弧"],
@@ -7735,11 +7854,16 @@ function GeometryStage({
               </button>
               <button
                 className={objectSnapEnabled ? "active" : ""}
+                aria-pressed={objectSnapEnabled}
                 onClick={() => setObjectSnapEnabled((value) => !value)}
-                title="对象捕捉：绘制时可吸附端点／最近点／相切点；仅直线端点吸附会自动添加重合约束"
+                title={
+                  objectSnapEnabled
+                    ? "关闭二维草图端点吸附"
+                    : "开启二维草图端点吸附"
+                }
               >
                 <Magnet size={14} />
-                捕捉
+                端点吸附
               </button>
               <button
                 className={orthogonalLock ? "active" : ""}
@@ -7872,6 +7996,7 @@ function GeometryStage({
               pendingConflict={sketchEditConflict}
               beginEdit={beginSketchEdit}
               viewCommand={viewCommand}
+              polylineCommand={polylineCommand}
               onCursorChange={publishCursorPoint}
               orthogonalLock={orthogonalLock}
               objectSnapEnabled={objectSnapEnabled}

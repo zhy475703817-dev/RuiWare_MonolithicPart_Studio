@@ -3645,6 +3645,20 @@ code {
   fill: rgba(232, 93, 4, 0.35);
   stroke-width: 2;
 }
+.snap-indicator.active.endpoint {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: #e85d04;
+  stroke-width: 2.5;
+}
+.snap-hint {
+  fill: #9b3f08;
+  stroke: #fbfcfc;
+  stroke-width: 3px;
+  paint-order: stroke fill;
+  font: 700 8px "Cascadia Code", monospace;
+  letter-spacing: 0;
+  pointer-events: none;
+}
 .snap-indicator.active.line-nearest {
   fill: rgba(30, 120, 149, 0.28);
   stroke: #1e7895;
