@@ -9,6 +9,12 @@ export type SketchPointerOperation =
       entityId: string;
     }
   | {
+      kind: "editing-handle";
+      pointerId: number;
+      entityId: string;
+      handleId: string;
+    }
+  | {
       kind: "panning-canvas";
       pointerId: number;
       button: 0 | 1;
@@ -20,7 +26,8 @@ export function resolveSketchPointerIntent(
 ): SketchPointerOperation["kind"] | null {
   if (button === 1) return "panning-canvas";
   if (button !== 0) return null;
-  if (hit === "control" || hit === "entity") return "dragging-entity";
+  if (hit === "control") return "editing-handle";
+  if (hit === "entity") return "dragging-entity";
   if (hit === "background") return "panning-canvas";
   return null;
 }

@@ -2398,6 +2398,9 @@ code {
 .semantic-sketch-canvas.dragging-entity * {
   cursor: move !important;
 }
+.semantic-sketch-canvas.editing-handle * {
+  cursor: inherit !important;
+}
 .solver-axis {
   stroke: #91a8b6;
   stroke-dasharray: 6 5;
@@ -3654,6 +3657,50 @@ code {
 .snap-indicator.active {
   fill: rgba(232, 93, 4, 0.35);
   stroke-width: 2;
+}
+.sketch-edit-control {
+  pointer-events: auto;
+}
+.sketch-edit-control-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.sketch-edit-control-visible {
+  fill: #fff;
+  stroke: #1e7895;
+  stroke-width: 1.5;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.sketch-edit-control.edge .sketch-edit-control-visible {
+  fill: #e9f5f8;
+}
+.sketch-edit-control.radius .sketch-edit-control-visible {
+  fill: #fff6e8;
+  stroke: #9c5a0c;
+}
+.sketch-edit-control.start .sketch-edit-control-visible,
+.sketch-edit-control.end .sketch-edit-control-visible {
+  fill: #eef8f6;
+  stroke: #117a65;
+}
+.sketch-edit-control-cross {
+  stroke: #1e7895;
+  stroke-width: 1.2;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.sketch-edit-control:hover .sketch-edit-control-visible,
+.sketch-edit-control.active .sketch-edit-control-visible {
+  fill: #1e7895;
+  stroke: #fff;
+  stroke-width: 2;
+}
+.sketch-edit-control:hover .sketch-edit-control-cross,
+.sketch-edit-control.active .sketch-edit-control-cross {
+  stroke: #9c5a0c;
+  stroke-width: 1.8;
 }
 .snap-indicator.active.endpoint {
   fill: rgba(255, 255, 255, 0.92);

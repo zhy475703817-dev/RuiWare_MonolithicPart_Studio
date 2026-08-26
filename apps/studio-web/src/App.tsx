@@ -80,6 +80,14 @@ import {
   type ArcDrawMode,
 } from "./features/sketch/sketchArc";
 import {
+  editSketchEntitiesAtHandle,
+  findSketchRectangleGroup,
+  getSketchEntityControls,
+  sketchEntityEditHint,
+  translateSketchEntities,
+  type SketchEntityEditTarget,
+} from "./features/sketch/sketchEntityEditing";
+import {
   panSketchViewport,
   type SketchViewportBounds,
 } from "./features/sketch/sketchViewport";
@@ -956,6 +964,78 @@ const propagateCoincidentMove = (
   return { entities: next, touchedIds: [...touched] };
 };
 
+const endpointChanged = (
+  before: [number, number] | null | undefined,
+  after: [number, number] | null | undefined,
+) =>
+  !!before &&
+  !!after &&
+  Math.hypot(after[0] - before[0], after[1] - before[1]) > 1e-9;
+
+/** Propagate every endpoint changed by a shape handle through existing joints. */
+const propagateShapeHandleEdit = (
+  constraints: Draft["sketch"]["constraints"],
+  entities: Draft["sketch"]["entities"],
+  beforeEntities: Draft["sketch"]["entities"],
+  editedEntityIds: string[],
+) => {
+  let next = entities;
+  const touched = new Set(editedEntityIds);
+  for (const entityId of editedEntityIds) {
+    const before = beforeEntities.find((entity) => entity.id === entityId);
+    const after = next.find((entity) => entity.id === entityId);
+    if (!before || !after) continue;
+    for (const handle of ["start", "end"] as const) {
+      if (!endpointChanged(before[handle], after[handle])) continue;
+      const propagated = propagateCoincidentMove(
+        constraints,
+        next,
+        entityId,
+        handle,
+        beforeEntities,
+      );
+      next = propagated.entities;
+      propagated.touchedIds.forEach((id) => touched.add(id));
+    }
+  }
+  return { entities: next, touchedIds: [...touched] };
+};
+
+const changedSketchEntityIds = (
+  beforeEntities: Draft["sketch"]["entities"],
+  afterEntities: Draft["sketch"]["entities"],
+) => {
+  const beforeById = new Map(beforeEntities.map((entity) => [entity.id, entity]));
+  return afterEntities
+    .filter((entity) => {
+      const before = beforeById.get(entity.id);
+      if (!before) return true;
+      return (
+        JSON.stringify({
+          start: before.start,
+          end: before.end,
+          center: before.center,
+          radius: before.radius,
+          startAngle: before.startAngle,
+          endAngle: before.endAngle,
+          largeArc: before.largeArc,
+          points: before.points,
+        }) !==
+        JSON.stringify({
+          start: entity.start,
+          end: entity.end,
+          center: entity.center,
+          radius: entity.radius,
+          startAngle: entity.startAngle,
+          endAngle: entity.endAngle,
+          largeArc: entity.largeArc,
+          points: entity.points,
+        })
+      );
+    })
+    .map((entity) => entity.id);
+};
+
 const analyzeLocalSketchEdit = (
   sketch: Draft["sketch"],
   entityId: string,
@@ -1013,7 +1093,7 @@ const analyzeLocalSketchEdit = (
       item.enabled &&
       item.driving &&
       dimensions.has(item.constraintType) &&
-      item.entityRefs.includes(entityId) &&
+      item.entityRefs.some((ref) => touched.has(ref)) &&
       item.driverMode !== "unset",
   );
   const sharedParameterIds = [
@@ -1025,11 +1105,11 @@ const analyzeLocalSketchEdit = (
           normalized.constraints.some(
             (item) =>
               item.parameterId === parameterId &&
-              !item.entityRefs.includes(entityId),
+              !item.entityRefs.some((ref) => touched.has(ref)),
           ) ||
           sketch.entities.some(
             (item) =>
-              item.id !== entityId && item.parameterRefs.includes(parameterId),
+              !touched.has(item.id) && item.parameterRefs.includes(parameterId),
           ),
         ),
     ),
@@ -1054,13 +1134,19 @@ const analyzeLocalSketchEdit = (
 
 const commitLocalEntityFixedDimensions = (
   sketch: Draft["sketch"],
-  entityId: string,
+  entityIds: string | string[],
   entities: Draft["sketch"]["entities"],
-  options: { releaseSoftConstraintIds?: string[] } = {},
+  options: {
+    releaseSoftConstraintIds?: string[];
+    preserveParameterizedDimensions?: boolean;
+  } = {},
 ) => {
   const dimensions = dimensionTypeSet();
   const normalized = normalizeSketchTopology(sketch);
   const releaseIds = new Set(options.releaseSoftConstraintIds || []);
+  const editedIds = new Set(
+    Array.isArray(entityIds) ? entityIds : [entityIds],
+  );
   const nextConstraints = normalized.constraints.map((constraint) => {
     // Strong topology constraints are never auto-released here.
     if (
@@ -1070,9 +1156,12 @@ const commitLocalEntityFixedDimensions = (
       return { ...constraint, enabled: false, driving: false };
     }
     if (
-      !constraint.entityRefs.includes(entityId) ||
+      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
       !dimensions.has(constraint.constraintType)
     ) {
+      return constraint;
+    }
+    if (options.preserveParameterizedDimensions && constraint.parameterId) {
       return constraint;
     }
     if (constraint.driverMode === "expression" && constraint.expression) {
@@ -1662,14 +1751,17 @@ const applyCenterlineThinwallOffset = (
 const commitSharedParameterUpdate = (
   sketch: Draft["sketch"],
   parameterDefinitions: ParameterDefinition[],
-  entityId: string,
+  entityIds: string | string[],
   entities: Draft["sketch"]["entities"],
 ) => {
   const dimensions = dimensionTypeSet();
+  const editedIds = new Set(
+    Array.isArray(entityIds) ? entityIds : [entityIds],
+  );
   let nextParameters = parameterDefinitions;
   const nextConstraints = sketch.constraints.map((constraint) => {
     if (
-      !constraint.entityRefs.includes(entityId) ||
+      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
       !dimensions.has(constraint.constraintType) ||
       !constraint.parameterId
     ) {
@@ -1705,6 +1797,28 @@ const commitSharedParameterUpdate = (
   };
 };
 
+const commitCompletedGeometryEdit = (
+  draft: Draft,
+  entityIds: string[],
+  entities: Draft["sketch"]["entities"],
+) => {
+  const parameterCommit = commitSharedParameterUpdate(
+    draft.sketch,
+    draft.parameterDefinitions,
+    entityIds,
+    entities,
+  );
+  return {
+    sketch: commitLocalEntityFixedDimensions(
+      parameterCommit.sketch,
+      entityIds,
+      entities,
+      { preserveParameterizedDimensions: true },
+    ),
+    parameterDefinitions: parameterCommit.parameterDefinitions,
+  };
+};
+
 function ParametricSketchCanvas({
   draft,
   solution,
@@ -1714,6 +1828,8 @@ function ParametricSketchCanvas({
   onSelect,
   onSketch,
   onGeometryEdit,
+  validateGeometryEdit,
+  onGeometryEditRejected,
   onEditConflict,
   pendingConflict,
   beginEdit,
@@ -1735,6 +1851,11 @@ function ParametricSketchCanvas({
     sketch: Draft["sketch"];
     parameterDefinitions?: ParameterDefinition[];
   }) => void;
+  validateGeometryEdit: (patch: {
+    sketch: Draft["sketch"];
+    parameterDefinitions?: ParameterDefinition[];
+  }) => Promise<{ valid: boolean; message?: string }>;
+  onGeometryEditRejected: (message: string) => void;
   onEditConflict: (conflict: SketchEditConflict) => void;
   pendingConflict: SketchEditConflict | null;
   beginEdit: () => void;
@@ -1823,10 +1944,13 @@ function ParametricSketchCanvas({
       setPending([]);
     }
   }, [draft.sketch]);
-  const [hoveredCircleId, setHoveredCircleId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
     id: string;
-    handle: "start" | "end" | "center" | "body";
+    handle: "start" | "end" | "center" | "body" | "radius";
+    editTarget: SketchEntityEditTarget | null;
+    editPointer: { x: number; y: number } | null;
+    editCursor: string | null;
+    operationKind: "dragging-entity" | "editing-handle";
     origin: { x: number; y: number };
     originClientX: number;
     originClientY: number;
@@ -1863,6 +1987,7 @@ function ParametricSketchCanvas({
     startedOnBackground: boolean;
   } | null>(null);
   const pointerOperationRef = useRef<SketchPointerOperation | null>(null);
+  const editValidationTokenRef = useRef(0);
   const activeToolRef = useRef(tool);
   const dragEntitiesRef = useRef<Draft["sketch"]["entities"] | null>(null);
   const dragRef = useRef<typeof drag>(null);
@@ -1884,6 +2009,15 @@ function ParametricSketchCanvas({
     : pendingConflict
       ? conflictPrimitives || basePrimitives
       : settlePrimitives || basePrimitives;
+  const editDisplayEntities = drag
+    ? dragEntitiesRef.current || drag.beforeEntities
+    : pendingConflict
+      ? pendingConflict.afterEntities
+      : draft.sketch.entities;
+  const entityControls =
+    tool === "select" && caseName === "nominal" && !pendingConflict
+      ? getSketchEntityControls(editDisplayEntities, selected)
+      : [];
   useEffect(() => {
     if (!settlePrimitives) return;
     setSettlePrimitives(null);
@@ -1891,7 +2025,6 @@ function ParametricSketchCanvas({
   useEffect(() => {
     setPending([]);
     snapPreviewHitRef.current = null;
-    setHoveredCircleId(null);
     const indicator = snapIndicatorRef.current;
     const rubber = snapRubberBandRef.current;
     const circlePreview = circlePreviewRef.current;
@@ -1992,6 +2125,27 @@ function ParametricSketchCanvas({
     x: cx + point.x * scale,
     y: cy - point.y * scale,
   });
+  const activeEntityEditHint =
+    drag?.hasMoved && drag.editTarget
+      ? sketchEntityEditHint(editDisplayEntities, drag.editTarget)
+      : null;
+  const activeEntityEditHintLayout = activeEntityEditHint
+    ? layoutLineDimensionLabel(
+        screen({
+          x: activeEntityEditHint.reference[0],
+          y: activeEntityEditHint.reference[1],
+        }),
+        screen({
+          x: activeEntityEditHint.anchor[0],
+          y: activeEntityEditHint.anchor[1],
+        }),
+        { width: 460, height: 330 },
+        {
+          width: 116,
+          height: activeEntityEditHint.lines.length > 1 ? 34 : 22,
+        },
+      )
+    : null;
   const resolveLineDrawPreview = (worldPoint: { x: number; y: number }) => {
     const preciseSnap = resolvePointerSnap(worldPoint);
     const anchor = pendingAnchorRef.current;
@@ -2736,7 +2890,13 @@ function ParametricSketchCanvas({
   const startDrag = (
     event: React.PointerEvent,
     id: string,
-    handle: "start" | "end" | "center" | "body",
+    handle: "start" | "end" | "center" | "body" | "radius",
+    options: {
+      editTarget?: SketchEntityEditTarget;
+      moveIds?: string[];
+      isHandle?: boolean;
+      cursor?: string;
+    } = {},
   ) => {
     if (
       event.button !== 0 ||
@@ -2757,21 +2917,26 @@ function ParametricSketchCanvas({
     );
     const source = snapshot.find((item) => item.id === id);
     if (!source) return;
-    const duplicate = event.altKey;
-    const multiSelected =
-      selected.includes(id) &&
-      selected.filter((itemId) =>
-        snapshot.some((entity) => entity.id === itemId),
-      ).length > 1;
-    const groupSourceIds = multiSelected
-      ? selected.filter((itemId) =>
-          snapshot.some((entity) => entity.id === itemId),
-        )
-      : [id];
+    const requestedMoveIds = options.moveIds?.filter((itemId) =>
+      snapshot.some((entity) => entity.id === itemId),
+    );
+    const selectedMoveIds = selected.filter((itemId) =>
+      snapshot.some((entity) => entity.id === itemId),
+    );
+    const multiSelected = requestedMoveIds
+      ? requestedMoveIds.length > 1
+      : selected.includes(id) && selectedMoveIds.length > 1;
+    const groupSourceIds = requestedMoveIds?.length
+      ? requestedMoveIds
+      : multiSelected
+        ? selectedMoveIds
+        : [id];
+    const duplicate = event.altKey && !options.editTarget;
     const sourceIds = duplicate ? groupSourceIds : [];
     // Multi-select move/copy always translates whole entities together.
     const effectiveHandle =
-      (duplicate && sourceIds.length > 1) || (!duplicate && multiSelected)
+      !options.editTarget &&
+      ((duplicate && sourceIds.length > 1) || (!duplicate && multiSelected))
         ? ("body" as const)
         : handle;
     let dragId = id;
@@ -2798,21 +2963,33 @@ function ParametricSketchCanvas({
       snapshot = [...snapshot, ...copies];
     }
     const moveIds = duplicate ? duplicateIds : groupSourceIds;
+    const editingHandle = !!options.editTarget || !!options.isHandle;
     const operation = tryBeginSketchPointerOperation(
       pointerOperationRef.current,
-      {
-        kind: "dragging-entity",
-        pointerId: event.pointerId,
-        entityId: dragId,
-      },
+      editingHandle
+        ? {
+            kind: "editing-handle",
+            pointerId: event.pointerId,
+            entityId: dragId,
+            handleId: options.editTarget?.id || `${dragId}.${effectiveHandle}`,
+          }
+        : {
+            kind: "dragging-entity",
+            pointerId: event.pointerId,
+            entityId: dragId,
+          },
     );
     if (!operation) return;
     pointerOperationRef.current = operation;
     setSettlePrimitives(null);
     dragEntitiesRef.current = snapshot;
-    const nextDrag = {
+    const nextDrag: NonNullable<typeof drag> = {
       id: dragId,
       handle: effectiveHandle,
+      editTarget: options.editTarget || null,
+      editPointer: null,
+      editCursor: options.cursor || null,
+      operationKind: editingHandle ? "editing-handle" : "dragging-entity",
       origin: world(event),
       originClientX: event.clientX,
       originClientY: event.clientY,
@@ -2866,11 +3043,13 @@ function ParametricSketchCanvas({
     const current = pointerWorld;
     let dx = current.x - active.origin.x,
       dy = current.y - active.origin.y;
-    ({ dx, dy } = applyOrthogonalDelta(
-      dx,
-      dy,
-      event.shiftKey || orthogonalLock,
-    ));
+    if (!active.editTarget) {
+      ({ dx, dy } = applyOrthogonalDelta(
+        dx,
+        dy,
+        event.shiftKey || orthogonalLock,
+      ));
+    }
     dx = Math.round(dx * 100) / 100;
     dy = Math.round(dy * 100) / 100;
     if (!active.hasMoved) {
@@ -2888,65 +3067,74 @@ function ParametricSketchCanvas({
       dragRef.current = { ...active, hasMoved: true };
       setDrag((value) => (value ? { ...value, hasMoved: true } : value));
     }
+    if (active.editTarget) {
+      const targetPoint: [number, number] = [
+        active.editTarget.originPoint[0] + dx,
+        active.editTarget.originPoint[1] + dy,
+      ];
+      const edited = editSketchEntitiesAtHandle(
+        active.beforeEntities,
+        active.editTarget,
+        targetPoint,
+      );
+      if (!edited) return;
+      const propagated = propagateShapeHandleEdit(
+        draft.sketch.constraints,
+        edited.entities,
+        active.beforeEntities,
+        edited.editedEntityIds,
+      );
+      dragEntitiesRef.current = propagated.entities;
+      dragRef.current = {
+        ...active,
+        hasMoved: true,
+        editPointer: current,
+      };
+      setDragTick((value) => value + 1);
+      return;
+    }
     const source = active.entity;
-    const shift = (
-      value: [number, number] | null | undefined,
-    ): [number, number] | null =>
-      value ? [value[0] + dx, value[1] + dy] : null;
     const translateWhole =
       active.handle === "center" || active.handle === "body";
     const movingIds = new Set(
       active.moveIds.length ? active.moveIds : [active.id],
     );
     const rigidGroup = movingIds.size > 1;
-    const local = active.beforeEntities.map((item) => {
-      if (!movingIds.has(item.id)) return item;
-      if (rigidGroup || (active.duplicate && translateWhole)) {
-        return {
-          ...item,
-          center: shift(item.center),
-          start: shift(item.start),
-          end: shift(item.end),
-          points: item.points.map(
-            ([x, y]) => [x + dx, y + dy] as [number, number],
-          ),
-        };
-      }
-      if (translateWhole) {
-        const base = active.duplicate ? item : source;
-        return {
-          ...item,
-          center: shift(base.center),
-          start: shift(base.start),
-          end: shift(base.end),
-          points: base.points.map(
-            ([x, y]) => [x + dx, y + dy] as [number, number],
-          ),
-        };
-      }
-      const endpoint = shift(
-        active.handle === "start" || active.handle === "end"
-          ? (active.duplicate ? item : source)[active.handle]
-          : null,
-      );
-      if (!endpoint) return item;
-      const pivot = active.duplicate ? item : source;
-      if (item.geometryType === "arc" && pivot.center) {
-        const angle =
-          (Math.atan2(
-            endpoint[1] - pivot.center[1],
-            endpoint[0] - pivot.center[0],
-          ) *
-            180) /
-          Math.PI;
-        return {
-          ...item,
-          [active.handle]: endpoint,
-          [active.handle === "start" ? "startAngle" : "endAngle"]: angle,
-        };
-      }
-      return { ...item, [active.handle]: endpoint };
-    });
+    const local =
+      rigidGroup || translateWhole
+        ? translateSketchEntities(
+            active.beforeEntities,
+            [...movingIds],
+            [dx, dy],
+          )
+        : active.beforeEntities.map((item) => {
+            if (!movingIds.has(item.id)) return item;
+            const endpoint =
+              active.handle === "start" || active.handle === "end"
+                ? ([
+                    (active.duplicate ? item : source)[active.handle]![0] + dx,
+                    (active.duplicate ? item : source)[active.handle]![1] + dy,
+                  ] as [number, number])
+                : null;
+            if (!endpoint) return item;
+            const pivot = active.duplicate ? item : source;
+            if (item.geometryType === "arc" && pivot.center) {
+              const angle =
+                (Math.atan2(
+                  endpoint[1] - pivot.center[1],
+                  endpoint[0] - pivot.center[0],
+                ) *
+                  180) /
+                Math.PI;
+              return {
+                ...item,
+                [active.handle]: endpoint,
+                [active.handle === "start" ? "startAngle" : "endAngle"]:
+                  angle,
+              };
+            }
+            return { ...item, [active.handle]: endpoint };
+          });
     if (active.duplicate || rigidGroup) {
       // Group translate (move or Alt-copy) keeps relative topology among moved entities.
       dragEntitiesRef.current = local;
@@ -2962,7 +3150,7 @@ function ParametricSketchCanvas({
     }
     setDragTick((value) => value + 1);
   };
-  const finishDrag = () => {
+  const finishDrag = async () => {
     const active = dragRef.current;
     if (!active) return;
     const afterEntities =
@@ -2979,13 +3167,50 @@ function ParametricSketchCanvas({
       );
       setDrag(null);
     };
+    const validateAndCommit = async (
+      committed: {
+        sketch: Draft["sketch"];
+        parameterDefinitions?: ParameterDefinition[];
+      },
+      previewEntities: Draft["sketch"]["entities"],
+    ) => {
+      const validationToken = ++editValidationTokenRef.current;
+      let validation: { valid: boolean; message?: string };
+      try {
+        validation = await validateGeometryEdit(committed);
+      } catch (error) {
+        validation = {
+          valid: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      if (validationToken !== editValidationTokenRef.current) return false;
+      if (!validation.valid) {
+        setSettlePrimitives(null);
+        clearDragState();
+        onGeometryEditRejected(
+          validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+        );
+        return false;
+      }
+      setSettlePrimitives(entitiesToPrimitives(previewEntities));
+      beginEdit();
+      onGeometryEdit(committed);
+      clearDragState();
+      return true;
+    };
     if (!active.hasMoved) {
       clearDragState();
       return;
     }
+    const changedEntityIds = changedSketchEntityIds(
+      active.beforeEntities,
+      afterEntities,
+    );
     const moved = afterEntities.find((item) => item.id === active.id);
     const before = active.beforeEntities.find((item) => item.id === active.id);
     const displacement = (() => {
+      if (active.editTarget) return changedEntityIds.length ? 1 : 0;
       if (!moved || !before) return 0;
       if (active.handle === "center" || active.handle === "body") {
         const from = before.center || before.start;
@@ -3037,25 +3262,52 @@ function ParametricSketchCanvas({
           boundaryRefs: region.boundaryRefs.map((ref) => idMap[ref]),
           role: `${region.role}.copy`,
         }));
-      setSettlePrimitives(entitiesToPrimitives(afterEntities));
-      beginEdit();
-      onGeometryEdit({
-        sketch: {
-          ...draft.sketch,
-          entities: afterEntities,
-          constraints: [...draft.sketch.constraints, ...copiedConstraints],
-          regions: [...draft.sketch.regions, ...copiedRegions],
-          constraintsReviewed: false,
+      const accepted = await validateAndCommit(
+        {
+          sketch: {
+            ...draft.sketch,
+            entities: afterEntities,
+            constraints: [...draft.sketch.constraints, ...copiedConstraints],
+            regions: [...draft.sketch.regions, ...copiedRegions],
+            constraintsReviewed: false,
+          },
         },
-      });
-      onSelect(
-        active.duplicateIds.length ? active.duplicateIds : [active.id],
+        afterEntities,
       );
-      clearDragState();
+      if (accepted) {
+        onSelect(
+          active.duplicateIds.length ? active.duplicateIds : [active.id],
+        );
+      }
+      return;
+    }
+    if (active.editTarget) {
+      const touchedEntityIds = changedEntityIds.length
+        ? changedEntityIds
+        : [...active.editTarget.entityIds];
+      const conflict = analyzeLocalSketchEdit(
+        draft.sketch,
+        active.id,
+        active.beforeEntities,
+        afterEntities,
+        touchedEntityIds,
+      );
+      if (conflict) {
+        onEditConflict(conflict);
+        clearDragState();
+        return;
+      }
+      const committed = commitCompletedGeometryEdit(
+        draft,
+        touchedEntityIds,
+        afterEntities,
+      );
+      await validateAndCommit(committed, afterEntities);
       return;
     }
     if (active.moveIds.length > 1) {
       let entities = afterEntities;
+      const touchedEntityIds = new Set(active.moveIds);
       for (const moveId of active.moveIds) {
         const propagated = propagateCoincidentMove(
           draft.sketch.constraints,
@@ -3065,17 +3317,27 @@ function ParametricSketchCanvas({
           active.beforeEntities,
         );
         entities = propagated.entities;
+        propagated.touchedIds.forEach((id) => touchedEntityIds.add(id));
       }
-      setSettlePrimitives(entitiesToPrimitives(entities));
-      beginEdit();
-      onGeometryEdit({
-        sketch: {
-          ...draft.sketch,
-          entities,
-          constraintsReviewed: false,
-        },
-      });
-      clearDragState();
+      const touched = [...touchedEntityIds];
+      const conflict = analyzeLocalSketchEdit(
+        draft.sketch,
+        active.id,
+        active.beforeEntities,
+        entities,
+        touched,
+      );
+      if (conflict) {
+        onEditConflict(conflict);
+        clearDragState();
+        return;
+      }
+      const committed = commitCompletedGeometryEdit(
+        draft,
+        touched,
+        entities,
+      );
+      await validateAndCommit(committed, entities);
       return;
     }
     const translateWhole = active.handle === "center" || active.handle === "body";
@@ -3100,20 +3362,21 @@ function ParametricSketchCanvas({
       return;
     }
     // Freeze the released pose until draft catches up — avoids flashing stale solve geometry.
-    setSettlePrimitives(entitiesToPrimitives(propagated.entities));
-    const sketch = commitLocalEntityFixedDimensions(
-      draft.sketch,
-      active.id,
+    const committed = commitCompletedGeometryEdit(
+      draft,
+      propagated.touchedIds,
       propagated.entities,
     );
-    beginEdit();
-    onGeometryEdit({ sketch });
-    clearDragState();
+    await validateAndCommit(committed, propagated.entities);
   };
   const cancelEntityDrag = () => {
+    editValidationTokenRef.current += 1;
     const active = dragRef.current;
     if (!active) {
-      if (pointerOperationRef.current?.kind === "dragging-entity") {
+      if (
+        pointerOperationRef.current?.kind === "dragging-entity" ||
+        pointerOperationRef.current?.kind === "editing-handle"
+      ) {
         pointerOperationRef.current = null;
       }
       dragEntitiesRef.current = null;
@@ -3166,8 +3429,11 @@ function ParametricSketchCanvas({
       return;
     }
     if (!operationOwnsPointer(operation, event.pointerId)) return;
-    if (operation.kind === "dragging-entity") {
-      if (dragRef.current) finishDrag();
+    if (
+      operation.kind === "dragging-entity" ||
+      operation.kind === "editing-handle"
+    ) {
+      if (dragRef.current) void finishDrag();
       else cancelEntityDrag();
       return;
     }
@@ -3195,7 +3461,10 @@ function ParametricSketchCanvas({
   const cancelPointer = (event: React.PointerEvent<SVGSVGElement>) => {
     const operation = pointerOperationRef.current;
     if (!operationOwnsPointer(operation, event.pointerId)) return;
-    if (operation?.kind === "dragging-entity") {
+    if (
+      operation?.kind === "dragging-entity" ||
+      operation?.kind === "editing-handle"
+    ) {
       cancelEntityDrag();
     } else {
       cancelCanvasPan(true);
@@ -3223,6 +3492,7 @@ function ParametricSketchCanvas({
     return () => {
       window.removeEventListener("blur", cancelActiveOperation);
       window.removeEventListener("keydown", cancelOnEscape, true);
+      editValidationTokenRef.current += 1;
       const pointerId = pointerOperationRef.current?.pointerId;
       if (
         pointerId != null &&
@@ -3261,12 +3531,47 @@ function ParametricSketchCanvas({
       return;
     }
     event.stopPropagation();
+    const rectangle = findSketchRectangleGroup(editDisplayEntities, entityId);
+    if (rectangle && handle === "body") {
+      if (event.shiftKey || event.ctrlKey) {
+        rectangle.entityIds.forEach((id) => onSelect(id, true));
+        return;
+      }
+      onSelect(rectangle.entityIds);
+      startDrag(event, rectangle.entityIds[0], "body", {
+        moveIds: rectangle.entityIds,
+      });
+      return;
+    }
     if (event.shiftKey || event.ctrlKey) {
       onSelect(entityId, true);
       return;
     }
     if (!selected.includes(entityId)) onSelect(entityId);
     startDrag(event, entityId, handle);
+  };
+  const beginControlPointerOperation = (
+    event: React.PointerEvent,
+    control: (typeof entityControls)[number],
+  ) => {
+    event.stopPropagation();
+    if (control.editTarget) {
+      const handle =
+        control.editTarget.kind === "arc-start"
+          ? "start"
+          : control.editTarget.kind === "arc-end"
+            ? "end"
+            : "radius";
+      startDrag(event, control.entityId, handle, {
+        editTarget: control.editTarget,
+        cursor: control.cursor,
+      });
+      return;
+    }
+    startDrag(event, control.entityId, "center", {
+      isHandle: true,
+      cursor: control.cursor,
+    });
   };
   const drawPrimitive = (primitive: (typeof primitives)[number]) => {
     const active = selected.includes(primitive.id);
@@ -3306,14 +3611,18 @@ function ParametricSketchCanvas({
                 cx={a.x}
                 cy={a.y}
                 r="5"
-                onPointerDown={(e) => startDrag(e, primitive.id, "start")}
+                onPointerDown={(e) =>
+                  startDrag(e, primitive.id, "start", { isHandle: true })
+                }
               />
               <circle
                 className="drag-handle"
                 cx={b.x}
                 cy={b.y}
                 r="5"
-                onPointerDown={(e) => startDrag(e, primitive.id, "end")}
+                onPointerDown={(e) =>
+                  startDrag(e, primitive.id, "end", { isHandle: true })
+                }
               />
             </>
           )}
@@ -3323,10 +3632,6 @@ function ParametricSketchCanvas({
     if (primitive.type === "circle" && primitive.center) {
       const c = screen(primitive.center);
       const radiusPx = (primitive.radius || 0) * scale;
-      const showCenter =
-        hoveredCircleId === primitive.id ||
-        (drag?.id === primitive.id &&
-          (drag.handle === "center" || drag.handle === "body"));
       const beginCircleDrag = (event: React.PointerEvent) => {
         beginEntityPointerOperation(event, primitive.id, "body");
       };
@@ -3348,37 +3653,13 @@ function ParametricSketchCanvas({
             cy={c.y}
             r={radiusPx}
           />
-          <g
-            onPointerEnter={() => setHoveredCircleId(primitive.id)}
-            onPointerLeave={(event) => {
-              const next = event.relatedTarget as Node | null;
-              if (next && event.currentTarget.contains(next)) return;
-              setHoveredCircleId((current) =>
-                current === primitive.id ? null : current,
-              );
-            }}
-          >
-            <circle
-              className="curve-hit-target circle-interior-hit"
-              cx={c.x}
-              cy={c.y}
-              r={Math.max(0, radiusPx - 1)}
-              onPointerDown={(event) =>
-                beginEntityPointerOperation(event, primitive.id, "center")
-              }
-            />
-            {showCenter && (
-              <circle
-                className="circle-center-mark"
-                cx={c.x}
-                cy={c.y}
-                r="4"
-                onPointerDown={(event) =>
-                  beginEntityPointerOperation(event, primitive.id, "center")
-                }
-              />
-            )}
-          </g>
+          <circle
+            className="curve-hit-target circle-interior-hit"
+            cx={c.x}
+            cy={c.y}
+            r={Math.max(0, radiusPx - 1)}
+            onPointerDown={beginCircleDrag}
+          />
         </g>
       );
     }
@@ -3419,11 +3700,8 @@ function ParametricSketchCanvas({
         largeArc,
       });
       const arcPath = arcSvgPath(fromEntity || geometry, screen, scale);
-      const a = screen({ x: geometry.start[0], y: geometry.start[1] });
-      const b = screen({ x: geometry.end[0], y: geometry.end[1] });
-      const c = screen(primitive.center);
       const beginArcDrag = (event: React.PointerEvent) => {
-        beginEntityPointerOperation(event, primitive.id, "center");
+        beginEntityPointerOperation(event, primitive.id, "body");
       };
       return (
         <g key={primitive.id} onPointerDown={beginArcDrag}>
@@ -3432,37 +3710,6 @@ function ParametricSketchCanvas({
             className={`sketch-arc ${active ? "selected" : ""} ${primitive.construction ? "construction" : ""}`}
             d={arcPath}
           />
-          {active && selected.length === 1 && caseName === "nominal" && (
-            <>
-              <circle
-                className="drag-handle"
-                cx={a.x}
-                cy={a.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "start")
-                }
-              />
-              <circle
-                className="drag-handle"
-                cx={b.x}
-                cy={b.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "end")
-                }
-              />
-              <circle
-                className="drag-handle center"
-                cx={c.x}
-                cy={c.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "center")
-                }
-              />
-            </>
-          )}
         </g>
       );
     }
@@ -3473,7 +3720,8 @@ function ParametricSketchCanvas({
       ref={svgRef}
       className={`semantic-sketch-canvas tool-${tool}${
         isPanning ? " panning" : ""
-      }${drag ? " dragging-entity" : ""}`}
+      }${drag ? ` ${drag.operationKind}` : ""}`}
+      style={drag?.editCursor ? { cursor: drag.editCursor } : undefined}
       viewBox="0 0 460 330"
       preserveAspectRatio="xMidYMid meet"
       onPointerDown={startPan}
@@ -3527,6 +3775,97 @@ function ParametricSketchCanvas({
         {sketchPlaneAxes(draft.sketch.plane).vertical}
       </text>
       {primitives.map(drawPrimitive)}
+      {entityControls.map((control) => {
+        const point = screen({ x: control.point[0], y: control.point[1] });
+        const active =
+          drag?.editTarget?.id === control.editTarget?.id ||
+          (!control.editTarget && drag?.id === control.entityId);
+        return (
+          <g
+            key={control.id}
+            className={`sketch-edit-control ${control.kind}${active ? " active" : ""}`}
+            style={{ cursor: control.cursor }}
+            data-sketch-edit-handle={control.kind}
+            onPointerDown={(event) =>
+              beginControlPointerOperation(event, control)
+            }
+          >
+            <circle
+              className="sketch-edit-control-hit"
+              cx={point.x}
+              cy={point.y}
+              r="9"
+            />
+            {control.kind === "corner" ? (
+              <rect
+                className="sketch-edit-control-visible"
+                x={point.x - 4}
+                y={point.y - 4}
+                width="8"
+                height="8"
+              />
+            ) : control.kind === "edge" ? (
+              <rect
+                className="sketch-edit-control-visible"
+                x={point.x - 4}
+                y={point.y - 3}
+                width="8"
+                height="6"
+                rx="1"
+              />
+            ) : control.kind === "radius" ? (
+              <path
+                className="sketch-edit-control-visible"
+                d={`M${point.x},${point.y - 5} L${point.x + 5},${point.y} L${point.x},${point.y + 5} L${point.x - 5},${point.y} Z`}
+              />
+            ) : (
+              <circle
+                className="sketch-edit-control-visible"
+                cx={point.x}
+                cy={point.y}
+                r={control.kind === "center" ? 4 : 5}
+              />
+            )}
+            {control.kind === "center" ? (
+              <>
+                <line
+                  className="sketch-edit-control-cross"
+                  x1={point.x - 7}
+                  y1={point.y}
+                  x2={point.x + 7}
+                  y2={point.y}
+                />
+                <line
+                  className="sketch-edit-control-cross"
+                  x1={point.x}
+                  y1={point.y - 7}
+                  x2={point.x}
+                  y2={point.y + 7}
+                />
+              </>
+            ) : null}
+          </g>
+        );
+      })}
+      {activeEntityEditHint && activeEntityEditHintLayout ? (
+        <g
+          className="line-dimension-hint entity-edit-dimension"
+          transform={`translate(${activeEntityEditHintLayout.x} ${activeEntityEditHintLayout.y})`}
+          pointerEvents="none"
+        >
+          <rect
+            width="116"
+            height={activeEntityEditHint.lines.length > 1 ? 34 : 22}
+            rx="4"
+            fillOpacity={LINE_DIMENSION_HINT_PRESENTATION.backgroundOpacity}
+          />
+          {activeEntityEditHint.lines.map((line, index) => (
+            <text key={line} x="8" y={14 + index * 14} opacity="1">
+              {line}
+            </text>
+          ))}
+        </g>
+      ) : null}
       {pending.map((point, index) => {
         const item = screen({ x: point.x, y: point.y });
         return (
@@ -7330,8 +7669,12 @@ function GeometryStage({
     draft.sketch.entities[0]?.id ? [draft.sketch.entities[0].id] : [],
   );
   const [tool, setTool] = useState<SketchTool>("select");
-  const [history, setHistory] = useState<Draft["sketch"][]>([]);
-  const [future, setFuture] = useState<Draft["sketch"][]>([]);
+  type SketchHistorySnapshot = {
+    sketch: Draft["sketch"];
+    parameterDefinitions: ParameterDefinition[];
+  };
+  const [history, setHistory] = useState<SketchHistorySnapshot[]>([]);
+  const [future, setFuture] = useState<SketchHistorySnapshot[]>([]);
   const [solving, setSolving] = useState(false);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
   const [polylineCommand, setPolylineCommand] =
@@ -7497,7 +7840,15 @@ function GeometryStage({
       ),
     });
   const beginSketchEdit = () => {
-    setHistory((items) => [...items, draft.sketch].slice(-40));
+    setHistory((items) =>
+      [
+        ...items,
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+      ].slice(-40),
+    );
     setFuture([]);
   };
   const applySketch = (sketch: Draft["sketch"]) => {
@@ -7526,7 +7877,40 @@ function GeometryStage({
         : {}),
     });
   };
-  const resolveSketchEditConflict = (
+  const validateSketchGeometryEdit = async (patch: {
+    sketch: Draft["sketch"];
+    parameterDefinitions?: ParameterDefinition[];
+  }) => {
+    const currentNominal = solution?.cases.find(
+      (entry) => entry.case === "nominal",
+    );
+    if (!currentNominal?.valid) return { valid: true };
+    try {
+      const candidate: Draft = {
+        ...draft,
+        sketch: normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
+        parameterDefinitions:
+          patch.parameterDefinitions || draft.parameterDefinitions,
+      };
+      const validation = await api.solveSketch(candidate);
+      const nominal = validation.cases.find(
+        (entry) => entry.case === "nominal",
+      );
+      return {
+        valid: !!nominal?.valid,
+        message: nominal?.valid
+          ? undefined
+          : nominal?.diagnostics.map((item) => item.message).join("；") ||
+            "约束求解失败，已恢复拖动前的合法几何。",
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+  const resolveSketchEditConflict = async (
     action: "cancel" | "acceptSoftRelease" | "updateParameters",
   ) => {
     const conflict = sketchEditConflict;
@@ -7542,11 +7926,10 @@ function GeometryStage({
       const committed = commitSharedParameterUpdate(
         draft.sketch,
         draft.parameterDefinitions,
-        conflict.entityId,
+        conflict.touchedEntityIds,
         conflict.afterEntities,
       );
-      beginSketchEdit();
-      applyGeometryEdit({
+      const patch = {
         ...committed,
         sketch: {
           ...committed.sketch,
@@ -7557,15 +7940,24 @@ function GeometryStage({
               : constraint,
           ),
         },
-      });
+      };
+      const validation = await validateSketchGeometryEdit(patch);
+      if (!validation.valid) {
+        showError(
+          validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+        );
+        setSketchEditConflict(null);
+        return;
+      }
+      beginSketchEdit();
+      applyGeometryEdit(patch);
       setSketchEditConflict(null);
       return;
     }
-    beginSketchEdit();
-    applyGeometryEdit({
+    const patch = {
       sketch: commitLocalEntityFixedDimensions(
         draft.sketch,
-        conflict.entityId,
+        conflict.touchedEntityIds,
         conflict.afterEntities,
         {
           releaseSoftConstraintIds: conflict.softConstraints.map(
@@ -7573,24 +7965,50 @@ function GeometryStage({
           ),
         },
       ),
-    });
+    };
+    const validation = await validateSketchGeometryEdit(patch);
+    if (!validation.valid) {
+      showError(
+        validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+      );
+      setSketchEditConflict(null);
+      return;
+    }
+    beginSketchEdit();
+    applyGeometryEdit(patch);
     setSketchEditConflict(null);
   };
   const undo = () => {
     const previous = history.at(-1);
     if (!previous) return;
     setSketchEditConflict(null);
-    setFuture((items) => [draft.sketch, ...items].slice(0, 40));
+    setFuture((items) =>
+      [
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+        ...items,
+      ].slice(0, 40),
+    );
     setHistory((items) => items.slice(0, -1));
-    applySketch(previous);
+    applyGeometryEdit(previous);
   };
   const redo = () => {
     const next = future[0];
     if (!next) return;
     setSketchEditConflict(null);
-    setHistory((items) => [...items, draft.sketch].slice(-40));
+    setHistory((items) =>
+      [
+        ...items,
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+      ].slice(-40),
+    );
     setFuture((items) => items.slice(1));
-    applySketch(next);
+    applyGeometryEdit(next);
   };
   const cleanSketchReferences = (
     sketch: Draft["sketch"],
@@ -8342,6 +8760,8 @@ function GeometryStage({
               onSelect={selectEntity}
               onSketch={applySketch}
               onGeometryEdit={applyGeometryEdit}
+              validateGeometryEdit={validateSketchGeometryEdit}
+              onGeometryEditRejected={showError}
               onEditConflict={setSketchEditConflict}
               pendingConflict={sketchEditConflict}
               beginEdit={beginSketchEdit}

@@ -12,7 +12,7 @@ import {
 
 describe("二维草图指针操作状态机", () => {
   it("prioritizes controls and entities over left-button canvas panning", () => {
-    expect(resolveSketchPointerIntent(0, "control")).toBe("dragging-entity");
+    expect(resolveSketchPointerIntent(0, "control")).toBe("editing-handle");
     expect(resolveSketchPointerIntent(0, "entity")).toBe("dragging-entity");
     expect(resolveSketchPointerIntent(0, "background")).toBe("panning-canvas");
     expect(resolveSketchPointerIntent(0, "other")).toBeNull();
@@ -42,10 +42,32 @@ describe("二维草图指针操作状态机", () => {
       pointerId: 7,
       button: 0,
     };
+    const edit: SketchPointerOperation = {
+      kind: "editing-handle",
+      pointerId: 7,
+      entityId: "circle.1",
+      handleId: "circle.1.radius-control",
+    };
 
     expect(tryBeginSketchPointerOperation(null, drag)).toEqual(drag);
+    expect(tryBeginSketchPointerOperation(null, edit)).toEqual(edit);
     expect(tryBeginSketchPointerOperation(drag, pan)).toBeNull();
     expect(tryBeginSketchPointerOperation(pan, drag)).toBeNull();
+    expect(tryBeginSketchPointerOperation(edit, drag)).toBeNull();
+    expect(tryBeginSketchPointerOperation(edit, pan)).toBeNull();
+  });
+
+  it("keeps handle editing distinct from whole-entity dragging", () => {
+    const edit: SketchPointerOperation = {
+      kind: "editing-handle",
+      pointerId: 23,
+      entityId: "arc.1",
+      handleId: "arc.1.end-control",
+    };
+
+    expect(edit.kind).toBe("editing-handle");
+    expect(operationOwnsPointer(edit, 23)).toBe(true);
+    expect(endSketchPointerOperation(edit, 23)).toBeNull();
   });
 
   it("uses a stable screen-pixel threshold for click versus drag", () => {
