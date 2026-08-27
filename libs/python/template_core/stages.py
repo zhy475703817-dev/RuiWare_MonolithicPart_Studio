@@ -12,6 +12,40 @@ from .sketch_solver import solve_semantic_sketch
 STAGE_ORDER: tuple[StageName, ...] = ("templateInfo", "material", "baseSketch", "features", "variants", "review", "admission")
 
 
+def _collect_expression_names(expressions: list[str]) -> tuple[set[str], bool]:
+    names: set[str] = set()
+    syntax_valid = True
+    for expression in expressions:
+        try:
+            names |= expression_names(expression)
+        except RuleEvaluationError:
+            syntax_valid = False
+    return names, syntax_valid
+
+
+def _geometry_parameter_references(draft: TemplateDraft) -> tuple[set[str], bool]:
+    expressions: list[str] = []
+    for operation in draft.geometryRecipe.operations:
+        expressions.extend([*operation.argumentExpressions.values(), operation.conditionExpression])
+        for structured_name in ("pathPoints", "stations"):
+            structured = operation.arguments.get(structured_name)
+            if isinstance(structured, str):
+                expressions.extend(
+                    component.strip()
+                    for row in structured.split(";")
+                    for component in row.split(":")
+                    if component.strip()
+                )
+    for face in draft.geometryRecipe.semanticFaces:
+        expressions.extend([
+            face.uStartExpression,
+            face.uSpanExpression,
+            face.vStartExpression,
+            face.vSpanExpression,
+        ])
+    return _collect_expression_names(expressions)
+
+
 def _validation(stage: StageName, checks: list[StageCheck]) -> StageValidation:
     blocking = [item for item in checks if item.severity == "error"]
     progress = round(sum(item.passed for item in blocking) / len(blocking) * 100) if blocking else 100
@@ -88,25 +122,7 @@ def validate_material(draft: TemplateDraft, sample_contexts: list[dict[str, Any]
 
 
 def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
-    required: set[str] = set()
-    expression_syntax_valid = True
-    for operation in draft.geometryRecipe.operations:
-        expressions = [*operation.argumentExpressions.values(), operation.conditionExpression]
-        for structured_name in ("pathPoints", "stations"):
-            structured = operation.arguments.get(structured_name)
-            if isinstance(structured, str):
-                expressions.extend(
-                    component.strip()
-                    for row in structured.split(";")
-                    for component in row.split(":")
-                    if component.strip()
-                )
-        for expression in expressions:
-            try:
-                required |= expression_names(expression)
-            except RuleEvaluationError:
-                expression_syntax_valid = False
-    declared = set(draft.sketch.drivingParameters)
+    required, expression_syntax_valid = _geometry_parameter_references(draft)
     known_parameters = {item.id for item in draft.parameterDefinitions}
     expressions_valid = expression_syntax_valid and required <= known_parameters
     missing = required - known_parameters
@@ -164,7 +180,7 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="geometry-recipe", label="基础几何配方已建立", passed=bool(draft.geometryRecipe.operations), severity="error", path="geometryRecipe.operations", message="基础几何必须至少包含一个拉伸、旋转、扫掠、放样、钣金或派生操作。"),
         StageCheck(id="geometry-operators-supported", label="几何算子均已实现", passed=operators_supported, severity="error", path="geometryRecipe.operations", message="当前配方包含CAD内核尚未实现的算子。"),
         StageCheck(id="geometry-operator-inputs", label="几何算子输入完整", passed=operator_inputs_ok, severity="error", path="geometryRecipe.operations", message="；".join(operator_input_messages) or "算子输入完整。"),
-        StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed or draft.sketch.constraintsReviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
+        StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
     ]
     return _validation("baseSketch", checks)
 
@@ -187,6 +203,7 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
 
 def validate_variants(draft: TemplateDraft) -> StageValidation:
     ids = [item.id for item in draft.parameterDefinitions]
+    parameter_ids = set(ids)
     variant_ids = [item.id for item in draft.variants]
     override_keys = {key for item in draft.variants for key in item.overrides}
     try:
@@ -199,21 +216,47 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         not item.declaredInRuleStage or item.contractReady
         for item in draft.parameterDefinitions
     )
-    geometry_references: set[str] = set()
-    geometry_expressions_valid = True
-    for operation in draft.geometryRecipe.operations:
-        for expression in [*operation.argumentExpressions.values(), operation.conditionExpression]:
-            try:
-                geometry_references |= expression_names(expression)
-            except RuleEvaluationError:
-                geometry_expressions_valid = False
-    geometry_contract_ok = geometry_expressions_valid and geometry_references <= set(ids)
+    geometry_references, geometry_expressions_valid = _geometry_parameter_references(draft)
+    geometry_contract_ok = geometry_expressions_valid and geometry_references <= parameter_ids
+    semantic_face_ids = {item.id for item in draft.geometryRecipe.semanticFaces}
+    feature_rule_ids = {item.id for item in draft.featureRules}
+    invalid_variant_overrides: list[str] = []
+    for variant in draft.variants:
+        if variant.expected != "valid":
+            continue
+        evaluation = evaluate_template(draft.parameterDefinitions, [], overrides=variant.overrides)
+        if any(item.severity == "error" for item in evaluation.diagnostics):
+            invalid_variant_overrides.append(variant.id)
+    interface_parameter_refs = {
+        parameter_id
+        for item in draft.interfaces
+        for parameter_id in item.parameterRefs
+    }
+    interface_geometry_refs = {
+        geometry_id
+        for item in draft.interfaces
+        for geometry_id in [
+            *item.geometryRefs,
+            *( [item.referenceFrame.originRef] if item.referenceFrame.originRef else [] ),
+        ]
+    }
+    interface_parameters_ok = interface_parameter_refs <= parameter_ids
+    interface_geometry_ok = interface_geometry_refs <= semantic_face_ids
+    interface_rule_sources_ok = all(
+        item.declarationMode != "featureDerived"
+        or bool(item.sourceFeatureRuleId and item.sourceFeatureRuleId in feature_rule_ids)
+        for item in draft.interfaces
+    )
     checks = [
-        StageCheck(id="geometry-parameter-contract", label="几何参数契约完整", passed=geometry_contract_ok, severity="error", path="parameterDefinitions", message=f"几何配方只能引用已声明参数：{', '.join(sorted(geometry_references - set(ids))) or '请检查表达式语法'}。"),
+        StageCheck(id="geometry-parameter-contract", label="几何参数契约完整", passed=geometry_contract_ok, severity="error", path="parameterDefinitions", message=f"几何配方与语义面只能引用已声明参数：{', '.join(sorted(geometry_references - parameter_ids)) or '请检查表达式语法'}。"),
         StageCheck(id="parameter-ids", label="参数标识唯一", passed=len(ids) == len(set(ids)), severity="error", path="parameterDefinitions", message="参数标识不能重复。"),
         StageCheck(id="nominal-variant", label="标称实例已定义", passed="nominal" in variant_ids, severity="error", path="variants", message="必须保留 nominal 标称实例。"),
         StageCheck(id="variant-ids", label="变体标识唯一", passed=len(variant_ids) == len(set(variant_ids)), severity="error", path="variants", message="变体标识不能重复。"),
-        StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= set(ids), severity="error", path="variants", message="变体只能覆盖已声明参数。"),
+        StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= parameter_ids, severity="error", path="variants", message="变体只能覆盖已声明参数。"),
+        StageCheck(id="variant-overrides-evaluable", label="有效变体参数可求值", passed=not invalid_variant_overrides, severity="error", path="variants", message=f"以下有效变体的参数覆盖无法通过类型、范围或依赖检查：{', '.join(invalid_variant_overrides) or '无'}。"),
+        StageCheck(id="interface-parameter-refs", label="接口参数引用有效", passed=interface_parameters_ok, severity="error", path="interfaces", message=f"接口只能引用已声明参数：{', '.join(sorted(interface_parameter_refs - parameter_ids)) or '无缺失参数'}。"),
+        StageCheck(id="interface-geometry-refs", label="接口几何引用有效", passed=interface_geometry_ok, severity="error", path="interfaces", message=f"接口只能引用已声明语义面：{', '.join(sorted(interface_geometry_refs - semantic_face_ids)) or '无缺失语义面'}。"),
+        StageCheck(id="interface-rule-sources", label="特征派生接口来源有效", passed=interface_rule_sources_ok, severity="error", path="interfaces", message="特征派生接口必须选择已有制造特征规则。"),
         StageCheck(id="parameter-sources", label="参数来源完整", passed=sources_complete, severity="error", path="parameterDefinitions", message="每个参数必须声明用户输入、材料属性、公式、查表或外部配置来源。"),
         StageCheck(id="parameter-contract-ready", label="规则预声明参数已补全契约", passed=contract_ready, severity="error", path="parameterDefinitions", message="规则页预声明的参数需要在契约页补全后，才能进入试算、验证与发布。"),
         StageCheck(id="parameter-dependency", label="参数依赖图有效", passed=dependency_ok, severity="error", path="parameterDefinitions", message="参数存在未知依赖或循环依赖。"),

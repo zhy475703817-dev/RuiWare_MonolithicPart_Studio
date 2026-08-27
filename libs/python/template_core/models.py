@@ -204,12 +204,12 @@ def default_geometry_recipe() -> GeometryRecipe:
     return GeometryRecipe(
         constructionMode="extrude",
         semanticFaces=[
-            {"id": "part.face.front", "label": "前侧面", "hostFrame": "negativeY", "uStartExpression": "-width / 2", "uSpanExpression": "width", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.back", "label": "后侧面", "hostFrame": "positiveY", "uStartExpression": "-width / 2", "uSpanExpression": "width", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.left", "label": "左侧面", "hostFrame": "negativeX", "uStartExpression": "-depth / 2", "uSpanExpression": "depth", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.right", "label": "右侧面", "hostFrame": "positiveX", "uStartExpression": "-depth / 2", "uSpanExpression": "depth", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.endFace.start", "label": "起始端面", "hostFrame": "negativeZ", "uStartExpression": "-width / 2", "uSpanExpression": "width", "vStartExpression": "-depth / 2", "vSpanExpression": "depth"},
-            {"id": "part.endFace.end", "label": "终止端面", "hostFrame": "positiveZ", "uStartExpression": "-width / 2", "uSpanExpression": "width", "vStartExpression": "-depth / 2", "vSpanExpression": "depth"},
+            {"id": "part.face.front", "label": "前侧面", "hostFrame": "negativeY", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.back", "label": "后侧面", "hostFrame": "positiveY", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.left", "label": "左侧面", "hostFrame": "negativeX", "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.right", "label": "右侧面", "hostFrame": "positiveX", "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.endFace.start", "label": "起始端面", "hostFrame": "negativeZ", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
+            {"id": "part.endFace.end", "label": "终止端面", "hostFrame": "positiveZ", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
         ],
         operations=[
             {

@@ -209,9 +209,6 @@ def validate_template_stage(repository: Repository, stage: StageName, draft: Tem
 
 def complete_template_stage(repository: Repository, stage: StageName, draft_id: str) -> tuple[TemplateDraft, StageValidation]:
     draft = _draft(repository, draft_id)
-    index = STAGE_ORDER.index(stage)
-    if index > 0 and getattr(draft.stageStatus, STAGE_ORDER[index - 1]) != "complete":
-        raise api_error("STAGE_PREREQUISITE_INCOMPLETE", status_code=409, context={"requiredStage": STAGE_ORDER[index - 1]})
     validation = validate_template_stage(repository, stage, draft)
     if not validation.complete:
         return draft, validation

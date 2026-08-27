@@ -1,10 +1,12 @@
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
 from app.repository import Repository
 from template_core.material import RuiWareMaterialLibrary
+from template_core.models import TemplateDraft
 
 
 def _material_database(path) -> None:
@@ -57,6 +59,7 @@ def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch) -> N
     draft = client.post(f"{stage_path}/material/complete").json()["draft"]
 
     draft["sketch"]["constraintsReviewed"] = True
+    draft["geometryRecipe"]["reviewed"] = True
     draft = client.put(f"/api/v1/template-drafts/{draft['id']}", json=draft).json()
     draft = client.post(f"{stage_path}/baseSketch/complete").json()["draft"]
 
@@ -107,6 +110,86 @@ def test_upstream_change_invalidates_downstream(tmp_path) -> None:
     assert result.stageStatus.material == "complete"
     assert result.stageStatus.baseSketch == "in_progress"
     assert result.stageStatus.review == "not_started"
+
+
+def test_stage_validation_reports_missing_prerequisites(tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "unused.db"))
+    monkeypatch.setattr(main, "repository", repository)
+    client = TestClient(main.app)
+
+    draft = client.post("/api/v1/template-drafts/blank", json={"name": "前置准入测试"}).json()
+    draft["featureRulesReviewed"] = True
+    draft = client.put(f"/api/v1/template-drafts/{draft['id']}", json=draft).json()
+    stage_path = f"/api/v1/template-drafts/{draft['id']}/stages"
+
+    validation = client.get(f"{stage_path}/features/validate").json()
+    assert validation["complete"] is False
+    prerequisite = validation["checks"][0]
+    assert prerequisite["id"] == "workflow-prerequisites"
+    assert prerequisite["passed"] is False
+    assert "定义" in prerequisite["message"]
+    assert "几何" in prerequisite["message"]
+
+    completion = client.post(f"{stage_path}/features/complete")
+    assert completion.status_code == 200
+    payload = completion.json()
+    assert payload["draft"]["stageStatus"]["features"] != "complete"
+    assert payload["validation"]["checks"][0]["id"] == "workflow-prerequisites"
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_missing"),
+    [
+        ("material", ["定义"]),
+        ("baseSketch", ["定义", "材料"]),
+        ("features", ["定义", "材料", "几何"]),
+        ("variants", ["定义", "材料", "几何", "规则"]),
+        ("review", ["定义", "材料", "几何", "规则", "契约"]),
+        ("admission", ["定义", "材料", "几何", "规则", "契约", "验证"]),
+    ],
+)
+def test_every_stage_reports_workflow_prerequisites(stage, expected_missing, tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "unused.db"))
+    monkeypatch.setattr(main, "repository", repository)
+    client = TestClient(main.app)
+
+    draft = client.post("/api/v1/template-drafts/blank", json={"name": "越级准入测试"}).json()
+    validation = client.get(f"/api/v1/template-drafts/{draft['id']}/stages/{stage}/validate").json()
+    prerequisite = validation["checks"][0]
+
+    assert validation["complete"] is False
+    assert prerequisite["id"] == "workflow-prerequisites"
+    assert prerequisite["passed"] is False
+    for label in expected_missing:
+        assert label in prerequisite["message"]
+
+
+def test_base_sketch_requires_geometry_recipe_review(tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "unused.db"))
+    monkeypatch.setattr(main, "repository", repository)
+    client = TestClient(main.app)
+
+    draft = TemplateDraft(
+        name="几何配方复核测试",
+        code="GEO-REVIEW-001",
+        description="用于验证草图复核和几何配方复核必须独立完成。",
+        designIntent="防止只勾选草图约束复核就误通过基础几何阶段。",
+        owner="模板工程师",
+        manufacturingClassification={"reviewed": True},
+        sketch={"constraintsReviewed": True},
+        geometryRecipe={"reviewed": False},
+        stageStatus={"templateInfo": "complete", "material": "complete"},
+    )
+    saved = repository.save_draft(draft)
+    completion = client.post(f"/api/v1/template-drafts/{saved.id}/stages/baseSketch/complete").json()
+    geometry_review = next(item for item in completion["validation"]["checks"] if item["id"] == "geometry-reviewed")
+    constraints_review = next(item for item in completion["validation"]["checks"] if item["id"] == "constraints-reviewed")
+    prerequisites = next(item for item in completion["validation"]["checks"] if item["id"] == "workflow-prerequisites")
+
+    assert prerequisites["passed"] is True
+    assert constraints_review["passed"] is True
+    assert geometry_review["passed"] is False
+    assert completion["draft"]["stageStatus"]["baseSketch"] != "complete"
 
 
 def test_revision_restore_preserves_historical_stage_state(tmp_path) -> None:

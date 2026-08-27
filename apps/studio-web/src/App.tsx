@@ -3287,6 +3287,35 @@ const renameRecordKey = <T,>(
     ]),
   ) as Record<string, T>;
 
+const defaultScopedReferenceForParameter = (
+  type: ParameterSource["type"],
+  parameterId: string,
+) =>
+  type === "componentConfig"
+    ? `component.${parameterId}`
+    : type === "productConfig"
+      ? `product.${parameterId}`
+      : type === "projectZone"
+        ? `projectZone.${parameterId}`
+        : null;
+
+const replaceParameterSourceReference = (
+  source: ParameterSource,
+  previousId: string,
+  nextId: string,
+) => {
+  if (source.type === "lookup") {
+    return replaceExpressionParameter(source.reference, previousId, nextId);
+  }
+  if (
+    source.reference &&
+    source.reference === defaultScopedReferenceForParameter(source.type, previousId)
+  ) {
+    return defaultScopedReferenceForParameter(source.type, nextId);
+  }
+  return source.reference;
+};
+
 const renameParameterReferences = (
   draft: Draft,
   previousId: string,
@@ -3308,14 +3337,11 @@ const renameParameterReferences = (
             previousId,
             nextId,
           ),
-          reference:
-            parameter.sourceDefinition.type === "lookup"
-              ? replaceExpressionParameter(
-                  parameter.sourceDefinition.reference,
-                  previousId,
-                  nextId,
-                )
-              : parameter.sourceDefinition.reference,
+          reference: replaceParameterSourceReference(
+            parameter.sourceDefinition,
+            previousId,
+            nextId,
+          ),
           dependencies: parameter.sourceDefinition.dependencies.map((id) =>
             id === previousId ? nextId : id,
           ),
@@ -3378,6 +3404,17 @@ const renameParameterReferences = (
   geometryRecipe: {
     ...draft.geometryRecipe,
     reviewed: false,
+    semanticFaces: draft.geometryRecipe.semanticFaces.map((face) => ({
+      ...face,
+      uStartExpression:
+        replaceExpressionParameter(face.uStartExpression, previousId, nextId) || "0",
+      uSpanExpression:
+        replaceExpressionParameter(face.uSpanExpression, previousId, nextId) || "0",
+      vStartExpression:
+        replaceExpressionParameter(face.vStartExpression, previousId, nextId) || "0",
+      vSpanExpression:
+        replaceExpressionParameter(face.vSpanExpression, previousId, nextId) || "0",
+    })),
     operations: draft.geometryRecipe.operations.map((operation) => ({
       ...operation,
       arguments: Object.fromEntries(
@@ -3417,6 +3454,17 @@ const renameParameterReferences = (
         value === previousId ? nextId : value,
       ]),
     ),
+    placement: {
+      ...rule.placement,
+      pitchExpression:
+        replaceExpressionParameter(rule.placement.pitchExpression, previousId, nextId) || "0",
+      startMarginExpression:
+        replaceExpressionParameter(rule.placement.startMarginExpression, previousId, nextId) || "0",
+      endMarginExpression:
+        replaceExpressionParameter(rule.placement.endMarginExpression, previousId, nextId) || "0",
+      maximumPitchExpression:
+        replaceExpressionParameter(rule.placement.maximumPitchExpression, previousId, nextId) || "0",
+    },
     argumentExpressions: Object.fromEntries(
       Object.entries(rule.argumentExpressions).map(([key, value]) => [
         key,
@@ -6875,7 +6923,7 @@ function GeometryStage({
     setRecipe({
       semanticFaces: [
         ...recipe.semanticFaces,
-        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-width / 2", uSpanExpression: "width", vStartExpression: "0", vSpanExpression: "length" },
+        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
       ],
     });
   const setSketch = (patch: Partial<Draft["sketch"]>) =>
