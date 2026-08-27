@@ -1,7 +1,4 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useLoader } from "@react-three/fiber";
-import { Bounds, Center, Grid, OrbitControls } from "@react-three/drei";
-import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import {
   Archive,
   ArrowRight,
@@ -51,6 +48,9 @@ import {
 import { api, toErrorNotice } from "./api";
 import type { ErrorNotice } from "./api/errors";
 import { WorkspaceShell } from "./components/layout/WorkspaceShell";
+import { CadViewer } from "./components/review/CadViewer";
+import { CheckList, Field, NumberInput, PanelTitle } from "./components/ui/FormParts";
+import { TemplateInfo } from "./features/stages/TemplateInfo";
 import {
   buildLineSnapCoincidentConstraints,
   DEFAULT_SKETCH_SNAP_OPTIONS,
@@ -1941,6 +1941,17 @@ function ParametricSketchCanvas({
   pendingRef.current = pending;
   pendingAnchorRef.current = pending.length === 1 ? pending[0] : null;
   useEffect(() => {
+    latestSketchRef.current = draft.sketch;
+    const lastLineId = polylineSessionRef.current?.lastLineId;
+    if (
+      lastLineId &&
+      !draft.sketch.entities.some((entity) => entity.id === lastLineId)
+    ) {
+      polylineSessionRef.current = null;
+      setPending([]);
+    }
+  }, [draft.sketch]);
+  useEffect(() => {
     setPending([]);
     polylineSessionRef.current = null;
     lineInferenceRef.current = null;
@@ -2658,6 +2669,27 @@ function ParametricSketchCanvas({
         endAngle: null,
         points: [],
       });
+      return;
+    }
+    if (tool === "polyline") {
+      const segmentNumber = (polylineSessionRef.current?.segmentIds.length || 0) + 1;
+      let constraintNumber = 0;
+      const createConstraintId = () =>
+        uid(`constraint.polyline.${segmentNumber}.${++constraintNumber}`);
+      const result = advanceSketchPolyline(
+        polylineSessionRef.current,
+        drawPoint,
+        latestSketchRef.current,
+        () => uid(`polyline.edge.${segmentNumber}`),
+        createConstraintId,
+      );
+      polylineSessionRef.current = result.session;
+      setPending(result.session ? [result.session.lastPoint] : []);
+      paintDrawCursor(null);
+      if (!result.accepted || !result.createdLineId) return;
+      if (result.beginUndo) beginEdit();
+      onSketch(result.sketch);
+      onSelect(result.createdLineId);
       return;
     }
     const needed = tool === "arc" ? 3 : 2;
@@ -4185,141 +4217,6 @@ function ParametricSketchCanvas({
   );
 }
 
-function Field({
-  label,
-  children,
-  hint,
-}: {
-  label: string;
-  children: React.ReactNode;
-  hint?: string;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-      {hint && <small>{hint}</small>}
-    </label>
-  );
-}
-function NumberInput({
-  value,
-  onChange,
-  unit = "mm",
-  min,
-  step = 0.01,
-  precision = 2,
-}: {
-  value: number | null | undefined;
-  onChange: (v: number) => void;
-  unit?: string;
-  min?: number;
-  step?: number;
-  /** Decimal places for display and commit; sketch defaults to 0.01. */
-  precision?: number;
-}) {
-  const roundValue = (numeric: number) => {
-    const factor = 10 ** precision;
-    return Math.round(numeric * factor) / factor;
-  };
-  const formatValue = (numeric: number) => roundValue(numeric).toFixed(precision);
-  const [textValue, setTextValue] = useState(
-    value == null || !Number.isFinite(Number(value))
-      ? ""
-      : formatValue(Number(value)),
-  );
-  const [focused, setFocused] = useState(false);
-  useEffect(() => {
-    if (!focused) {
-      setTextValue(
-        value == null || !Number.isFinite(Number(value))
-          ? ""
-          : formatValue(Number(value)),
-      );
-    }
-  }, [value, focused, precision]);
-  const accept = (raw: string) => {
-    setTextValue(raw);
-    const numeric = Number(raw);
-    if (raw.trim() !== "" && Number.isFinite(numeric))
-      onChange(roundValue(numeric));
-  };
-  return (
-    <div className="number-wrap">
-      <input
-        type="number"
-        value={textValue}
-        min={min}
-        step={step}
-        onFocus={() => setFocused(true)}
-        onChange={(e) => accept(e.target.value)}
-        onBlur={() => {
-          setFocused(false);
-          const numeric = Number(textValue);
-          if (textValue.trim() === "" || !Number.isFinite(numeric)) {
-            setTextValue(
-              value == null || !Number.isFinite(Number(value))
-                ? ""
-                : formatValue(Number(value)),
-            );
-            return;
-          }
-          const rounded = roundValue(numeric);
-          if (rounded !== value) onChange(rounded);
-          setTextValue(formatValue(rounded));
-        }}
-      />
-      <span>{unit}</span>
-    </div>
-  );
-}
-function PanelTitle({
-  icon: Icon,
-  title,
-  subtitle,
-  actions,
-}: {
-  icon: typeof Box;
-  title: string;
-  subtitle: string;
-  actions?: React.ReactNode;
-}) {
-  return (
-    <div className="panel-title">
-      <div className="title-icon">
-        <Icon size={18} />
-      </div>
-      <div>
-        <h2>{title}</h2>
-        <p>{subtitle}</p>
-      </div>
-      {actions && <div className="panel-actions">{actions}</div>}
-    </div>
-  );
-}
-function CheckList({ validation }: { validation: StageValidation | null }) {
-  if (!validation)
-    return (
-      <div className="empty-note">运行阶段检查后，在这里确认必填项与风险。</div>
-    );
-  return (
-    <div className="check-list">
-      {validation.checks.map((item) => (
-        <div
-          className={`check-item ${item.passed ? "pass" : item.severity}`}
-          key={item.id}
-        >
-          {item.passed ? <Check size={15} /> : <CircleAlert size={15} />}
-          <div>
-            <strong>{item.label}</strong>
-            {!item.passed && <span>{item.message}</span>}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 const GEOMETRIC_CONSTRAINTS = [
   ["coincident", "重合（单对首尾）"],
   ["horizontal", "水平（相对 X 轴）"],
@@ -4425,6 +4322,29 @@ const replaceExpressionParameter = (
     token === previousId ? nextId : token,
   ) ?? expression;
 
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const replaceExpressionAliasesWithParameterId = (
+  expression: string | null | undefined,
+  aliases: string[],
+  parameterId: string,
+) => {
+  let nextExpression = expression ?? "";
+  for (const alias of [...new Set(aliases.map((item) => item.trim()).filter(Boolean))]) {
+    if (alias === parameterId) continue;
+    if (/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) {
+      nextExpression = replaceExpressionParameter(nextExpression, alias, parameterId) || "";
+      continue;
+    }
+    nextExpression = nextExpression.replace(
+      new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(alias)}(?=$|[^A-Za-z0-9_])`, "g"),
+      (_match, prefix) => `${prefix}${parameterId}`,
+    );
+  }
+  return nextExpression;
+};
+
 const renameRecordKey = <T,>(
   record: Record<string, T>,
   previousId: string,
@@ -4436,6 +4356,203 @@ const renameRecordKey = <T,>(
       value,
     ]),
   ) as Record<string, T>;
+
+const defaultScopedReferenceForParameter = (
+  type: ParameterSource["type"],
+  parameterId: string,
+) =>
+  type === "componentConfig"
+    ? `component.${parameterId}`
+    : type === "productConfig"
+      ? `product.${parameterId}`
+      : type === "projectZone"
+        ? `projectZone.${parameterId}`
+        : null;
+
+const replaceParameterSourceReference = (
+  source: ParameterSource,
+  previousId: string,
+  nextId: string,
+) => {
+  if (source.type === "lookup") {
+    return replaceExpressionParameter(source.reference, previousId, nextId);
+  }
+  if (
+    source.reference &&
+    source.reference === defaultScopedReferenceForParameter(source.type, previousId)
+  ) {
+    return defaultScopedReferenceForParameter(source.type, nextId);
+  }
+  return source.reference;
+};
+
+const normalizeParameterAliasReferences = (
+  draft: Draft,
+  parameterId: string,
+  aliases: string[],
+): Draft => ({
+  ...draft,
+  parameterDefinitions: draft.parameterDefinitions.map((parameter) => ({
+    ...parameter,
+    sourceDefinition: parameter.sourceDefinition
+      ? {
+          ...parameter.sourceDefinition,
+          expression: replaceExpressionAliasesWithParameterId(
+            parameter.sourceDefinition.expression,
+            aliases,
+            parameterId,
+          ),
+          reference:
+            parameter.sourceDefinition.type === "lookup"
+              ? replaceExpressionAliasesWithParameterId(
+                  parameter.sourceDefinition.reference,
+                  aliases,
+                  parameterId,
+                )
+              : parameter.sourceDefinition.reference,
+        }
+      : parameter.sourceDefinition,
+  })),
+  blank: {
+    ...draft.blank,
+    lengthExpression: replaceExpressionAliasesWithParameterId(
+      draft.blank.lengthExpression,
+      aliases,
+      parameterId,
+    ),
+    widthExpression: replaceExpressionAliasesWithParameterId(
+      draft.blank.widthExpression,
+      aliases,
+      parameterId,
+    ),
+    thicknessExpression: replaceExpressionAliasesWithParameterId(
+      draft.blank.thicknessExpression,
+      aliases,
+      parameterId,
+    ),
+  },
+  sketch: {
+    ...draft.sketch,
+    constraints: draft.sketch.constraints.map((constraint) => ({
+      ...constraint,
+      expression: replaceExpressionAliasesWithParameterId(
+        constraint.expression,
+        aliases,
+        parameterId,
+      ),
+    })),
+  },
+  geometryRecipe: {
+    ...draft.geometryRecipe,
+    semanticFaces: draft.geometryRecipe.semanticFaces.map((face) => ({
+      ...face,
+      uStartExpression: replaceExpressionAliasesWithParameterId(
+        face.uStartExpression,
+        aliases,
+        parameterId,
+      ),
+      uSpanExpression: replaceExpressionAliasesWithParameterId(
+        face.uSpanExpression,
+        aliases,
+        parameterId,
+      ),
+      vStartExpression: replaceExpressionAliasesWithParameterId(
+        face.vStartExpression,
+        aliases,
+        parameterId,
+      ),
+      vSpanExpression: replaceExpressionAliasesWithParameterId(
+        face.vSpanExpression,
+        aliases,
+        parameterId,
+      ),
+    })),
+    operations: draft.geometryRecipe.operations.map((operation) => ({
+      ...operation,
+      arguments: Object.fromEntries(
+        Object.entries(operation.arguments).map(([key, value]) => [
+          key,
+          typeof value === "string"
+            ? replaceExpressionAliasesWithParameterId(value, aliases, parameterId)
+            : value,
+        ]),
+      ),
+      argumentExpressions: Object.fromEntries(
+        Object.entries(operation.argumentExpressions).map(([key, value]) => [
+          key,
+          replaceExpressionAliasesWithParameterId(value, aliases, parameterId),
+        ]),
+      ),
+      conditionExpression: replaceExpressionAliasesWithParameterId(
+        operation.conditionExpression,
+        aliases,
+        parameterId,
+      ),
+    })),
+  },
+  featureRules: draft.featureRules.map((rule) => ({
+    ...rule,
+    conditionExpression: replaceExpressionAliasesWithParameterId(
+      rule.conditionExpression,
+      aliases,
+      parameterId,
+    ),
+    countExpression: replaceExpressionAliasesWithParameterId(
+      rule.countExpression,
+      aliases,
+      parameterId,
+    ),
+    arguments: Object.fromEntries(
+      Object.entries(rule.arguments).map(([key, value]) => [
+        key,
+        typeof value === "string"
+          ? replaceExpressionAliasesWithParameterId(value, aliases, parameterId)
+          : value,
+      ]),
+    ),
+    placement: {
+      ...rule.placement,
+      pitchExpression: replaceExpressionAliasesWithParameterId(
+        rule.placement.pitchExpression,
+        aliases,
+        parameterId,
+      ),
+      startMarginExpression: replaceExpressionAliasesWithParameterId(
+        rule.placement.startMarginExpression,
+        aliases,
+        parameterId,
+      ),
+      endMarginExpression: replaceExpressionAliasesWithParameterId(
+        rule.placement.endMarginExpression,
+        aliases,
+        parameterId,
+      ),
+      maximumPitchExpression: replaceExpressionAliasesWithParameterId(
+        rule.placement.maximumPitchExpression,
+        aliases,
+        parameterId,
+      ),
+    },
+    argumentExpressions: Object.fromEntries(
+      Object.entries(rule.argumentExpressions).map(([key, value]) => [
+        key,
+        replaceExpressionAliasesWithParameterId(value, aliases, parameterId),
+      ]),
+    ),
+    polygonVertices: rule.polygonVertices.map((vertex) => ({
+      uExpression: replaceExpressionAliasesWithParameterId(
+        vertex.uExpression,
+        aliases,
+        parameterId,
+      ),
+      vExpression: replaceExpressionAliasesWithParameterId(
+        vertex.vExpression,
+        aliases,
+        parameterId,
+      ),
+    })),
+  })),
+});
 
 const renameParameterReferences = (
   draft: Draft,
@@ -4458,14 +4575,11 @@ const renameParameterReferences = (
             previousId,
             nextId,
           ),
-          reference:
-            parameter.sourceDefinition.type === "lookup"
-              ? replaceExpressionParameter(
-                  parameter.sourceDefinition.reference,
-                  previousId,
-                  nextId,
-                )
-              : parameter.sourceDefinition.reference,
+          reference: replaceParameterSourceReference(
+            parameter.sourceDefinition,
+            previousId,
+            nextId,
+          ),
           dependencies: parameter.sourceDefinition.dependencies.map((id) =>
             id === previousId ? nextId : id,
           ),
@@ -4528,6 +4642,17 @@ const renameParameterReferences = (
   geometryRecipe: {
     ...draft.geometryRecipe,
     reviewed: false,
+    semanticFaces: draft.geometryRecipe.semanticFaces.map((face) => ({
+      ...face,
+      uStartExpression:
+        replaceExpressionParameter(face.uStartExpression, previousId, nextId) || "0",
+      uSpanExpression:
+        replaceExpressionParameter(face.uSpanExpression, previousId, nextId) || "0",
+      vStartExpression:
+        replaceExpressionParameter(face.vStartExpression, previousId, nextId) || "0",
+      vSpanExpression:
+        replaceExpressionParameter(face.vSpanExpression, previousId, nextId) || "0",
+    })),
     operations: draft.geometryRecipe.operations.map((operation) => ({
       ...operation,
       arguments: Object.fromEntries(
@@ -4567,6 +4692,17 @@ const renameParameterReferences = (
         value === previousId ? nextId : value,
       ]),
     ),
+    placement: {
+      ...rule.placement,
+      pitchExpression:
+        replaceExpressionParameter(rule.placement.pitchExpression, previousId, nextId) || "0",
+      startMarginExpression:
+        replaceExpressionParameter(rule.placement.startMarginExpression, previousId, nextId) || "0",
+      endMarginExpression:
+        replaceExpressionParameter(rule.placement.endMarginExpression, previousId, nextId) || "0",
+      maximumPitchExpression:
+        replaceExpressionParameter(rule.placement.maximumPitchExpression, previousId, nextId) || "0",
+    },
     argumentExpressions: Object.fromEntries(
       Object.entries(rule.argumentExpressions).map(([key, value]) => [
         key,
@@ -6704,6 +6840,9 @@ export default function App() {
                 update={update}
                 registry={registry}
                 showError={showError}
+                profileModeSketch={profileModeSketch}
+                operatorDefaults={operatorDefaults}
+                semanticParameterIds={semanticParameterIds}
               />
             )}
             {stage === "material" && (
@@ -6772,380 +6911,6 @@ export default function App() {
           </aside>
         </div>
     </WorkspaceShell>
-  );
-}
-
-function TemplateInfo({
-  draft,
-  change,
-  update,
-  registry,
-  showError,
-}: {
-  draft: Draft;
-  change: (d: Draft) => void;
-  update: <K extends keyof Draft>(k: K, v: Draft[K]) => void;
-  registry: TemplateAuthoringRegistry | null;
-  showError: (error: unknown) => void;
-}) {
-  const [attachmentBusy, setAttachmentBusy] = useState("");
-  const classification = draft.manufacturingClassification;
-  const setClassification = (
-    patch: Partial<Draft["manufacturingClassification"]>,
-  ) =>
-    change({
-      ...draft,
-      manufacturingClassification: {
-        ...classification,
-        ...patch,
-        reviewed: false,
-      },
-    });
-  const selectPrototype = (prototypeId: string) => {
-    const prototype = registry?.geometryPrototypes.find(
-      (item) => item.id === prototypeId,
-    );
-    if (!prototype) {
-      update("geometryPrototypeId", prototypeId);
-      return;
-    }
-    const first = draft.geometryRecipe.operations[0];
-    const operator =
-      prototype.operator === "sketch.centerline_thinwall_extrude"
-        ? "sketch.region_extrude"
-        : prototype.operator;
-    const defaults = operatorDefaults(operator);
-    const operation = first
-      ? {
-          ...first,
-          operator,
-          ...defaults,
-        }
-      : {
-          id: "body.main",
-          operator,
-          ...defaults,
-          conditionExpression: "True",
-          semanticOutputs: ["part.body", "part.referenceFrame"],
-        };
-    const profileParameters = prototype.drivingParameters.filter(
-      (id) => id !== "length" && id !== "height",
-    );
-    const sketch = {
-      ...draft.sketch,
-      profileMode:
-        prototypeId === "prototype.closedProfile"
-          ? ("multiRegion" as const)
-          : prototypeId === "prototype.openThinWallProfile"
-            ? ("centerlineThinWall" as const)
-          : draft.sketch.profileMode,
-      drivingParameters: profileParameters,
-      constraintsReviewed: false,
-    };
-    change({
-      ...draft,
-      geometryPrototypeId: prototypeId,
-      sketch:
-        prototypeId === "prototype.closedProfile" ||
-        prototypeId === "prototype.openThinWallProfile"
-          ? profileModeSketch(
-              sketch.profileMode,
-              sketch,
-              semanticParameterIds(draft),
-            )
-          : sketch,
-      geometryRecipe: {
-        ...draft.geometryRecipe,
-        constructionMode:
-          prototype.constructionMode as GeometryRecipe["constructionMode"],
-        operations: [operation, ...draft.geometryRecipe.operations.slice(1)],
-        reviewed: false,
-      },
-    });
-  };
-  return (
-    <>
-      <div className="panel">
-        <PanelTitle
-          icon={ClipboardCheck}
-          title="模板身份"
-          subtitle="编码和名称负责业务身份；制造分类与几何原型由受控注册表提供。"
-          actions={
-            <span className="registry-version">
-              注册表 {registry?.version || "加载中"}
-            </span>
-          }
-        />
-        <div className="form-grid two">
-          <Field label="模板编码">
-            <input
-              value={draft.code}
-              onChange={(e) => update("code", e.target.value.toUpperCase())}
-            />
-          </Field>
-          <Field label="模板名称">
-            <input
-              value={draft.name}
-              onChange={(e) => update("name", e.target.value)}
-            />
-          </Field>
-          <Field label="负责人">
-            <input
-              value={draft.owner}
-              onChange={(e) => update("owner", e.target.value)}
-            />
-          </Field>
-          <Field label="组织">
-            <input
-              value={draft.organization}
-              onChange={(e) => update("organization", e.target.value)}
-            />
-          </Field>
-        </div>
-        <Field label="检索标签" hint="使用逗号分隔，可包含业务叫法和制造分类">
-          <input
-            value={draft.tags.join(", ")}
-            onChange={(e) => update("tags", csv(e.target.value))}
-          />
-        </Field>
-      </div>
-      <div className="panel">
-        <PanelTitle
-          icon={Hammer}
-          title="单体制造分类"
-          subtitle="当前生成器只生成最终为一个连续实体的零部件；来源和制造工艺用于筛选算子与可制造性规则。"
-        />
-        <div className="scope-banner">
-          <CheckCircle2 size={16} />
-          <span>
-            <strong>模板类型：单体零部件</strong>
-            <small>
-              一个毛坯经成形、去除材料和表面处理形成；焊接组合体和可拆装组件不在当前平台建模。
-            </small>
-          </span>
-        </div>
-        <div className="form-grid two">
-          <Field label="零部件来源">
-            <select
-              value={classification.originId}
-              onChange={(e) => setClassification({ originId: e.target.value })}
-            >
-              {registry?.origins
-                .filter((x) => x.enabled)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Field label="主成形工艺">
-            <select
-              value={classification.primaryProcessId}
-              onChange={(e) =>
-                setClassification({ primaryProcessId: e.target.value })
-              }
-            >
-              {registry?.primaryProcesses
-                .filter((x) => x.enabled)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        </div>
-        <Field label="后续工序（可多选）">
-          <div className="process-grid">
-            {registry?.secondaryProcesses
-              .filter((x) => x.enabled)
-              .map((item) => (
-                <label
-                  className={
-                    classification.secondaryProcessIds.includes(item.id)
-                      ? "selected"
-                      : ""
-                  }
-                  key={item.id}
-                >
-                  <input
-                    type="checkbox"
-                    checked={classification.secondaryProcessIds.includes(
-                      item.id,
-                    )}
-                    onChange={(e) =>
-                      setClassification({
-                        secondaryProcessIds: e.target.checked
-                          ? [...classification.secondaryProcessIds, item.id]
-                          : classification.secondaryProcessIds.filter(
-                              (id) => id !== item.id,
-                            ),
-                      })
-                    }
-                  />
-                  {item.label}
-                </label>
-              ))}
-          </div>
-        </Field>
-        <label className="confirm-box">
-          <input
-            type="checkbox"
-            checked={classification.reviewed}
-            onChange={(e) =>
-              change({
-                ...draft,
-                manufacturingClassification: {
-                  ...classification,
-                  reviewed: e.target.checked,
-                },
-              })
-            }
-          />
-          <span>
-            <strong>制造分类与单体范围已由工程师确认</strong>
-            <small>确认该模板不包含焊接子件、装配子件或多个独立实体。</small>
-          </span>
-        </label>
-      </div>
-      <div className="panel">
-        <PanelTitle
-          icon={Box}
-          title="初始几何原型"
-          subtitle="原型只建立可编辑的初始草图和几何配方，不限制最终形状。"
-        />
-        <div className="prototype-grid">
-          {registry?.geometryPrototypes
-            .filter((x) => x.enabled)
-            .map((item) => (
-              <button
-                key={item.id}
-                className={
-                  draft.geometryPrototypeId === item.id ? "active" : ""
-                }
-                onClick={() => selectPrototype(item.id)}
-              >
-                <div>
-                  <strong>{item.label}</strong>
-                  <span
-                    className={`capability-badge ${item.implementationStatus}`}
-                  >
-                    {item.implementationStatus === "available"
-                      ? "可直接编译"
-                      : item.implementationStatus === "configurable"
-                        ? "需配置配方"
-                        : "规划中"}
-                  </span>
-                </div>
-                <p>{item.description}</p>
-                <code>{item.constructionMode}</code>
-              </button>
-            ))}
-        </div>
-        <div className="prototype-note">
-          <CircleAlert size={14} />
-          <span>
-            切换原型会重置基体首个算子和草图驱动参数，但不会删除制造规则、接口或变体；完成详细建模后不建议再次切换。
-          </span>
-        </div>
-      </div>
-      <div className="panel">
-        <PanelTitle
-          icon={MessageSquareText}
-          title="设计意图"
-          subtitle="说明它是什么、用于哪里、必须保持什么；不在这里硬编码几何。"
-        />
-        <Field label="用途说明">
-          <textarea
-            rows={3}
-            value={draft.description}
-            onChange={(e) => update("description", e.target.value)}
-          />
-        </Field>
-        <Field label="设计约束与可变范围">
-          <textarea
-            rows={5}
-            value={draft.designIntent}
-            onChange={(e) => update("designIntent", e.target.value)}
-          />
-        </Field>
-      </div>
-      <div className="panel">
-        <PanelTitle
-          icon={FileImage}
-          title="证据与参考"
-          subtitle="图片、图纸、标准和样件作为工程参考与追溯依据，不直接成为权威几何。"
-        />
-        <label className="upload-zone">
-          <Upload />
-          <strong>{attachmentBusy ? "正在上传证据…" : "添加多张图片、图纸或已有 CAD"}</strong>
-          <span>可一次选择多个文件 · PNG / JPG / WEBP / PDF / DXF / STEP · 单文件不超过 20 MB</span>
-          <input
-            type="file"
-            multiple
-            disabled={!!attachmentBusy}
-            onChange={async (e) => {
-              const files = Array.from(e.target.files || []);
-              e.currentTarget.value = "";
-              if (!files.length || !draft.id) return;
-              setAttachmentBusy(`0/${files.length}`);
-              try {
-                let saved = draft;
-                for (let index = 0; index < files.length; index += 1) {
-                  const file = files[index];
-                  const image = ["image/png", "image/jpeg", "image/webp"].includes(file.type);
-                  saved = await api.uploadAttachment(draft.id, file, image ? "referenceImage" : "drawing");
-                  setAttachmentBusy(`${index + 1}/${files.length}`);
-                }
-                change(saved);
-              } catch (error) {
-                showError(error);
-              } finally {
-                setAttachmentBusy("");
-              }
-            }}
-          />
-        </label>
-        {!!draft.attachments.length && (
-          <div className="evidence-summary">
-            <strong>{draft.attachments.length} 项证据</strong>
-            <span>为每项证据补充说明，便于工程复核与追溯</span>
-          </div>
-        )}
-        {draft.attachments.map((a) => (
-          <div className="asset-row evidence-asset" key={a.id}>
-            <div className="evidence-preview">
-              {a.mediaType.startsWith("image/") ? <img src={a.url} alt={a.description || a.filename} loading="lazy" /> : <FileImage />}
-            </div>
-            <div className="evidence-fields">
-              <div className="evidence-file-heading"><strong>{a.filename}</strong><span>{(a.size / 1024).toFixed(1)} KB · {a.kind}</span></div>
-              <label>图片／证据说明
-                <textarea
-                  rows={2}
-                  value={a.description || ""}
-                  placeholder="例如：主视图，已知总宽 90 mm；红框处为连接孔。"
-                  onChange={(event) => change({...draft, attachments:draft.attachments.map((item) => item.id === a.id ? {...item,description:event.target.value} : item)})}
-                  onBlur={async (event) => {
-                    if (!draft.id) return;
-                    try { change(await api.updateAttachment(draft.id, a.id, {description:event.target.value,kind:a.kind})); }
-                    catch (error) { showError(error); }
-                  }}
-                />
-              </label>
-            </div>
-            <button className="asset-delete" aria-label={`删除附件 ${a.filename}`}
-              onClick={async () => {
-                if (!draft.id) return;
-                try { change(await api.removeAttachment(draft.id, a.id)); }
-                catch (error) { showError(error); }
-              }}>
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -8034,7 +7799,7 @@ function GeometryStage({
     setRecipe({
       semanticFaces: [
         ...recipe.semanticFaces,
-        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-width / 2", uSpanExpression: "width", vStartExpression: "0", vSpanExpression: "length" },
+        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
       ],
     });
   const setSketch = (patch: Partial<Draft["sketch"]>) =>
@@ -9868,6 +9633,25 @@ function RulesStage({
           : parameter,
       ),
     });
+  const editParameterDisplayName = (parameter: ParameterDefinition, displayName: string) => {
+    const normalized = normalizeParameterAliasReferences(draft, parameter.id, [
+      parameter.displayName || "",
+      parameter.label || "",
+    ]);
+    change({
+      ...normalized,
+      parameterDefinitions: normalized.parameterDefinitions.map((item) =>
+        item.id === parameter.id
+          ? {
+              ...item,
+              label: displayName,
+              displayName,
+              ...(item.declaredInRuleStage ? { contractReady: false } : {}),
+            }
+          : item,
+      ),
+    });
+  };
   const renameRuleParameter = (previousId: string, rawNextId: string) => {
     const nextId = rawNextId.trim();
     if (nextId === previousId) return true;
@@ -10324,10 +10108,7 @@ function RulesStage({
                     <input
                       value={parameter.displayName || parameter.label}
                       onChange={(event) =>
-                        editParameter(parameter.id, {
-                          label: event.target.value,
-                          displayName: event.target.value,
-                        })
+                        editParameterDisplayName(parameter, event.target.value)
                       }
                     />
                   </Field>
@@ -10741,6 +10522,25 @@ function ContractStage({
           : p,
       ),
     });
+  const editParamDisplayName = (parameter: ParameterDefinition, displayName: string) => {
+    const normalized = normalizeParameterAliasReferences(draft, parameter.id, [
+      parameter.displayName || "",
+      parameter.label || "",
+    ]);
+    change({
+      ...normalized,
+      parameterDefinitions: normalized.parameterDefinitions.map((item) =>
+        item.id === parameter.id
+          ? {
+              ...item,
+              label: displayName,
+              displayName,
+              ...(item.declaredInRuleStage ? { contractReady: true } : {}),
+            }
+          : item,
+      ),
+    });
+  };
   const renameParam = (previousId: string, rawNextId: string) => {
     const nextId = rawNextId.trim();
     if (nextId === previousId) return true;
@@ -10915,10 +10715,7 @@ function ContractStage({
                     <input
                       value={p.displayName || p.label}
                       onChange={(e) =>
-                        editParam(i, {
-                          label: e.target.value,
-                          displayName: e.target.value,
-                        })
+                        editParamDisplayName(p, e.target.value)
                       }
                     />
                   </Field>

@@ -184,8 +184,8 @@ class SemanticFaceDefinition(BaseModel):
     label: str
     hostFrame: Literal["negativeY", "positiveY", "negativeX", "positiveX", "negativeZ", "positiveZ"]
     sourceOperationId: str = "body.main"
-    uStartExpression: str = "-width / 2"
-    uSpanExpression: str = "width"
+    uStartExpression: str = "-sectionWidth / 2"
+    uSpanExpression: str = "sectionWidth"
     vStartExpression: str = "0"
     vSpanExpression: str = "length"
 
@@ -200,12 +200,12 @@ class GeometryRecipe(BaseModel):
     paths: list[str] = Field(default_factory=list)
     operations: list[GeometryOperationDefinition] = Field(default_factory=list)
     semanticFaces: list[SemanticFaceDefinition] = Field(default_factory=lambda: [
-        SemanticFaceDefinition(id="part.face.front", label="前侧面", hostFrame="negativeY", uStartExpression="-width / 2", uSpanExpression="width", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.back", label="后侧面", hostFrame="positiveY", uStartExpression="-width / 2", uSpanExpression="width", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.left", label="左侧面", hostFrame="negativeX", uStartExpression="-depth / 2", uSpanExpression="depth", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.right", label="右侧面", hostFrame="positiveX", uStartExpression="-depth / 2", uSpanExpression="depth", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.endFace.start", label="起始端面", hostFrame="negativeZ", uStartExpression="-width / 2", uSpanExpression="width", vStartExpression="-depth / 2", vSpanExpression="depth"),
-        SemanticFaceDefinition(id="part.endFace.end", label="终止端面", hostFrame="positiveZ", uStartExpression="-width / 2", uSpanExpression="width", vStartExpression="-depth / 2", vSpanExpression="depth"),
+        SemanticFaceDefinition(id="part.face.front", label="前侧面", hostFrame="negativeY", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.back", label="后侧面", hostFrame="positiveY", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.left", label="左侧面", hostFrame="negativeX", uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.right", label="右侧面", hostFrame="positiveX", uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.endFace.start", label="起始端面", hostFrame="negativeZ", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
+        SemanticFaceDefinition(id="part.endFace.end", label="终止端面", hostFrame="positiveZ", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
     ])
     reviewed: bool = False
 

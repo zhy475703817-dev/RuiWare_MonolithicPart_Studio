@@ -12,6 +12,84 @@ from .sketch_solver import solve_semantic_sketch
 STAGE_ORDER: tuple[StageName, ...] = ("templateInfo", "material", "baseSketch", "features", "variants", "review", "admission")
 
 
+def _collect_expression_names(expressions: list[str]) -> tuple[set[str], bool]:
+    names: set[str] = set()
+    syntax_valid = True
+    for expression in expressions:
+        try:
+            names |= expression_names(expression)
+        except RuleEvaluationError:
+            syntax_valid = False
+    return names, syntax_valid
+
+
+def _parameter_aliases(draft: TemplateDraft) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for parameter in draft.parameterDefinitions:
+        names = {
+            parameter.id,
+            parameter.label,
+            parameter.displayName or "",
+            *(parameter.aliases or []),
+        }
+        for alias in names:
+            alias = alias.strip()
+            if alias and alias != parameter.id:
+                aliases[alias] = parameter.id
+    return aliases
+
+
+def _expression_alias_violations(
+    expressions: list[tuple[str, str]],
+    draft: TemplateDraft,
+) -> tuple[list[tuple[str, str, str]], bool]:
+    alias_map = _parameter_aliases(draft)
+    parameter_ids = {item.id for item in draft.parameterDefinitions}
+    violations: list[tuple[str, str, str]] = []
+    syntax_valid = True
+    for path, expression in expressions:
+        try:
+            names = expression_names(expression)
+        except RuleEvaluationError:
+            syntax_valid = False
+            continue
+        for name in sorted(names):
+            if name in parameter_ids:
+                continue
+            parameter_id = alias_map.get(name)
+            if parameter_id:
+                violations.append((path, name, parameter_id))
+    return violations, syntax_valid
+
+
+def _alias_violation_message(violations: list[tuple[str, str, str]]) -> str:
+    items = [f"{path} 使用了“{name}”，请改为参数 ID “{parameter_id}”" for path, name, parameter_id in violations]
+    return "；".join(items)
+
+
+def _geometry_parameter_references(draft: TemplateDraft) -> tuple[set[str], bool]:
+    expressions: list[str] = []
+    for operation in draft.geometryRecipe.operations:
+        expressions.extend([*operation.argumentExpressions.values(), operation.conditionExpression])
+        for structured_name in ("pathPoints", "stations"):
+            structured = operation.arguments.get(structured_name)
+            if isinstance(structured, str):
+                expressions.extend(
+                    component.strip()
+                    for row in structured.split(";")
+                    for component in row.split(":")
+                    if component.strip()
+                )
+    for face in draft.geometryRecipe.semanticFaces:
+        expressions.extend([
+            face.uStartExpression,
+            face.uSpanExpression,
+            face.vStartExpression,
+            face.vSpanExpression,
+        ])
+    return _collect_expression_names(expressions)
+
+
 def _validation(stage: StageName, checks: list[StageCheck]) -> StageValidation:
     blocking = [item for item in checks if item.severity == "error"]
     progress = round(sum(item.passed for item in blocking) / len(blocking) * 100) if blocking else 100
@@ -69,6 +147,14 @@ def validate_material(draft: TemplateDraft, sample_contexts: list[dict[str, Any]
             blank_expression_unknown |= expression_names(expression) - declared_parameters
         except RuleEvaluationError:
             blank_expressions_valid = False
+    blank_alias_violations, _ = _expression_alias_violations(
+        [
+            ("blank.lengthExpression", draft.blank.lengthExpression),
+            ("blank.widthExpression", draft.blank.widthExpression),
+            ("blank.thicknessExpression", draft.blank.thicknessExpression),
+        ],
+        draft,
+    )
     checks = [
         StageCheck(id="material-requirement", label="材料需求已定义", passed=requirement_complete, severity="error", path="materialRequirements", message="请定义材料类别、厚度约束并人工确认。"),
         StageCheck(id="thickness-domain", label="有效厚度域可求解", passed=not thickness_domain["empty"], severity="error", path="materialRequirements.0.thickness", message="允许厚度值与厚度上下限没有交集，请调整厚度约束。"),
@@ -81,6 +167,7 @@ def validate_material(draft: TemplateDraft, sample_contexts: list[dict[str, Any]
         StageCheck(id="blank-form", label="制造起始毛坯已定义", passed=bool(draft.blank.form), severity="error", path="blank.form", message="请选择制造过程开始时的毛坯形态。"),
         StageCheck(id="blank-preparation", label="毛坯准备关系完整", passed=blank_preparation_ok, severity="error", path="blank.preparationProcesses", message="选择独立毛坯时必须定义至少一道准备工序。"),
         StageCheck(id="blank-expressions", label="毛坯尺寸表达式有效", passed=blank_expressions_valid and not blank_expression_unknown, severity="error", path="blank", message=f"毛坯尺寸只能引用已声明参数：{', '.join(sorted(blank_expression_unknown)) or '请检查表达式语法'}。"),
+        StageCheck(id="blank-expression-id-only", label="毛坯表达式仅使用参数ID", passed=not blank_alias_violations, severity="error", path="blank", message=_alias_violation_message(blank_alias_violations) or "毛坯表达式仅可使用参数稳定 ID。"),
         StageCheck(id="route", label="制造路线已定义", passed=bool(draft.blank.manufacturingRoute), severity="error", path="blank.manufacturingRoute", message="请选择主要制造路线。"),
         StageCheck(id="material-drift", label="材料来源无漂移", passed=not drifted, severity="warning", path="materialValidationSamples", message="引用样例材料已变化；发布前应重新确认或改为冻结快照。"),
     ]
@@ -88,28 +175,30 @@ def validate_material(draft: TemplateDraft, sample_contexts: list[dict[str, Any]
 
 
 def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
-    required: set[str] = set()
-    expression_syntax_valid = True
-    for operation in draft.geometryRecipe.operations:
-        expressions = [*operation.argumentExpressions.values(), operation.conditionExpression]
-        for structured_name in ("pathPoints", "stations"):
-            structured = operation.arguments.get(structured_name)
-            if isinstance(structured, str):
-                expressions.extend(
-                    component.strip()
-                    for row in structured.split(";")
-                    for component in row.split(":")
-                    if component.strip()
-                )
-        for expression in expressions:
-            try:
-                required |= expression_names(expression)
-            except RuleEvaluationError:
-                expression_syntax_valid = False
-    declared = set(draft.sketch.drivingParameters)
+    required, expression_syntax_valid = _geometry_parameter_references(draft)
     known_parameters = {item.id for item in draft.parameterDefinitions}
     expressions_valid = expression_syntax_valid and required <= known_parameters
     missing = required - known_parameters
+    base_sketch_expressions: list[tuple[str, str]] = []
+    for operation in draft.geometryRecipe.operations:
+        for name, expression in operation.argumentExpressions.items():
+            base_sketch_expressions.append((f"geometryRecipe.operations.{operation.id}.{name}", expression))
+        base_sketch_expressions.append((f"geometryRecipe.operations.{operation.id}.conditionExpression", operation.conditionExpression))
+        for structured_name in ("pathPoints", "stations"):
+            structured = operation.arguments.get(structured_name)
+            if isinstance(structured, str):
+                base_sketch_expressions.append((f"geometryRecipe.operations.{operation.id}.{structured_name}", structured))
+    for face in draft.geometryRecipe.semanticFaces:
+        base_sketch_expressions.extend([
+            (f"geometryRecipe.semanticFaces.{face.id}.uStartExpression", face.uStartExpression),
+            (f"geometryRecipe.semanticFaces.{face.id}.uSpanExpression", face.uSpanExpression),
+            (f"geometryRecipe.semanticFaces.{face.id}.vStartExpression", face.vStartExpression),
+            (f"geometryRecipe.semanticFaces.{face.id}.vSpanExpression", face.vSpanExpression),
+        ])
+    for constraint in draft.sketch.constraints:
+        if constraint.expression:
+            base_sketch_expressions.append((f"sketch.constraints.{constraint.id}.expression", constraint.expression))
+    base_sketch_alias_violations, _ = _expression_alias_violations(base_sketch_expressions, draft)
     source_ok = (
         draft.sketch.acquisitionMethod not in {"imported", "reused"}
         or bool(draft.sketch.sourceAttachmentId or draft.sketch.sourceProfileId)
@@ -164,12 +253,39 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="geometry-recipe", label="基础几何配方已建立", passed=bool(draft.geometryRecipe.operations), severity="error", path="geometryRecipe.operations", message="基础几何必须至少包含一个拉伸、旋转、扫掠、放样、钣金或派生操作。"),
         StageCheck(id="geometry-operators-supported", label="几何算子均已实现", passed=operators_supported, severity="error", path="geometryRecipe.operations", message="当前配方包含CAD内核尚未实现的算子。"),
         StageCheck(id="geometry-operator-inputs", label="几何算子输入完整", passed=operator_inputs_ok, severity="error", path="geometryRecipe.operations", message="；".join(operator_input_messages) or "算子输入完整。"),
-        StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed or draft.sketch.constraintsReviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
+        StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
+        StageCheck(id="geometry-expressions-id-only", label="几何表达式仅使用参数ID", passed=not base_sketch_alias_violations, severity="error", path="geometryRecipe", message=_alias_violation_message(base_sketch_alias_violations) or "几何表达式仅可使用参数稳定 ID。"),
     ]
     return _validation("baseSketch", checks)
 
 
 def validate_features(draft: TemplateDraft) -> StageValidation:
+    feature_expressions: list[tuple[str, str]] = []
+    for parameter in draft.parameterDefinitions:
+        source = parameter.sourceDefinition
+        if source and source.type == "formula" and source.expression:
+            feature_expressions.append((f"parameterDefinitions.{parameter.id}.sourceDefinition.expression", source.expression))
+        if source and source.type == "lookup" and source.reference:
+            feature_expressions.append((f"parameterDefinitions.{parameter.id}.sourceDefinition.reference", source.reference))
+    for rule in draft.featureRules:
+        feature_expressions.extend([
+            (f"featureRules.{rule.id}.conditionExpression", rule.conditionExpression),
+            (f"featureRules.{rule.id}.countExpression", rule.countExpression),
+        ])
+        for name, expression in rule.argumentExpressions.items():
+            feature_expressions.append((f"featureRules.{rule.id}.argumentExpressions.{name}", expression))
+        feature_expressions.extend([
+            (f"featureRules.{rule.id}.placement.pitchExpression", rule.placement.pitchExpression),
+            (f"featureRules.{rule.id}.placement.startMarginExpression", rule.placement.startMarginExpression),
+            (f"featureRules.{rule.id}.placement.endMarginExpression", rule.placement.endMarginExpression),
+            (f"featureRules.{rule.id}.placement.maximumPitchExpression", rule.placement.maximumPitchExpression),
+        ])
+        for index, vertex in enumerate(rule.polygonVertices, start=1):
+            feature_expressions.extend([
+                (f"featureRules.{rule.id}.polygonVertices.{index}.uExpression", vertex.uExpression),
+                (f"featureRules.{rule.id}.polygonVertices.{index}.vExpression", vertex.vExpression),
+            ])
+    feature_alias_violations, _ = _expression_alias_violations(feature_expressions, draft)
     evaluation = evaluate_template(
         draft.parameterDefinitions, draft.featureRules,
         semantic_faces=draft.geometryRecipe.semanticFaces,
@@ -180,6 +296,7 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="feature-review", label="制造特征规则已确认", passed=draft.featureRulesReviewed, severity="error", path="featureRulesReviewed", message="即使零件没有制造特征，也需确认规则集合为空。"),
         StageCheck(id="feature-count", label="制造特征规则已建立", passed=len(draft.featureRules) > 0, severity="warning", path="featureRules", message="当前为无制造特征零件。"),
         StageCheck(id="feature-rules", label="制造特征规则可求值", passed=rule_ok, severity="error", path="featureRules", message="特征数量、条件或坐标表达式无法安全求值。"),
+        StageCheck(id="feature-expressions-id-only", label="规则表达式仅使用参数ID", passed=not feature_alias_violations, severity="error", path="featureRules", message=_alias_violation_message(feature_alias_violations) or "规则表达式仅可使用参数稳定 ID。"),
         StageCheck(id="resolved-rule-set", label="规则解析结果已检查", passed=not draft.featureRules or len(evaluation.features) > 0, severity="warning", path="featureRules", message="当前标称参数下，特征规则生成了空集合。"),
     ]
     return _validation("features", checks)
@@ -187,6 +304,7 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
 
 def validate_variants(draft: TemplateDraft) -> StageValidation:
     ids = [item.id for item in draft.parameterDefinitions]
+    parameter_ids = set(ids)
     variant_ids = [item.id for item in draft.variants]
     override_keys = {key for item in draft.variants for key in item.overrides}
     try:
@@ -199,21 +317,56 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         not item.declaredInRuleStage or item.contractReady
         for item in draft.parameterDefinitions
     )
-    geometry_references: set[str] = set()
-    geometry_expressions_valid = True
-    for operation in draft.geometryRecipe.operations:
-        for expression in [*operation.argumentExpressions.values(), operation.conditionExpression]:
-            try:
-                geometry_references |= expression_names(expression)
-            except RuleEvaluationError:
-                geometry_expressions_valid = False
-    geometry_contract_ok = geometry_expressions_valid and geometry_references <= set(ids)
+    parameter_source_expressions: list[tuple[str, str]] = []
+    for parameter in draft.parameterDefinitions:
+        source = parameter.sourceDefinition
+        if source and source.type == "formula" and source.expression:
+            parameter_source_expressions.append((f"parameterDefinitions.{parameter.id}.sourceDefinition.expression", source.expression))
+        if source and source.type == "lookup" and source.reference:
+            parameter_source_expressions.append((f"parameterDefinitions.{parameter.id}.sourceDefinition.reference", source.reference))
+    parameter_alias_violations, _ = _expression_alias_violations(parameter_source_expressions, draft)
+    geometry_references, geometry_expressions_valid = _geometry_parameter_references(draft)
+    geometry_contract_ok = geometry_expressions_valid and geometry_references <= parameter_ids
+    semantic_face_ids = {item.id for item in draft.geometryRecipe.semanticFaces}
+    feature_rule_ids = {item.id for item in draft.featureRules}
+    invalid_variant_overrides: list[str] = []
+    for variant in draft.variants:
+        if variant.expected != "valid":
+            continue
+        evaluation = evaluate_template(draft.parameterDefinitions, [], overrides=variant.overrides)
+        if any(item.severity == "error" for item in evaluation.diagnostics):
+            invalid_variant_overrides.append(variant.id)
+    interface_parameter_refs = {
+        parameter_id
+        for item in draft.interfaces
+        for parameter_id in item.parameterRefs
+    }
+    interface_geometry_refs = {
+        geometry_id
+        for item in draft.interfaces
+        for geometry_id in [
+            *item.geometryRefs,
+            *( [item.referenceFrame.originRef] if item.referenceFrame.originRef else [] ),
+        ]
+    }
+    interface_parameters_ok = interface_parameter_refs <= parameter_ids
+    interface_geometry_ok = interface_geometry_refs <= semantic_face_ids
+    interface_rule_sources_ok = all(
+        item.declarationMode != "featureDerived"
+        or bool(item.sourceFeatureRuleId and item.sourceFeatureRuleId in feature_rule_ids)
+        for item in draft.interfaces
+    )
     checks = [
-        StageCheck(id="geometry-parameter-contract", label="几何参数契约完整", passed=geometry_contract_ok, severity="error", path="parameterDefinitions", message=f"几何配方只能引用已声明参数：{', '.join(sorted(geometry_references - set(ids))) or '请检查表达式语法'}。"),
+        StageCheck(id="geometry-parameter-contract", label="几何参数契约完整", passed=geometry_contract_ok, severity="error", path="parameterDefinitions", message=f"几何配方与语义面只能引用已声明参数：{', '.join(sorted(geometry_references - parameter_ids)) or '请检查表达式语法'}。"),
         StageCheck(id="parameter-ids", label="参数标识唯一", passed=len(ids) == len(set(ids)), severity="error", path="parameterDefinitions", message="参数标识不能重复。"),
         StageCheck(id="nominal-variant", label="标称实例已定义", passed="nominal" in variant_ids, severity="error", path="variants", message="必须保留 nominal 标称实例。"),
         StageCheck(id="variant-ids", label="变体标识唯一", passed=len(variant_ids) == len(set(variant_ids)), severity="error", path="variants", message="变体标识不能重复。"),
-        StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= set(ids), severity="error", path="variants", message="变体只能覆盖已声明参数。"),
+        StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= parameter_ids, severity="error", path="variants", message="变体只能覆盖已声明参数。"),
+        StageCheck(id="variant-overrides-evaluable", label="有效变体参数可求值", passed=not invalid_variant_overrides, severity="error", path="variants", message=f"以下有效变体的参数覆盖无法通过类型、范围或依赖检查：{', '.join(invalid_variant_overrides) or '无'}。"),
+        StageCheck(id="parameter-source-expressions-id-only", label="参数来源表达式仅使用参数ID", passed=not parameter_alias_violations, severity="error", path="parameterDefinitions", message=_alias_violation_message(parameter_alias_violations) or "参数来源表达式仅可使用参数稳定 ID。"),
+        StageCheck(id="interface-parameter-refs", label="接口参数引用有效", passed=interface_parameters_ok, severity="error", path="interfaces", message=f"接口只能引用已声明参数：{', '.join(sorted(interface_parameter_refs - parameter_ids)) or '无缺失参数'}。"),
+        StageCheck(id="interface-geometry-refs", label="接口几何引用有效", passed=interface_geometry_ok, severity="error", path="interfaces", message=f"接口只能引用已声明语义面：{', '.join(sorted(interface_geometry_refs - semantic_face_ids)) or '无缺失语义面'}。"),
+        StageCheck(id="interface-rule-sources", label="特征派生接口来源有效", passed=interface_rule_sources_ok, severity="error", path="interfaces", message="特征派生接口必须选择已有制造特征规则。"),
         StageCheck(id="parameter-sources", label="参数来源完整", passed=sources_complete, severity="error", path="parameterDefinitions", message="每个参数必须声明用户输入、材料属性、公式、查表或外部配置来源。"),
         StageCheck(id="parameter-contract-ready", label="规则预声明参数已补全契约", passed=contract_ready, severity="error", path="parameterDefinitions", message="规则页预声明的参数需要在契约页补全后，才能进入试算、验证与发布。"),
         StageCheck(id="parameter-dependency", label="参数依赖图有效", passed=dependency_ok, severity="error", path="parameterDefinitions", message="参数存在未知依赖或循环依赖。"),

@@ -7,7 +7,7 @@ from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
 from template_core.metamodel import FeatureRule, ParameterDefinition, ParameterSource, PartInterface
 from template_core.models import TemplateDraft
-from template_core.rules import RuleEvaluationError, evaluate_expression, evaluate_template, parameter_evaluation_order
+from template_core.rules import RuleEvaluationError, evaluate_expression, evaluate_template, expression_names, parameter_evaluation_order
 from template_core.stages import validate_stage
 from template_core.sketch_solver import solve_semantic_sketch
 
@@ -310,6 +310,99 @@ def test_geometry_parameter_contract_is_not_tied_to_profile_dimensions() -> None
     assert next(item for item in result.checks if item.id == "sketch-solver").passed
     assert next(item for item in result.checks if item.id == "sketch-degrees-of-freedom").passed
     assert validate_stage("variants", draft).complete
+
+
+def test_default_semantic_faces_reference_existing_parameters() -> None:
+    draft = TemplateDraft(name="默认语义面参数契约")
+    parameter_ids = {item.id for item in draft.parameterDefinitions}
+    references = set()
+    for face in draft.geometryRecipe.semanticFaces:
+        for expression in [face.uStartExpression, face.uSpanExpression, face.vStartExpression, face.vSpanExpression]:
+            references |= expression_names(expression)
+    assert references <= parameter_ids
+    assert next(item for item in validate_stage("variants", draft).checks if item.id == "geometry-parameter-contract").passed
+
+
+def test_semantic_face_expressions_are_checked_as_geometry_parameters() -> None:
+    draft = TemplateDraft(name="语义面缺参测试", geometryRecipe={"reviewed": True})
+    draft.geometryRecipe.semanticFaces[0].uSpanExpression = "unknownWidth"
+
+    base = validate_stage("baseSketch", draft)
+    variants = validate_stage("variants", draft)
+
+    assert not next(item for item in base.checks if item.id == "driving-parameters").passed
+    assert not next(item for item in variants.checks if item.id == "geometry-parameter-contract").passed
+
+
+def test_interface_parameter_and_geometry_refs_are_checked() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口引用缺失测试",
+        "interfaces": [{
+            "id": "interface.bad",
+            "name": "缺失接口引用",
+            "geometryRefs": ["part.face.missing"],
+            "referenceFrame": {"originRef": "part.face.alsoMissing", "axis": "z"},
+            "parameterRefs": ["missingParameter"],
+        }],
+    })
+    result = validate_stage("variants", draft)
+
+    assert not next(item for item in result.checks if item.id == "interface-parameter-refs").passed
+    assert not next(item for item in result.checks if item.id == "interface-geometry-refs").passed
+
+
+def test_valid_variant_overrides_must_match_parameter_contract() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "变体覆盖值测试",
+        "variants": [
+            {"id": "nominal", "name": "标称实例", "overrides": {}},
+            {"id": "bad.length", "name": "错误长度", "overrides": {"length": "not-a-number"}, "expected": "valid"},
+        ],
+    })
+    result = validate_stage("variants", draft)
+
+    check = next(item for item in result.checks if item.id == "variant-overrides-evaluable")
+    assert not check.passed
+    assert "bad.length" in check.message
+
+
+def test_feature_expressions_reject_parameter_display_names() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "规则显示名称误用测试",
+        "featureRulesReviewed": True,
+        "parameterDefinitions": [
+            {"id": "holePitch", "label": "孔距", "displayName": "孔氏", "default": 100, "minimum": 10, "maximum": 500},
+        ],
+        "featureRules": [{
+            "id": "holes.main",
+            "name": "孔列",
+            "featureType": "circularHole",
+            "countExpression": "1",
+            "arguments": {"x": 0, "diameter": 12},
+            "argumentExpressions": {"z": "孔氏 / 2"},
+        }],
+    })
+    result = validate_stage("features", draft)
+    check = next(item for item in result.checks if item.id == "feature-expressions-id-only")
+    assert not check.passed
+    assert "孔氏" in check.message
+    assert "holePitch" in check.message
+
+
+def test_parameter_source_expressions_reject_parameter_display_names() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "契约显示名称误用测试",
+        "parameterDefinitions": [
+            {"id": "holePitch", "label": "孔距", "displayName": "孔距", "default": 100, "minimum": 10, "maximum": 500},
+            {"id": "holeCount", "label": "孔数", "default": 2, "minimum": 1, "maximum": 20, "sourceDefinition": {"type": "formula", "expression": "孔距 / 2"}},
+        ],
+        "variants": [{"id": "nominal", "name": "标称实例", "overrides": {}}],
+    })
+    result = validate_stage("variants", draft)
+    check = next(item for item in result.checks if item.id == "parameter-source-expressions-id-only")
+    assert not check.passed
+    assert "孔距" in check.message
+    assert "holePitch" in check.message
 
 
 def test_import_is_only_a_semantic_sketch_acquisition_method() -> None:
