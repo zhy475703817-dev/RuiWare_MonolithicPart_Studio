@@ -366,6 +366,45 @@ def test_valid_variant_overrides_must_match_parameter_contract() -> None:
     assert "bad.length" in check.message
 
 
+def test_feature_expressions_reject_parameter_display_names() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "规则显示名称误用测试",
+        "featureRulesReviewed": True,
+        "parameterDefinitions": [
+            {"id": "holePitch", "label": "孔距", "displayName": "孔氏", "default": 100, "minimum": 10, "maximum": 500},
+        ],
+        "featureRules": [{
+            "id": "holes.main",
+            "name": "孔列",
+            "featureType": "circularHole",
+            "countExpression": "1",
+            "arguments": {"x": 0, "diameter": 12},
+            "argumentExpressions": {"z": "孔氏 / 2"},
+        }],
+    })
+    result = validate_stage("features", draft)
+    check = next(item for item in result.checks if item.id == "feature-expressions-id-only")
+    assert not check.passed
+    assert "孔氏" in check.message
+    assert "holePitch" in check.message
+
+
+def test_parameter_source_expressions_reject_parameter_display_names() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "契约显示名称误用测试",
+        "parameterDefinitions": [
+            {"id": "holePitch", "label": "孔距", "displayName": "孔距", "default": 100, "minimum": 10, "maximum": 500},
+            {"id": "holeCount", "label": "孔数", "default": 2, "minimum": 1, "maximum": 20, "sourceDefinition": {"type": "formula", "expression": "孔距 / 2"}},
+        ],
+        "variants": [{"id": "nominal", "name": "标称实例", "overrides": {}}],
+    })
+    result = validate_stage("variants", draft)
+    check = next(item for item in result.checks if item.id == "parameter-source-expressions-id-only")
+    assert not check.passed
+    assert "孔距" in check.message
+    assert "holePitch" in check.message
+
+
 def test_import_is_only_a_semantic_sketch_acquisition_method() -> None:
     draft = TemplateDraft(name="导入转换测试", sketch={
         "acquisitionMethod":"imported", "sourceAttachmentId":"asset-dxf", "sourceHash":"a" * 64,
