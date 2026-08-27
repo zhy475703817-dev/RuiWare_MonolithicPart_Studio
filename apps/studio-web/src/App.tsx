@@ -38,6 +38,7 @@ import {
   Save,
   Search,
   Settings2,
+  Spline,
   Trash2,
   Undo2,
   Upload,
@@ -76,6 +77,11 @@ import {
   toggleArcDirection,
   type ArcDrawMode,
 } from "./features/sketch/sketchArc";
+import {
+  advanceSketchPolyline,
+  terminateSketchPolyline,
+  type SketchPolylineSession,
+} from "./features/sketch/sketchPolyline";
 import type {
   CompileResult,
   Draft,
@@ -450,9 +456,19 @@ function profileModeSketch(
   };
 }
 
-type SketchTool = "select" | "point" | "line" | "rectangle" | "circle" | "arc";
+type SketchTool =
+  | "select"
+  | "point"
+  | "line"
+  | "polyline"
+  | "rectangle"
+  | "circle"
+  | "arc";
 type SketchViewCommand =
   | { id: number; type: "zoomIn" | "zoomOut" | "fit" }
+  | null;
+type SketchPolylineCommand =
+  | { id: number; type: "finish" | "cancel" }
   | null;
 const cloneSketchEntities = (entities: Draft["sketch"]["entities"]) =>
   entities.map((item) => ({
@@ -1624,6 +1640,7 @@ function ParametricSketchCanvas({
   pendingConflict,
   beginEdit,
   viewCommand,
+  polylineCommand,
   onCursorChange,
   orthogonalLock,
   objectSnapEnabled,
@@ -1644,6 +1661,7 @@ function ParametricSketchCanvas({
   pendingConflict: SketchEditConflict | null;
   beginEdit: () => void;
   viewCommand: SketchViewCommand;
+  polylineCommand: SketchPolylineCommand;
   onCursorChange: (point: { x: number; y: number } | null) => void;
   orthogonalLock: boolean;
   objectSnapEnabled: boolean;
@@ -1683,6 +1701,8 @@ function ParametricSketchCanvas({
   const rectPreviewRef = useRef<SVGPathElement | null>(null);
   const pendingRef = useRef<SketchDrawPoint[]>([]);
   const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
+  const polylineSessionRef = useRef<SketchPolylineSession | null>(null);
+  const latestSketchRef = useRef(draft.sketch);
   const centerArcDragRef = useRef<{
     sweep: number;
     endAngle: number;
@@ -1690,12 +1710,34 @@ function ParametricSketchCanvas({
   pendingRef.current = pending;
   pendingAnchorRef.current = pending.length === 1 ? pending[0] : null;
   useEffect(() => {
+    latestSketchRef.current = draft.sketch;
+    const lastLineId = polylineSessionRef.current?.lastLineId;
+    if (
+      lastLineId &&
+      !draft.sketch.entities.some((entity) => entity.id === lastLineId)
+    ) {
+      polylineSessionRef.current = null;
+      setPending([]);
+    }
+  }, [draft.sketch]);
+  useEffect(() => {
     setPending([]);
+    polylineSessionRef.current = null;
     centerArcDragRef.current = null;
     arcPreviewRef.current?.setAttribute("visibility", "hidden");
     circlePreviewRef.current?.setAttribute("visibility", "hidden");
     rectPreviewRef.current?.setAttribute("visibility", "hidden");
   }, [tool, arcDrawMode]);
+  useEffect(() => {
+    if (tool !== "polyline" || !polylineCommand) return;
+    const result = terminateSketchPolyline(
+      polylineSessionRef.current,
+      polylineCommand.type,
+    );
+    polylineSessionRef.current = result.session;
+    setPending([]);
+    paintDrawCursor(null);
+  }, [polylineCommand?.id, tool]);
   const [hoveredCircleId, setHoveredCircleId] = useState<string | null>(null);
   const [drag, setDrag] = useState<{
     id: string;
@@ -1806,8 +1848,15 @@ function ParametricSketchCanvas({
     };
   };
   const viewport = useRef({ key: viewportKey, bounds: initialViewport() });
-  if (viewport.current.key !== viewportKey)
-    viewport.current = { key: viewportKey, bounds: initialViewport() };
+  if (viewport.current.key !== viewportKey) {
+    viewport.current = {
+      key: viewportKey,
+      bounds:
+        tool === "polyline" && polylineSessionRef.current?.segmentIds.length
+          ? viewport.current.bounds
+          : initialViewport(),
+    };
+  }
   useEffect(() => {
     if (!viewCommand) return;
     if (viewCommand.type === "fit") {
@@ -1881,7 +1930,7 @@ function ParametricSketchCanvas({
       }`.trim(),
     );
     const anchor = pendingAnchorRef.current;
-    if (rubber && tool === "line" && anchor) {
+    if (rubber && (tool === "line" || tool === "polyline") && anchor) {
       const start = {
         x: math.cx + anchor.x * math.scale,
         y: math.cy - anchor.y * math.scale,
@@ -2080,6 +2129,7 @@ function ParametricSketchCanvas({
         onSelect("");
       return;
     }
+    if (tool === "polyline" && event.detail > 1) return;
     const point = resolvePointerSnap(world(event));
     const drawPoint = sketchDrawPointFromSnap(point);
     if (tool === "point") {
@@ -2097,6 +2147,27 @@ function ParametricSketchCanvas({
         endAngle: null,
         points: [],
       });
+      return;
+    }
+    if (tool === "polyline") {
+      const segmentNumber = (polylineSessionRef.current?.segmentIds.length || 0) + 1;
+      let constraintNumber = 0;
+      const createConstraintId = () =>
+        uid(`constraint.polyline.${segmentNumber}.${++constraintNumber}`);
+      const result = advanceSketchPolyline(
+        polylineSessionRef.current,
+        drawPoint,
+        latestSketchRef.current,
+        () => uid(`polyline.edge.${segmentNumber}`),
+        createConstraintId,
+      );
+      polylineSessionRef.current = result.session;
+      setPending(result.session ? [result.session.lastPoint] : []);
+      paintDrawCursor(null);
+      if (!result.accepted || !result.createdLineId) return;
+      if (result.beginUndo) beginEdit();
+      onSketch(result.sketch);
+      onSelect(result.createdLineId);
       return;
     }
     const needed = tool === "arc" ? 3 : 2;
@@ -2892,6 +2963,22 @@ function ParametricSketchCanvas({
       onPointerMove={move}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
+      onDoubleClick={(event) => {
+        if (tool !== "polyline") return;
+        event.preventDefault();
+        event.stopPropagation();
+        polylineSessionRef.current = null;
+        setPending([]);
+        paintDrawCursor(null);
+      }}
+      onContextMenu={(event) => {
+        if (tool !== "polyline") return;
+        event.preventDefault();
+        event.stopPropagation();
+        polylineSessionRef.current = null;
+        setPending([]);
+        paintDrawCursor(null);
+      }}
       onPointerLeave={() => {
         onCursorChange(null);
         paintDrawCursor(null);
@@ -6404,6 +6491,8 @@ function GeometryStage({
   const [future, setFuture] = useState<Draft["sketch"][]>([]);
   const [solving, setSolving] = useState(false);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
+  const [polylineCommand, setPolylineCommand] =
+    useState<SketchPolylineCommand>(null);
   const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -6953,10 +7042,18 @@ function GeometryStage({
       ) {
         event.preventDefault();
         redo();
+      } else if (tool === "polyline" && event.key === "Enter") {
+        event.preventDefault();
+        setPolylineCommand({ id: Date.now(), type: "finish" });
       } else if (event.key === "Escape") {
         if (sketchEditConflict) {
           event.preventDefault();
           setSketchEditConflict(null);
+          return;
+        }
+        if (tool === "polyline") {
+          event.preventDefault();
+          setPolylineCommand({ id: Date.now(), type: "cancel" });
           return;
         }
         setSelectedEntities([]);
@@ -7172,6 +7269,7 @@ function GeometryStage({
                   ["select", MousePointer2, "选择"],
                   ["point", CircleDot, "点"],
                   ["line", Link2, "直线"],
+                  ["polyline", Spline, "连续折线"],
                   ["rectangle", Box, "矩形"],
                   ["circle", CircleDot, "圆"],
                   ["arc", RefreshCw, "圆弧"],
@@ -7399,6 +7497,7 @@ function GeometryStage({
               pendingConflict={sketchEditConflict}
               beginEdit={beginSketchEdit}
               viewCommand={viewCommand}
+              polylineCommand={polylineCommand}
               onCursorChange={publishCursorPoint}
               orthogonalLock={orthogonalLock}
               objectSnapEnabled={objectSnapEnabled}
