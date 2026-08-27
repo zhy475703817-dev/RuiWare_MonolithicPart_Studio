@@ -54,6 +54,8 @@ import { TemplateInfo } from "./features/stages/TemplateInfo";
 import {
   buildLineSnapCoincidentConstraints,
   DEFAULT_SKETCH_SNAP_OPTIONS,
+  endpointSnapToleranceMm,
+  isEndpointSnapKind,
   isNearestSnapKind,
   isTangentSnapKind,
   resolveSketchSnap,
@@ -78,10 +80,44 @@ import {
   type ArcDrawMode,
 } from "./features/sketch/sketchArc";
 import {
+  editSketchEntitiesAtHandle,
+  findSketchRectangleGroup,
+  getSketchEntityControls,
+  sketchEntityEditHint,
+  translateSketchEntities,
+  type SketchEntityEditTarget,
+} from "./features/sketch/sketchEntityEditing";
+import {
+  normalizeSketchSelectionBox,
+  selectSketchPrimitives,
+  type SketchSelectionBox,
+  type SketchSelectionMode,
+} from "./features/sketch/sketchBoxSelection";
+import {
+  panSketchViewport,
+  type SketchViewportBounds,
+} from "./features/sketch/sketchViewport";
+import {
+  endSketchPointerOperation,
+  operationOwnsPointer,
+  resolveSketchPointerIntent,
+  sketchPointerMovedPastThreshold,
+  tryBeginSketchPointerOperation,
+  type SketchPointerOperation,
+} from "./features/sketch/sketchPointerInteraction";
+import {
   advanceSketchPolyline,
   terminateSketchPolyline,
   type SketchPolylineSession,
 } from "./features/sketch/sketchPolyline";
+import {
+  buildLineInferenceConstraint,
+  layoutLineDimensionLabel,
+  LINE_DIMENSION_HINT_PRESENTATION,
+  linePreviewMetrics,
+  resolveSketchLineInference,
+  type SketchLineInference,
+} from "./features/sketch/sketchLineInference";
 import type {
   CompileResult,
   Draft,
@@ -456,6 +492,64 @@ function profileModeSketch(
   };
 }
 
+function Model({ url }: { url: string }) {
+  const geometry = useLoader(STLLoader, url);
+  return (
+    <Center>
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <meshStandardMaterial
+          color="#e99a35"
+          roughness={0.34}
+          metalness={0.4}
+        />
+      </mesh>
+    </Center>
+  );
+}
+
+function CadViewer({ result }: { result: CompileResult | null }) {
+  const stl = result?.artifacts.find((item) => item.kind === "stl");
+  if (!stl)
+    return (
+      <div className="viewer-empty">
+        <Box size={38} />
+        <strong>等待生成三维模型</strong>
+        <span>先保存模板并完成参数求值，再运行 B-Rep 编译</span>
+      </div>
+    );
+  return (
+    <div className="cad-viewer">
+      <Canvas camera={{ position: [160, 140, 220], fov: 42 }} shadows>
+        <color attach="background" args={["#f5f6f7"]} />
+        <ambientLight intensity={1.7} />
+        <directionalLight
+          position={[100, 160, 180]}
+          intensity={2.7}
+          castShadow
+        />
+        <Suspense fallback={null}>
+          <Bounds fit clip observe margin={1.25}>
+            <Model url={stl.url} />
+          </Bounds>
+        </Suspense>
+        <Grid
+          position={[0, -60, 0]}
+          args={[600, 600]}
+          cellSize={20}
+          cellThickness={0.55}
+          cellColor="#d4d9de"
+          sectionSize={100}
+          sectionColor="#aeb7c0"
+          fadeDistance={700}
+          infiniteGrid
+        />
+        <OrbitControls makeDefault />
+      </Canvas>
+      <span className="viewer-hint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
+    </div>
+  );
+}
+
 type SketchTool =
   | "select"
   | "point"
@@ -470,6 +564,21 @@ type SketchViewCommand =
 type SketchPolylineCommand =
   | { id: number; type: "finish" | "cancel" }
   | null;
+type SketchBoxSelectSession = {
+  pointerId: number;
+  originClientX: number;
+  originClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  originView: { x: number; y: number };
+  currentView: { x: number; y: number };
+  originWorld: { x: number; y: number };
+  currentWorld: { x: number; y: number };
+  mode: SketchSelectionMode;
+  hasMoved: boolean;
+  additive: boolean;
+  subtractive: boolean;
+};
 const cloneSketchEntities = (entities: Draft["sketch"]["entities"]) =>
   entities.map((item) => ({
     ...item,
@@ -876,6 +985,78 @@ const propagateCoincidentMove = (
   return { entities: next, touchedIds: [...touched] };
 };
 
+const endpointChanged = (
+  before: [number, number] | null | undefined,
+  after: [number, number] | null | undefined,
+) =>
+  !!before &&
+  !!after &&
+  Math.hypot(after[0] - before[0], after[1] - before[1]) > 1e-9;
+
+/** Propagate every endpoint changed by a shape handle through existing joints. */
+const propagateShapeHandleEdit = (
+  constraints: Draft["sketch"]["constraints"],
+  entities: Draft["sketch"]["entities"],
+  beforeEntities: Draft["sketch"]["entities"],
+  editedEntityIds: string[],
+) => {
+  let next = entities;
+  const touched = new Set(editedEntityIds);
+  for (const entityId of editedEntityIds) {
+    const before = beforeEntities.find((entity) => entity.id === entityId);
+    const after = next.find((entity) => entity.id === entityId);
+    if (!before || !after) continue;
+    for (const handle of ["start", "end"] as const) {
+      if (!endpointChanged(before[handle], after[handle])) continue;
+      const propagated = propagateCoincidentMove(
+        constraints,
+        next,
+        entityId,
+        handle,
+        beforeEntities,
+      );
+      next = propagated.entities;
+      propagated.touchedIds.forEach((id) => touched.add(id));
+    }
+  }
+  return { entities: next, touchedIds: [...touched] };
+};
+
+const changedSketchEntityIds = (
+  beforeEntities: Draft["sketch"]["entities"],
+  afterEntities: Draft["sketch"]["entities"],
+) => {
+  const beforeById = new Map(beforeEntities.map((entity) => [entity.id, entity]));
+  return afterEntities
+    .filter((entity) => {
+      const before = beforeById.get(entity.id);
+      if (!before) return true;
+      return (
+        JSON.stringify({
+          start: before.start,
+          end: before.end,
+          center: before.center,
+          radius: before.radius,
+          startAngle: before.startAngle,
+          endAngle: before.endAngle,
+          largeArc: before.largeArc,
+          points: before.points,
+        }) !==
+        JSON.stringify({
+          start: entity.start,
+          end: entity.end,
+          center: entity.center,
+          radius: entity.radius,
+          startAngle: entity.startAngle,
+          endAngle: entity.endAngle,
+          largeArc: entity.largeArc,
+          points: entity.points,
+        })
+      );
+    })
+    .map((entity) => entity.id);
+};
+
 const analyzeLocalSketchEdit = (
   sketch: Draft["sketch"],
   entityId: string,
@@ -933,7 +1114,7 @@ const analyzeLocalSketchEdit = (
       item.enabled &&
       item.driving &&
       dimensions.has(item.constraintType) &&
-      item.entityRefs.includes(entityId) &&
+      item.entityRefs.some((ref) => touched.has(ref)) &&
       item.driverMode !== "unset",
   );
   const sharedParameterIds = [
@@ -945,11 +1126,11 @@ const analyzeLocalSketchEdit = (
           normalized.constraints.some(
             (item) =>
               item.parameterId === parameterId &&
-              !item.entityRefs.includes(entityId),
+              !item.entityRefs.some((ref) => touched.has(ref)),
           ) ||
           sketch.entities.some(
             (item) =>
-              item.id !== entityId && item.parameterRefs.includes(parameterId),
+              !touched.has(item.id) && item.parameterRefs.includes(parameterId),
           ),
         ),
     ),
@@ -974,13 +1155,19 @@ const analyzeLocalSketchEdit = (
 
 const commitLocalEntityFixedDimensions = (
   sketch: Draft["sketch"],
-  entityId: string,
+  entityIds: string | string[],
   entities: Draft["sketch"]["entities"],
-  options: { releaseSoftConstraintIds?: string[] } = {},
+  options: {
+    releaseSoftConstraintIds?: string[];
+    preserveParameterizedDimensions?: boolean;
+  } = {},
 ) => {
   const dimensions = dimensionTypeSet();
   const normalized = normalizeSketchTopology(sketch);
   const releaseIds = new Set(options.releaseSoftConstraintIds || []);
+  const editedIds = new Set(
+    Array.isArray(entityIds) ? entityIds : [entityIds],
+  );
   const nextConstraints = normalized.constraints.map((constraint) => {
     // Strong topology constraints are never auto-released here.
     if (
@@ -990,9 +1177,12 @@ const commitLocalEntityFixedDimensions = (
       return { ...constraint, enabled: false, driving: false };
     }
     if (
-      !constraint.entityRefs.includes(entityId) ||
+      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
       !dimensions.has(constraint.constraintType)
     ) {
+      return constraint;
+    }
+    if (options.preserveParameterizedDimensions && constraint.parameterId) {
       return constraint;
     }
     if (constraint.driverMode === "expression" && constraint.expression) {
@@ -1082,8 +1272,6 @@ const alignEntitiesToPrimitives = (
     };
   });
 };
-
-const DRAG_MOVE_THRESHOLD = 0.2;
 
 /** Normalize any degree value into [0, 360). */
 const normalizeDegrees = (degrees: number) => {
@@ -1584,14 +1772,17 @@ const applyCenterlineThinwallOffset = (
 const commitSharedParameterUpdate = (
   sketch: Draft["sketch"],
   parameterDefinitions: ParameterDefinition[],
-  entityId: string,
+  entityIds: string | string[],
   entities: Draft["sketch"]["entities"],
 ) => {
   const dimensions = dimensionTypeSet();
+  const editedIds = new Set(
+    Array.isArray(entityIds) ? entityIds : [entityIds],
+  );
   let nextParameters = parameterDefinitions;
   const nextConstraints = sketch.constraints.map((constraint) => {
     if (
-      !constraint.entityRefs.includes(entityId) ||
+      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
       !dimensions.has(constraint.constraintType) ||
       !constraint.parameterId
     ) {
@@ -1627,6 +1818,28 @@ const commitSharedParameterUpdate = (
   };
 };
 
+const commitCompletedGeometryEdit = (
+  draft: Draft,
+  entityIds: string[],
+  entities: Draft["sketch"]["entities"],
+) => {
+  const parameterCommit = commitSharedParameterUpdate(
+    draft.sketch,
+    draft.parameterDefinitions,
+    entityIds,
+    entities,
+  );
+  return {
+    sketch: commitLocalEntityFixedDimensions(
+      parameterCommit.sketch,
+      entityIds,
+      entities,
+      { preserveParameterizedDimensions: true },
+    ),
+    parameterDefinitions: parameterCommit.parameterDefinitions,
+  };
+};
+
 function ParametricSketchCanvas({
   draft,
   solution,
@@ -1636,6 +1849,8 @@ function ParametricSketchCanvas({
   onSelect,
   onSketch,
   onGeometryEdit,
+  validateGeometryEdit,
+  onGeometryEditRejected,
   onEditConflict,
   pendingConflict,
   beginEdit,
@@ -1657,6 +1872,11 @@ function ParametricSketchCanvas({
     sketch: Draft["sketch"];
     parameterDefinitions?: ParameterDefinition[];
   }) => void;
+  validateGeometryEdit: (patch: {
+    sketch: Draft["sketch"];
+    parameterDefinitions?: ParameterDefinition[];
+  }) => Promise<{ valid: boolean; message?: string }>;
+  onGeometryEditRejected: (message: string) => void;
   onEditConflict: (conflict: SketchEditConflict) => void;
   pendingConflict: SketchEditConflict | null;
   beginEdit: () => void;
@@ -1670,10 +1890,13 @@ function ParametricSketchCanvas({
   const solved = solution?.cases.find((entry) => entry.case === caseName);
   const draftPrimitives = entitiesToPrimitives(draft.sketch.entities);
   const [pending, setPending] = useState<SketchDrawPoint[]>([]);
+  const pendingRef = useRef<SketchDrawPoint[]>([]);
+  const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
+  const polylineSessionRef = useRef<SketchPolylineSession | null>(null);
+  const latestSketchRef = useRef(draft.sketch);
   const snapOptions = useMemo(
     () => ({
       enabled: objectSnapEnabled,
-      toleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.toleranceMm,
       lineToleranceMm: DEFAULT_SKETCH_SNAP_OPTIONS.lineToleranceMm,
       kinds: DEFAULT_SKETCH_SNAP_OPTIONS.kinds,
     }),
@@ -1688,21 +1911,29 @@ function ParametricSketchCanvas({
         pendingPoints.length === 1)
         ? { x: pendingPoints[0].x, y: pendingPoints[0].y }
         : null;
-    return resolveSketchSnap(worldPoint, draft.sketch.entities, {
+    return resolveSketchSnap(worldPoint, latestSketchRef.current.entities, {
       ...snapOptions,
+      toleranceMm: endpointSnapToleranceMm(viewMathRef.current.scale),
       tangentFromCenter,
     });
   };
   const snapPreviewHitRef = useRef<SketchSnapHit | null>(null);
   const snapIndicatorRef = useRef<SVGCircleElement | null>(null);
+  const snapHintRef = useRef<SVGTextElement | null>(null);
   const snapRubberBandRef = useRef<SVGLineElement | null>(null);
+  const lineInferenceGuideRef = useRef<SVGLineElement | null>(null);
+  const lineInferenceReferenceRef = useRef<SVGLineElement | null>(null);
+  const lineInferenceConnectorRef = useRef<SVGLineElement | null>(null);
+  const lineDimensionGroupRef = useRef<SVGGElement | null>(null);
+  const lineDimensionLengthRef = useRef<SVGTextElement | null>(null);
+  const lineDimensionAngleRef = useRef<SVGTextElement | null>(null);
+  const lineInferenceBadgeRef = useRef<SVGGElement | null>(null);
+  const lineInferenceBadgeRectRef = useRef<SVGRectElement | null>(null);
+  const lineInferenceBadgeTextRef = useRef<SVGTextElement | null>(null);
+  const lineInferenceRef = useRef<SketchLineInference | null>(null);
   const circlePreviewRef = useRef<SVGCircleElement | null>(null);
   const arcPreviewRef = useRef<SVGPathElement | null>(null);
   const rectPreviewRef = useRef<SVGPathElement | null>(null);
-  const pendingRef = useRef<SketchDrawPoint[]>([]);
-  const pendingAnchorRef = useRef<SketchDrawPoint | null>(null);
-  const polylineSessionRef = useRef<SketchPolylineSession | null>(null);
-  const latestSketchRef = useRef(draft.sketch);
   const centerArcDragRef = useRef<{
     sweep: number;
     endAngle: number;
@@ -1723,26 +1954,38 @@ function ParametricSketchCanvas({
   useEffect(() => {
     setPending([]);
     polylineSessionRef.current = null;
+    lineInferenceRef.current = null;
     centerArcDragRef.current = null;
+    lineInferenceGuideRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceReferenceRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceConnectorRef.current?.setAttribute("visibility", "hidden");
+    lineDimensionGroupRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceBadgeRef.current?.setAttribute("visibility", "hidden");
     arcPreviewRef.current?.setAttribute("visibility", "hidden");
     circlePreviewRef.current?.setAttribute("visibility", "hidden");
     rectPreviewRef.current?.setAttribute("visibility", "hidden");
   }, [tool, arcDrawMode]);
   useEffect(() => {
-    if (tool !== "polyline" || !polylineCommand) return;
-    const result = terminateSketchPolyline(
-      polylineSessionRef.current,
-      polylineCommand.type,
-    );
-    polylineSessionRef.current = result.session;
-    setPending([]);
-    paintDrawCursor(null);
-  }, [polylineCommand?.id, tool]);
-  const [hoveredCircleId, setHoveredCircleId] = useState<string | null>(null);
+    latestSketchRef.current = draft.sketch;
+    const lastLineId = polylineSessionRef.current?.lastLineId;
+    if (
+      lastLineId &&
+      !draft.sketch.entities.some((entity) => entity.id === lastLineId)
+    ) {
+      polylineSessionRef.current = null;
+      setPending([]);
+    }
+  }, [draft.sketch]);
   const [drag, setDrag] = useState<{
     id: string;
-    handle: "start" | "end" | "center" | "body";
+    handle: "start" | "end" | "center" | "body" | "radius";
+    editTarget: SketchEntityEditTarget | null;
+    editPointer: { x: number; y: number } | null;
+    editCursor: string | null;
+    operationKind: "dragging-entity" | "editing-handle";
     origin: { x: number; y: number };
+    originClientX: number;
+    originClientY: number;
     entity: Draft["sketch"]["entities"][number];
     beforeEntities: Draft["sketch"]["entities"];
     pointerId: number;
@@ -1757,11 +2000,31 @@ function ParametricSketchCanvas({
   } | null>(null);
   const [dragTick, setDragTick] = useState(0);
   const [viewRevision, setViewRevision] = useState(0);
+  const [isPanning, setIsPanning] = useState(false);
   const [settlePrimitives, setSettlePrimitives] = useState<
     ReturnType<typeof entitiesToPrimitives> | null
   >(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewMathRef = useRef({ scale: 1, cx: 0, cy: 0, viewportKey: "" });
+  const panRef = useRef<{
+    pointerId: number;
+    button: 0 | 1;
+    originClientX: number;
+    originClientY: number;
+    originViewX: number;
+    originViewY: number;
+    bounds: SketchViewportBounds;
+    scale: number;
+    hasMoved: boolean;
+    startedOnBackground: boolean;
+  } | null>(null);
+  const [boxSelection, setBoxSelection] = useState<SketchBoxSelectSession | null>(null);
+  const boxSelectionRef = useRef<SketchBoxSelectSession | null>(null);
+  const suppressNextContextMenuRef = useRef(false);
+  boxSelectionRef.current = boxSelection;
+  const pointerOperationRef = useRef<SketchPointerOperation | null>(null);
+  const editValidationTokenRef = useRef(0);
+  const activeToolRef = useRef(tool);
   const dragEntitiesRef = useRef<Draft["sketch"]["entities"] | null>(null);
   const dragRef = useRef<typeof drag>(null);
   dragRef.current = drag;
@@ -1782,6 +2045,15 @@ function ParametricSketchCanvas({
     : pendingConflict
       ? conflictPrimitives || basePrimitives
       : settlePrimitives || basePrimitives;
+  const editDisplayEntities = drag
+    ? dragEntitiesRef.current || drag.beforeEntities
+    : pendingConflict
+      ? pendingConflict.afterEntities
+      : draft.sketch.entities;
+  const entityControls =
+    tool === "select" && caseName === "nominal" && !pendingConflict
+      ? getSketchEntityControls(editDisplayEntities, selected)
+      : [];
   useEffect(() => {
     if (!settlePrimitives) return;
     setSettlePrimitives(null);
@@ -1789,13 +2061,13 @@ function ParametricSketchCanvas({
   useEffect(() => {
     setPending([]);
     snapPreviewHitRef.current = null;
-    setHoveredCircleId(null);
     const indicator = snapIndicatorRef.current;
     const rubber = snapRubberBandRef.current;
     const circlePreview = circlePreviewRef.current;
     const arcPreview = arcPreviewRef.current;
     const rectPreview = rectPreviewRef.current;
     indicator?.setAttribute("visibility", "hidden");
+    snapHintRef.current?.setAttribute("visibility", "hidden");
     rubber?.setAttribute("visibility", "hidden");
     circlePreview?.setAttribute("visibility", "hidden");
     arcPreview?.setAttribute("visibility", "hidden");
@@ -1849,13 +2121,10 @@ function ParametricSketchCanvas({
   };
   const viewport = useRef({ key: viewportKey, bounds: initialViewport() });
   if (viewport.current.key !== viewportKey) {
-    viewport.current = {
-      key: viewportKey,
-      bounds:
-        tool === "polyline" && polylineSessionRef.current?.segmentIds.length
-          ? viewport.current.bounds
-          : initialViewport(),
-    };
+    viewport.current =
+      tool === "polyline" && polylineSessionRef.current?.segmentIds.length
+        ? { key: viewportKey, bounds: viewport.current.bounds }
+        : { key: viewportKey, bounds: initialViewport() };
   }
   useEffect(() => {
     if (!viewCommand) return;
@@ -1892,20 +2161,77 @@ function ParametricSketchCanvas({
     x: cx + point.x * scale,
     y: cy - point.y * scale,
   });
-  const paintDrawCursor = (hit: SketchSnapHit | null) => {
+  const activeEntityEditHint =
+    drag?.hasMoved && drag.editTarget
+      ? sketchEntityEditHint(editDisplayEntities, drag.editTarget)
+      : null;
+  const activeEntityEditHintLayout = activeEntityEditHint
+    ? layoutLineDimensionLabel(
+        screen({
+          x: activeEntityEditHint.reference[0],
+          y: activeEntityEditHint.reference[1],
+        }),
+        screen({
+          x: activeEntityEditHint.anchor[0],
+          y: activeEntityEditHint.anchor[1],
+        }),
+        { width: 460, height: 330 },
+        {
+          width: 116,
+          height: activeEntityEditHint.lines.length > 1 ? 34 : 22,
+        },
+      )
+    : null;
+  const resolveLineDrawPreview = (worldPoint: { x: number; y: number }) => {
+    const preciseSnap = resolvePointerSnap(worldPoint);
+    const anchor = pendingAnchorRef.current;
+    if ((tool !== "line" && tool !== "polyline") || !anchor) {
+      lineInferenceRef.current = null;
+      return { hit: preciseSnap, inference: null as SketchLineInference | null };
+    }
+    const resolved = resolveSketchLineInference({
+      anchor,
+      pointer: worldPoint,
+      entities: latestSketchRef.current.entities,
+      selectedEntityIds: selected,
+      worldToViewScale: viewMathRef.current.scale,
+      preciseSnap,
+      previous: lineInferenceRef.current,
+    });
+    lineInferenceRef.current = resolved.inference;
+    return {
+      hit: { point: resolved.point, target: preciseSnap.target },
+      inference: resolved.inference,
+    };
+  };
+  const hideLineDrawingAssists = () => {
+    lineInferenceGuideRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceReferenceRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceConnectorRef.current?.setAttribute("visibility", "hidden");
+    lineDimensionGroupRef.current?.setAttribute("visibility", "hidden");
+    lineInferenceBadgeRef.current?.setAttribute("visibility", "hidden");
+  };
+  const paintDrawCursor = (
+    hit: SketchSnapHit | null,
+    inference: SketchLineInference | null = null,
+  ) => {
     snapPreviewHitRef.current = hit;
     const indicator = snapIndicatorRef.current;
+    const hint = snapHintRef.current;
     const rubber = snapRubberBandRef.current;
     const circlePreview = circlePreviewRef.current;
     const arcPreview = arcPreviewRef.current;
     const rectPreview = rectPreviewRef.current;
     if (!indicator) return;
     if (!hit || tool === "select" || caseName !== "nominal") {
+      if (!hit) lineInferenceRef.current = null;
       indicator.setAttribute("visibility", "hidden");
+      hint?.setAttribute("visibility", "hidden");
       rubber?.setAttribute("visibility", "hidden");
       circlePreview?.setAttribute("visibility", "hidden");
       arcPreview?.setAttribute("visibility", "hidden");
       rectPreview?.setAttribute("visibility", "hidden");
+      hideLineDrawingAssists();
       return;
     }
     const math = viewMathRef.current;
@@ -1921,7 +2247,9 @@ function ParametricSketchCanvas({
       "class",
       `snap-indicator ${
         hit.target
-          ? isNearestSnapKind(hit.target.kind)
+          ? isEndpointSnapKind(hit.target.kind)
+            ? "active endpoint"
+            : isNearestSnapKind(hit.target.kind)
             ? "active line-nearest"
             : isTangentSnapKind(hit.target.kind)
               ? "active tangent"
@@ -1929,6 +2257,14 @@ function ParametricSketchCanvas({
           : ""
       }`.trim(),
     );
+    if (hint && hit.target && isEndpointSnapKind(hit.target.kind)) {
+      hint.setAttribute("visibility", "visible");
+      hint.setAttribute("x", String(screenPoint.x + 10));
+      hint.setAttribute("y", String(screenPoint.y - 10));
+      hint.textContent = `端点 · ${hit.target.handle === "start" ? "起点" : "终点"}`;
+    } else {
+      hint?.setAttribute("visibility", "hidden");
+    }
     const anchor = pendingAnchorRef.current;
     if (rubber && (tool === "line" || tool === "polyline") && anchor) {
       const start = {
@@ -1940,8 +2276,127 @@ function ParametricSketchCanvas({
       rubber.setAttribute("y1", String(start.y));
       rubber.setAttribute("x2", String(screenPoint.x));
       rubber.setAttribute("y2", String(screenPoint.y));
+      const metrics = linePreviewMetrics(anchor, {
+        x: hit.point[0],
+        y: hit.point[1],
+      });
+      const dimensionGroup = lineDimensionGroupRef.current;
+      if (dimensionGroup) {
+        const layout = layoutLineDimensionLabel(start, screenPoint);
+        dimensionGroup.setAttribute("visibility", "visible");
+        dimensionGroup.setAttribute(
+          "transform",
+          `translate(${layout.x} ${layout.y})`,
+        );
+        if (lineDimensionLengthRef.current) {
+          lineDimensionLengthRef.current.textContent =
+            `L ${metrics.length.toFixed(2)} mm`;
+        }
+        if (lineDimensionAngleRef.current) {
+          lineDimensionAngleRef.current.textContent =
+            `∠ ${metrics.angleDegrees.toFixed(1)}°`;
+        }
+      }
+      const guide = lineInferenceGuideRef.current;
+      const reference = lineInferenceReferenceRef.current;
+      const connector = lineInferenceConnectorRef.current;
+      const badge = lineInferenceBadgeRef.current;
+      if (inference && guide && badge) {
+        const dx = screenPoint.x - start.x;
+        const dy = screenPoint.y - start.y;
+        const viewLength = Math.hypot(dx, dy) || 1;
+        const ux = dx / viewLength;
+        const uy = dy / viewLength;
+        if (inference.kind === "horizontal") {
+          guide.setAttribute("x1", String(Math.max(0, Math.min(start.x, screenPoint.x) - 18)));
+          guide.setAttribute("y1", String(start.y));
+          guide.setAttribute("x2", String(Math.min(460, Math.max(start.x, screenPoint.x) + 18)));
+          guide.setAttribute("y2", String(start.y));
+        } else if (inference.kind === "vertical") {
+          guide.setAttribute("x1", String(start.x));
+          guide.setAttribute("y1", String(Math.max(0, Math.min(start.y, screenPoint.y) - 18)));
+          guide.setAttribute("x2", String(start.x));
+          guide.setAttribute("y2", String(Math.min(330, Math.max(start.y, screenPoint.y) + 18)));
+        } else {
+          guide.setAttribute("x1", String(start.x - ux * 14));
+          guide.setAttribute("y1", String(start.y - uy * 14));
+          guide.setAttribute("x2", String(screenPoint.x + ux * 14));
+          guide.setAttribute("y2", String(screenPoint.y + uy * 14));
+        }
+        guide.setAttribute("class", `line-inference-guide ${inference.kind}`);
+        guide.setAttribute("visibility", "visible");
+        const labels: Record<SketchLineInference["kind"], string> = {
+          horizontal: "H  水平",
+          vertical: "V  竖直",
+          parallel: "∥  平行",
+          perpendicular: "⊥  垂直",
+        };
+        const badgeText = inference.referenceLabel
+          ? `${labels[inference.kind]} · ${inference.referenceLabel}`
+          : labels[inference.kind];
+        const badgeWidth = Math.min(176, Math.max(58, 24 + badgeText.length * 7));
+        let badgeX = screenPoint.x + 12;
+        if (badgeX + badgeWidth > 454) badgeX = screenPoint.x - badgeWidth - 12;
+        let badgeY = screenPoint.y - 34;
+        if (badgeY < 6) badgeY = screenPoint.y + 12;
+        badgeX = Math.max(6, Math.min(454 - badgeWidth, badgeX));
+        badgeY = Math.max(6, Math.min(304, badgeY));
+        badge.setAttribute("visibility", "visible");
+        badge.setAttribute("transform", `translate(${badgeX} ${badgeY})`);
+        lineInferenceBadgeRectRef.current?.setAttribute(
+          "width",
+          String(badgeWidth),
+        );
+        if (lineInferenceBadgeTextRef.current) {
+          lineInferenceBadgeTextRef.current.textContent = badgeText;
+        }
+        if (
+          reference &&
+          inference.referenceStart &&
+          inference.referenceEnd
+        ) {
+          const referenceStart = screen({
+            x: inference.referenceStart[0],
+            y: inference.referenceStart[1],
+          });
+          const referenceEnd = screen({
+            x: inference.referenceEnd[0],
+            y: inference.referenceEnd[1],
+          });
+          reference.setAttribute("visibility", "visible");
+          reference.setAttribute("x1", String(referenceStart.x));
+          reference.setAttribute("y1", String(referenceStart.y));
+          reference.setAttribute("x2", String(referenceEnd.x));
+          reference.setAttribute("y2", String(referenceEnd.y));
+          reference.setAttribute(
+            "class",
+            `line-inference-reference ${inference.kind}`,
+          );
+        } else {
+          reference?.setAttribute("visibility", "hidden");
+        }
+        if (connector && inference.referenceNearestPoint) {
+          const nearest = screen({
+            x: inference.referenceNearestPoint[0],
+            y: inference.referenceNearestPoint[1],
+          });
+          connector.setAttribute("visibility", "visible");
+          connector.setAttribute("x1", String((start.x + screenPoint.x) / 2));
+          connector.setAttribute("y1", String((start.y + screenPoint.y) / 2));
+          connector.setAttribute("x2", String(nearest.x));
+          connector.setAttribute("y2", String(nearest.y));
+        } else {
+          connector?.setAttribute("visibility", "hidden");
+        }
+      } else {
+        guide?.setAttribute("visibility", "hidden");
+        reference?.setAttribute("visibility", "hidden");
+        connector?.setAttribute("visibility", "hidden");
+        badge?.setAttribute("visibility", "hidden");
+      }
     } else {
       rubber?.setAttribute("visibility", "hidden");
+      hideLineDrawingAssists();
     }
     if (circlePreview && tool === "circle" && anchor) {
       const center = {
@@ -2064,6 +2519,10 @@ function ParametricSketchCanvas({
       rectPreview?.setAttribute("visibility", "hidden");
     }
   };
+  useEffect(() => {
+    if (!snapPreviewHitRef.current) return;
+    paintDrawCursor(snapPreviewHitRef.current, lineInferenceRef.current);
+  }, [viewRevision]);
   const clientToWorld = (clientX: number, clientY: number, svg: SVGSVGElement) => {
     // Use the live screen CTM so letterboxing from preserveAspectRatio
     // (canvas is width:100% × fixed height, viewBox 460×330) maps X/Y uniformly.
@@ -2078,6 +2537,19 @@ function ParametricSketchCanvas({
     return {
       x: Math.round(((viewX - math.cx) / math.scale) * 100) / 100,
       y: Math.round(((math.cy - viewY) / math.scale) * 100) / 100,
+    };
+  };
+  const clientToView = (
+    clientX: number,
+    clientY: number,
+    svg: SVGSVGElement,
+  ) => {
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const inverse = ctm.inverse();
+    return {
+      x: inverse.a * clientX + inverse.c * clientY + inverse.e,
+      y: inverse.b * clientX + inverse.d * clientY + inverse.f,
     };
   };
   const world = (event: { clientX: number; clientY: number; currentTarget: EventTarget }) => {
@@ -2130,8 +2602,58 @@ function ParametricSketchCanvas({
       return;
     }
     if (tool === "polyline" && event.detail > 1) return;
-    const point = resolvePointerSnap(world(event));
+    const pointerWorld = world(event);
+    const linePreview =
+      tool === "line" || tool === "polyline"
+        ? resolveLineDrawPreview(pointerWorld)
+        : null;
+    const point = linePreview?.hit || resolvePointerSnap(pointerWorld);
+    const committedInference = linePreview?.inference || null;
     const drawPoint = sketchDrawPointFromSnap(point);
+    if (tool === "polyline") {
+      // The second pointer-up in a double-click ends the session; it must not
+      // also create a tiny duplicate segment.
+      const segmentNumber =
+        (polylineSessionRef.current?.segmentIds.length || 0) + 1;
+      let constraintNumber = 0;
+      const createConstraintId = () =>
+        uid(`constraint.polyline.${segmentNumber}.${++constraintNumber}`);
+      const result = advanceSketchPolyline(
+        polylineSessionRef.current,
+        drawPoint,
+        latestSketchRef.current,
+        () => uid(`polyline.edge.${segmentNumber}`),
+        createConstraintId,
+      );
+      const inferenceConstraints = result.createdLineId
+        ? buildLineInferenceConstraint(
+            result.createdLineId,
+            committedInference,
+            result.sketch.entities,
+            result.sketch.constraints,
+            createConstraintId,
+          )
+        : [];
+      const committedSketch = inferenceConstraints.length
+        ? {
+            ...result.sketch,
+            constraints: [
+              ...result.sketch.constraints,
+              ...inferenceConstraints,
+            ],
+          }
+        : result.sketch;
+      polylineSessionRef.current = result.session;
+      setPending(result.session ? [result.session.lastPoint] : []);
+      lineInferenceRef.current = null;
+      paintDrawCursor(null);
+      if (!result.accepted || !result.createdLineId) return;
+      if (result.beginUndo) beginEdit();
+      latestSketchRef.current = committedSketch;
+      onSketch(committedSketch);
+      onSelect(result.createdLineId);
+      return;
+    }
     if (tool === "point") {
       addEntity({
         id: uid("point"),
@@ -2202,22 +2724,39 @@ function ParametricSketchCanvas({
         endAngle: null,
         points: [],
       };
-      const entities = [...draft.sketch.entities, entity];
+      const sketch = latestSketchRef.current;
+      const entities = [...sketch.entities, entity];
+      let constraintNumber = 0;
+      const createConstraintId = () =>
+        uid(`constraint.line.${++constraintNumber}`);
       const snapConstraints = buildLineSnapCoincidentConstraints(
         lineId,
         next[0].snapTarget,
         next[1].snapTarget,
         entities,
-        draft.sketch.constraints,
-        () => uid("constraint.snap"),
+        sketch.constraints,
+        createConstraintId,
+      );
+      const inferenceConstraints = buildLineInferenceConstraint(
+        lineId,
+        committedInference,
+        entities,
+        [...sketch.constraints, ...snapConstraints],
+        createConstraintId,
       );
       beginEdit();
-      onSketch({
-        ...draft.sketch,
+      const committedSketch = {
+        ...sketch,
         entities,
-        constraints: [...draft.sketch.constraints, ...snapConstraints],
+        constraints: [
+          ...sketch.constraints,
+          ...snapConstraints,
+          ...inferenceConstraints,
+        ],
         constraintsReviewed: false,
-      });
+      };
+      latestSketchRef.current = committedSketch;
+      onSketch(committedSketch);
       onSelect(lineId);
       return;
     }
@@ -2323,6 +2862,217 @@ function ParametricSketchCanvas({
       });
     }
   };
+  const clampClientToCanvas = (
+    clientX: number,
+    clientY: number,
+    svg: SVGSVGElement,
+  ) => {
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(clientX, rect.left), rect.right),
+      y: Math.min(Math.max(clientY, rect.top), rect.bottom),
+    };
+  };
+  const beginBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (
+      event.button !== 2 ||
+      pointerOperationRef.current ||
+      dragRef.current ||
+      panRef.current ||
+      tool !== "select" ||
+      caseName !== "nominal" ||
+      pendingConflict
+    ) {
+      return;
+    }
+    const svg = event.currentTarget;
+    // A stale flag can remain when the browser suppresses contextmenu after a drag.
+    // A new right-button press always starts a fresh context-menu decision.
+    suppressNextContextMenuRef.current = false;
+    const client = clampClientToCanvas(event.clientX, event.clientY, svg);
+    const originView = clientToView(client.x, client.y, svg);
+    const originWorld = clientToWorld(client.x, client.y, svg);
+    const operation = tryBeginSketchPointerOperation(
+      pointerOperationRef.current,
+      { kind: "box-selecting", pointerId: event.pointerId, button: 2 },
+    );
+    if (!operation) return;
+    const session: SketchBoxSelectSession = {
+      pointerId: event.pointerId,
+      originClientX: client.x,
+      originClientY: client.y,
+      currentClientX: client.x,
+      currentClientY: client.y,
+      originView,
+      currentView: originView,
+      originWorld,
+      currentWorld: originWorld,
+      mode: "contain",
+      hasMoved: false,
+      additive: event.shiftKey,
+      subtractive: event.ctrlKey || event.metaKey,
+    };
+    pointerOperationRef.current = operation;
+    boxSelectionRef.current = session;
+    setBoxSelection(session);
+    svg.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
+  const updateBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    const active = boxSelectionRef.current;
+    if (!active || active.pointerId !== event.pointerId) return false;
+    const svg = event.currentTarget;
+    const client = clampClientToCanvas(event.clientX, event.clientY, svg);
+    const currentView = clientToView(client.x, client.y, svg);
+    const currentWorld = clientToWorld(client.x, client.y, svg);
+    const hasMoved =
+      active.hasMoved ||
+      sketchPointerMovedPastThreshold(
+        { x: active.originClientX, y: active.originClientY },
+        client,
+      );
+    const next: SketchBoxSelectSession = {
+      ...active,
+      currentClientX: client.x,
+      currentClientY: client.y,
+      currentView,
+      currentWorld,
+      mode: client.x >= active.originClientX ? "contain" : "cross",
+      hasMoved,
+    };
+    boxSelectionRef.current = next;
+    setBoxSelection(next);
+    if (hasMoved) event.preventDefault();
+    return true;
+  };
+  const clearBoxSelection = () => {
+    const active = boxSelectionRef.current;
+    const operation = pointerOperationRef.current;
+    const pointerId =
+      active?.pointerId ??
+      (operation?.kind === "box-selecting" ? operation.pointerId : null);
+    if (pointerId != null && svgRef.current?.hasPointerCapture(pointerId)) {
+      svgRef.current.releasePointerCapture(pointerId);
+    }
+    boxSelectionRef.current = null;
+    setBoxSelection(null);
+  };
+  const cancelBoxSelection = () => {
+    const active = boxSelectionRef.current;
+    clearBoxSelection();
+    if (active) {
+      pointerOperationRef.current = endSketchPointerOperation(
+        pointerOperationRef.current,
+        active.pointerId,
+      );
+    } else if (pointerOperationRef.current?.kind === "box-selecting") {
+      pointerOperationRef.current = null;
+    }
+  };
+  const finishBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    const active = boxSelectionRef.current;
+    if (!active || active.pointerId !== event.pointerId) {
+      cancelBoxSelection();
+      return;
+    }
+    const ids = active.hasMoved
+      ? selectSketchPrimitives(
+          draftPrimitives,
+          normalizeSketchSelectionBox(active.originWorld, active.currentWorld),
+          active.mode,
+        )
+      : [];
+    suppressNextContextMenuRef.current = active.hasMoved;
+    clearBoxSelection();
+    pointerOperationRef.current = endSketchPointerOperation(
+      pointerOperationRef.current,
+      event.pointerId,
+    );
+    if (!active.hasMoved) return;
+    if (active.subtractive && !active.additive) {
+      onSelect(selected.filter((id) => !ids.includes(id)));
+    } else {
+      onSelect(ids, active.additive);
+    }
+    event.preventDefault();
+  };
+  const startPan = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.button === 2) {
+      beginBoxSelection(event);
+      return;
+    }
+    const target = event.target;
+    const startedOnBackground =
+      target === event.currentTarget ||
+      (target instanceof Element &&
+        !!target.closest('[data-sketch-canvas-background="true"]'));
+    const hit = startedOnBackground ? "background" : "other";
+    if (resolveSketchPointerIntent(event.button, hit) !== "panning-canvas") {
+      return;
+    }
+    if (event.button !== 0 && event.button !== 1) return;
+    const operation = tryBeginSketchPointerOperation(
+      pointerOperationRef.current,
+      {
+        kind: "panning-canvas",
+        pointerId: event.pointerId,
+        button: event.button,
+      },
+    );
+    if (!operation || dragRef.current || panRef.current) return;
+    const origin = clientToView(
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    pointerOperationRef.current = operation;
+    panRef.current = {
+      pointerId: event.pointerId,
+      button: event.button,
+      originClientX: event.clientX,
+      originClientY: event.clientY,
+      originViewX: origin.x,
+      originViewY: origin.y,
+      bounds: { ...viewport.current.bounds },
+      scale: viewMathRef.current.scale,
+      hasMoved: false,
+      startedOnBackground,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+    event.preventDefault();
+  };
+  const panToClientPosition = (
+    clientX: number,
+    clientY: number,
+    pointerId: number,
+    svg: SVGSVGElement,
+  ) => {
+    const activePan = panRef.current;
+    if (!activePan || activePan.pointerId !== pointerId) return false;
+    if (
+      !activePan.hasMoved &&
+      !sketchPointerMovedPastThreshold(
+        { x: activePan.originClientX, y: activePan.originClientY },
+        { x: clientX, y: clientY },
+      )
+    ) {
+      return true;
+    }
+    activePan.hasMoved = true;
+    const current = clientToView(clientX, clientY, svg);
+    viewport.current = {
+      key: viewMathRef.current.viewportKey,
+      bounds: panSketchViewport(
+        activePan.bounds,
+        current.x - activePan.originViewX,
+        current.y - activePan.originViewY,
+        activePan.scale,
+      ),
+    };
+    setViewRevision((value) => value + 1);
+    return true;
+  };
   const applyOrthogonalDelta = (
     dx: number,
     dy: number,
@@ -2335,9 +3085,23 @@ function ParametricSketchCanvas({
   const startDrag = (
     event: React.PointerEvent,
     id: string,
-    handle: "start" | "end" | "center" | "body",
+    handle: "start" | "end" | "center" | "body" | "radius",
+    options: {
+      editTarget?: SketchEntityEditTarget;
+      moveIds?: string[];
+      isHandle?: boolean;
+      cursor?: string;
+    } = {},
   ) => {
-    if (tool !== "select" || caseName !== "nominal" || pendingConflict) return;
+    if (
+      event.button !== 0 ||
+      pointerOperationRef.current ||
+      panRef.current ||
+      tool !== "select" ||
+      caseName !== "nominal" ||
+      pendingConflict
+    )
+      return;
     event.stopPropagation();
     event.preventDefault();
     // Seed from the geometry currently on screen (draft in nominal, solved otherwise).
@@ -2348,21 +3112,26 @@ function ParametricSketchCanvas({
     );
     const source = snapshot.find((item) => item.id === id);
     if (!source) return;
-    const duplicate = event.altKey;
-    const multiSelected =
-      selected.includes(id) &&
-      selected.filter((itemId) =>
-        snapshot.some((entity) => entity.id === itemId),
-      ).length > 1;
-    const groupSourceIds = multiSelected
-      ? selected.filter((itemId) =>
-          snapshot.some((entity) => entity.id === itemId),
-        )
-      : [id];
+    const requestedMoveIds = options.moveIds?.filter((itemId) =>
+      snapshot.some((entity) => entity.id === itemId),
+    );
+    const selectedMoveIds = selected.filter((itemId) =>
+      snapshot.some((entity) => entity.id === itemId),
+    );
+    const multiSelected = requestedMoveIds
+      ? requestedMoveIds.length > 1
+      : selected.includes(id) && selectedMoveIds.length > 1;
+    const groupSourceIds = requestedMoveIds?.length
+      ? requestedMoveIds
+      : multiSelected
+        ? selectedMoveIds
+        : [id];
+    const duplicate = event.altKey && !options.editTarget;
     const sourceIds = duplicate ? groupSourceIds : [];
     // Multi-select move/copy always translates whole entities together.
     const effectiveHandle =
-      (duplicate && sourceIds.length > 1) || (!duplicate && multiSelected)
+      !options.editTarget &&
+      ((duplicate && sourceIds.length > 1) || (!duplicate && multiSelected))
         ? ("body" as const)
         : handle;
     let dragId = id;
@@ -2389,12 +3158,36 @@ function ParametricSketchCanvas({
       snapshot = [...snapshot, ...copies];
     }
     const moveIds = duplicate ? duplicateIds : groupSourceIds;
+    const editingHandle = !!options.editTarget || !!options.isHandle;
+    const operation = tryBeginSketchPointerOperation(
+      pointerOperationRef.current,
+      editingHandle
+        ? {
+            kind: "editing-handle",
+            pointerId: event.pointerId,
+            entityId: dragId,
+            handleId: options.editTarget?.id || `${dragId}.${effectiveHandle}`,
+          }
+        : {
+            kind: "dragging-entity",
+            pointerId: event.pointerId,
+            entityId: dragId,
+          },
+    );
+    if (!operation) return;
+    pointerOperationRef.current = operation;
     setSettlePrimitives(null);
     dragEntitiesRef.current = snapshot;
-    const nextDrag = {
+    const nextDrag: NonNullable<typeof drag> = {
       id: dragId,
       handle: effectiveHandle,
+      editTarget: options.editTarget || null,
+      editPointer: null,
+      editCursor: options.cursor || null,
+      operationKind: editingHandle ? "editing-handle" : "dragging-entity",
       origin: world(event),
+      originClientX: event.clientX,
+      originClientY: event.clientY,
       entity,
       beforeEntities: snapshot,
       pointerId: event.pointerId,
@@ -2411,20 +3204,35 @@ function ParametricSketchCanvas({
   const move = (event: React.PointerEvent<SVGSVGElement>) => {
     const pointerWorld = world(event);
     onCursorChange(pointerWorld);
+    const operation = pointerOperationRef.current;
+    if (operation && !operationOwnsPointer(operation, event.pointerId)) return;
+    if (operation?.kind === "box-selecting") {
+      updateBoxSelection(event);
+      return;
+    }
+    const activePan = panRef.current;
+    if (
+      operation?.kind === "panning-canvas" &&
+      activePan?.pointerId === event.pointerId
+    ) {
+      paintDrawCursor(null);
+      panToClientPosition(
+        event.clientX,
+        event.clientY,
+        event.pointerId,
+        event.currentTarget,
+      );
+      return;
+    }
     const active = dragRef.current;
     if (!active) {
       if (tool !== "select" && caseName === "nominal" && !pendingConflict) {
-        paintDrawCursor(
-          objectSnapEnabled
-            ? resolvePointerSnap(pointerWorld)
-            : {
-                point: [
-                  Math.round(pointerWorld.x * 100) / 100,
-                  Math.round(pointerWorld.y * 100) / 100,
-                ],
-                target: null,
-              },
-        );
+        if (tool === "line" || tool === "polyline") {
+          const preview = resolveLineDrawPreview(pointerWorld);
+          paintDrawCursor(preview.hit, preview.inference);
+        } else {
+          paintDrawCursor(resolvePointerSnap(pointerWorld));
+        }
       } else {
         paintDrawCursor(null);
       }
@@ -2434,15 +3242,22 @@ function ParametricSketchCanvas({
     const current = pointerWorld;
     let dx = current.x - active.origin.x,
       dy = current.y - active.origin.y;
-    ({ dx, dy } = applyOrthogonalDelta(
-      dx,
-      dy,
-      event.shiftKey || orthogonalLock,
-    ));
+    if (!active.editTarget) {
+      ({ dx, dy } = applyOrthogonalDelta(
+        dx,
+        dy,
+        event.shiftKey || orthogonalLock,
+      ));
+    }
     dx = Math.round(dx * 100) / 100;
     dy = Math.round(dy * 100) / 100;
     if (!active.hasMoved) {
-      if (Math.hypot(dx, dy) < DRAG_MOVE_THRESHOLD) {
+      if (
+        !sketchPointerMovedPastThreshold(
+          { x: active.originClientX, y: active.originClientY },
+          { x: event.clientX, y: event.clientY },
+        )
+      ) {
         // Keep the pressed preview identical to the pre-drag geometry.
         dragEntitiesRef.current = active.beforeEntities;
         return;
@@ -2451,65 +3266,74 @@ function ParametricSketchCanvas({
       dragRef.current = { ...active, hasMoved: true };
       setDrag((value) => (value ? { ...value, hasMoved: true } : value));
     }
+    if (active.editTarget) {
+      const targetPoint: [number, number] = [
+        active.editTarget.originPoint[0] + dx,
+        active.editTarget.originPoint[1] + dy,
+      ];
+      const edited = editSketchEntitiesAtHandle(
+        active.beforeEntities,
+        active.editTarget,
+        targetPoint,
+      );
+      if (!edited) return;
+      const propagated = propagateShapeHandleEdit(
+        draft.sketch.constraints,
+        edited.entities,
+        active.beforeEntities,
+        edited.editedEntityIds,
+      );
+      dragEntitiesRef.current = propagated.entities;
+      dragRef.current = {
+        ...active,
+        hasMoved: true,
+        editPointer: current,
+      };
+      setDragTick((value) => value + 1);
+      return;
+    }
     const source = active.entity;
-    const shift = (
-      value: [number, number] | null | undefined,
-    ): [number, number] | null =>
-      value ? [value[0] + dx, value[1] + dy] : null;
     const translateWhole =
       active.handle === "center" || active.handle === "body";
     const movingIds = new Set(
       active.moveIds.length ? active.moveIds : [active.id],
     );
     const rigidGroup = movingIds.size > 1;
-    const local = active.beforeEntities.map((item) => {
-      if (!movingIds.has(item.id)) return item;
-      if (rigidGroup || (active.duplicate && translateWhole)) {
-        return {
-          ...item,
-          center: shift(item.center),
-          start: shift(item.start),
-          end: shift(item.end),
-          points: item.points.map(
-            ([x, y]) => [x + dx, y + dy] as [number, number],
-          ),
-        };
-      }
-      if (translateWhole) {
-        const base = active.duplicate ? item : source;
-        return {
-          ...item,
-          center: shift(base.center),
-          start: shift(base.start),
-          end: shift(base.end),
-          points: base.points.map(
-            ([x, y]) => [x + dx, y + dy] as [number, number],
-          ),
-        };
-      }
-      const endpoint = shift(
-        active.handle === "start" || active.handle === "end"
-          ? (active.duplicate ? item : source)[active.handle]
-          : null,
-      );
-      if (!endpoint) return item;
-      const pivot = active.duplicate ? item : source;
-      if (item.geometryType === "arc" && pivot.center) {
-        const angle =
-          (Math.atan2(
-            endpoint[1] - pivot.center[1],
-            endpoint[0] - pivot.center[0],
-          ) *
-            180) /
-          Math.PI;
-        return {
-          ...item,
-          [active.handle]: endpoint,
-          [active.handle === "start" ? "startAngle" : "endAngle"]: angle,
-        };
-      }
-      return { ...item, [active.handle]: endpoint };
-    });
+    const local =
+      rigidGroup || translateWhole
+        ? translateSketchEntities(
+            active.beforeEntities,
+            [...movingIds],
+            [dx, dy],
+          )
+        : active.beforeEntities.map((item) => {
+            if (!movingIds.has(item.id)) return item;
+            const endpoint =
+              active.handle === "start" || active.handle === "end"
+                ? ([
+                    (active.duplicate ? item : source)[active.handle]![0] + dx,
+                    (active.duplicate ? item : source)[active.handle]![1] + dy,
+                  ] as [number, number])
+                : null;
+            if (!endpoint) return item;
+            const pivot = active.duplicate ? item : source;
+            if (item.geometryType === "arc" && pivot.center) {
+              const angle =
+                (Math.atan2(
+                  endpoint[1] - pivot.center[1],
+                  endpoint[0] - pivot.center[0],
+                ) *
+                  180) /
+                Math.PI;
+              return {
+                ...item,
+                [active.handle]: endpoint,
+                [active.handle === "start" ? "startAngle" : "endAngle"]:
+                  angle,
+              };
+            }
+            return { ...item, [active.handle]: endpoint };
+          });
     if (active.duplicate || rigidGroup) {
       // Group translate (move or Alt-copy) keeps relative topology among moved entities.
       dragEntitiesRef.current = local;
@@ -2525,7 +3349,7 @@ function ParametricSketchCanvas({
     }
     setDragTick((value) => value + 1);
   };
-  const finishDrag = () => {
+  const finishDrag = async () => {
     const active = dragRef.current;
     if (!active) return;
     const afterEntities =
@@ -2536,15 +3360,56 @@ function ParametricSketchCanvas({
     const clearDragState = () => {
       dragEntitiesRef.current = null;
       dragRef.current = null;
+      pointerOperationRef.current = endSketchPointerOperation(
+        pointerOperationRef.current,
+        active.pointerId,
+      );
       setDrag(null);
+    };
+    const validateAndCommit = async (
+      committed: {
+        sketch: Draft["sketch"];
+        parameterDefinitions?: ParameterDefinition[];
+      },
+      previewEntities: Draft["sketch"]["entities"],
+    ) => {
+      const validationToken = ++editValidationTokenRef.current;
+      let validation: { valid: boolean; message?: string };
+      try {
+        validation = await validateGeometryEdit(committed);
+      } catch (error) {
+        validation = {
+          valid: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      if (validationToken !== editValidationTokenRef.current) return false;
+      if (!validation.valid) {
+        setSettlePrimitives(null);
+        clearDragState();
+        onGeometryEditRejected(
+          validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+        );
+        return false;
+      }
+      setSettlePrimitives(entitiesToPrimitives(previewEntities));
+      beginEdit();
+      onGeometryEdit(committed);
+      clearDragState();
+      return true;
     };
     if (!active.hasMoved) {
       clearDragState();
       return;
     }
+    const changedEntityIds = changedSketchEntityIds(
+      active.beforeEntities,
+      afterEntities,
+    );
     const moved = afterEntities.find((item) => item.id === active.id);
     const before = active.beforeEntities.find((item) => item.id === active.id);
     const displacement = (() => {
+      if (active.editTarget) return changedEntityIds.length ? 1 : 0;
       if (!moved || !before) return 0;
       if (active.handle === "center" || active.handle === "body") {
         const from = before.center || before.start;
@@ -2563,7 +3428,7 @@ function ParametricSketchCanvas({
       if (!from || !to) return 0;
       return Math.hypot(to[0] - from[0], to[1] - from[1]);
     })();
-    if (displacement < DRAG_MOVE_THRESHOLD) {
+    if (displacement < 1e-9) {
       clearDragState();
       return;
     }
@@ -2596,25 +3461,52 @@ function ParametricSketchCanvas({
           boundaryRefs: region.boundaryRefs.map((ref) => idMap[ref]),
           role: `${region.role}.copy`,
         }));
-      setSettlePrimitives(entitiesToPrimitives(afterEntities));
-      beginEdit();
-      onGeometryEdit({
-        sketch: {
-          ...draft.sketch,
-          entities: afterEntities,
-          constraints: [...draft.sketch.constraints, ...copiedConstraints],
-          regions: [...draft.sketch.regions, ...copiedRegions],
-          constraintsReviewed: false,
+      const accepted = await validateAndCommit(
+        {
+          sketch: {
+            ...draft.sketch,
+            entities: afterEntities,
+            constraints: [...draft.sketch.constraints, ...copiedConstraints],
+            regions: [...draft.sketch.regions, ...copiedRegions],
+            constraintsReviewed: false,
+          },
         },
-      });
-      onSelect(
-        active.duplicateIds.length ? active.duplicateIds : [active.id],
+        afterEntities,
       );
-      clearDragState();
+      if (accepted) {
+        onSelect(
+          active.duplicateIds.length ? active.duplicateIds : [active.id],
+        );
+      }
+      return;
+    }
+    if (active.editTarget) {
+      const touchedEntityIds = changedEntityIds.length
+        ? changedEntityIds
+        : [...active.editTarget.entityIds];
+      const conflict = analyzeLocalSketchEdit(
+        draft.sketch,
+        active.id,
+        active.beforeEntities,
+        afterEntities,
+        touchedEntityIds,
+      );
+      if (conflict) {
+        onEditConflict(conflict);
+        clearDragState();
+        return;
+      }
+      const committed = commitCompletedGeometryEdit(
+        draft,
+        touchedEntityIds,
+        afterEntities,
+      );
+      await validateAndCommit(committed, afterEntities);
       return;
     }
     if (active.moveIds.length > 1) {
       let entities = afterEntities;
+      const touchedEntityIds = new Set(active.moveIds);
       for (const moveId of active.moveIds) {
         const propagated = propagateCoincidentMove(
           draft.sketch.constraints,
@@ -2624,17 +3516,27 @@ function ParametricSketchCanvas({
           active.beforeEntities,
         );
         entities = propagated.entities;
+        propagated.touchedIds.forEach((id) => touchedEntityIds.add(id));
       }
-      setSettlePrimitives(entitiesToPrimitives(entities));
-      beginEdit();
-      onGeometryEdit({
-        sketch: {
-          ...draft.sketch,
-          entities,
-          constraintsReviewed: false,
-        },
-      });
-      clearDragState();
+      const touched = [...touchedEntityIds];
+      const conflict = analyzeLocalSketchEdit(
+        draft.sketch,
+        active.id,
+        active.beforeEntities,
+        entities,
+        touched,
+      );
+      if (conflict) {
+        onEditConflict(conflict);
+        clearDragState();
+        return;
+      }
+      const committed = commitCompletedGeometryEdit(
+        draft,
+        touched,
+        entities,
+      );
+      await validateAndCommit(committed, entities);
       return;
     }
     const translateWhole = active.handle === "center" || active.handle === "body";
@@ -2659,22 +3561,229 @@ function ParametricSketchCanvas({
       return;
     }
     // Freeze the released pose until draft catches up — avoids flashing stale solve geometry.
-    setSettlePrimitives(entitiesToPrimitives(propagated.entities));
-    const sketch = commitLocalEntityFixedDimensions(
-      draft.sketch,
-      active.id,
+    const committed = commitCompletedGeometryEdit(
+      draft,
+      propagated.touchedIds,
       propagated.entities,
     );
-    beginEdit();
-    onGeometryEdit({ sketch });
-    clearDragState();
+    await validateAndCommit(committed, propagated.entities);
+  };
+  const cancelEntityDrag = () => {
+    editValidationTokenRef.current += 1;
+    const active = dragRef.current;
+    if (!active) {
+      if (
+        pointerOperationRef.current?.kind === "dragging-entity" ||
+        pointerOperationRef.current?.kind === "editing-handle"
+      ) {
+        pointerOperationRef.current = null;
+      }
+      dragEntitiesRef.current = null;
+      setSettlePrimitives(null);
+      setDrag(null);
+      return;
+    }
+    if (svgRef.current?.hasPointerCapture(active.pointerId)) {
+      svgRef.current.releasePointerCapture(active.pointerId);
+    }
+    dragEntitiesRef.current = null;
+    dragRef.current = null;
+    pointerOperationRef.current = endSketchPointerOperation(
+      pointerOperationRef.current,
+      active.pointerId,
+    );
+    setSettlePrimitives(null);
+    setDrag(null);
+  };
+  const cancelCanvasPan = (restoreView: boolean) => {
+    const active = panRef.current;
+    if (!active) {
+      if (pointerOperationRef.current?.kind === "panning-canvas") {
+        pointerOperationRef.current = null;
+      }
+      setIsPanning(false);
+      return;
+    }
+    if (restoreView && active.hasMoved) {
+      viewport.current = {
+        key: viewMathRef.current.viewportKey,
+        bounds: { ...active.bounds },
+      };
+      setViewRevision((value) => value + 1);
+    }
+    if (svgRef.current?.hasPointerCapture(active.pointerId)) {
+      svgRef.current.releasePointerCapture(active.pointerId);
+    }
+    panRef.current = null;
+    pointerOperationRef.current = endSketchPointerOperation(
+      pointerOperationRef.current,
+      active.pointerId,
+    );
+    setIsPanning(false);
+  };
+  const finishPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    const operation = pointerOperationRef.current;
+    if (!operation) {
+      if (event.button === 0 && tool !== "select") click(event);
+      return;
+    }
+    if (!operationOwnsPointer(operation, event.pointerId)) return;
+    if (
+      operation.kind === "dragging-entity" ||
+      operation.kind === "editing-handle"
+    ) {
+      if (dragRef.current) void finishDrag();
+      else cancelEntityDrag();
+      return;
+    }
+    if (operation.kind === "box-selecting") {
+      finishBoxSelection(event);
+      return;
+    }
+    const activePan = panRef.current;
+    if (!activePan || activePan.pointerId !== event.pointerId) {
+      cancelCanvasPan(false);
+      return;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    panRef.current = null;
+    pointerOperationRef.current = endSketchPointerOperation(
+      pointerOperationRef.current,
+      event.pointerId,
+    );
+    setIsPanning(false);
+    if (activePan.hasMoved) return;
+    if (activePan.button === 0 && tool !== "select") {
+      click(event);
+    } else if (activePan.button === 0 && activePan.startedOnBackground) {
+      onSelect("");
+    }
+  };
+  const cancelPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    const operation = pointerOperationRef.current;
+    if (!operationOwnsPointer(operation, event.pointerId)) return;
+    if (
+      operation?.kind === "dragging-entity" ||
+      operation?.kind === "editing-handle"
+    ) {
+      cancelEntityDrag();
+    } else if (operation?.kind === "box-selecting") {
+      cancelBoxSelection();
+    } else {
+      cancelCanvasPan(true);
+    }
+  };
+  useEffect(() => {
+    if (activeToolRef.current === tool) return;
+    activeToolRef.current = tool;
+    cancelEntityDrag();
+    cancelBoxSelection();
+    cancelCanvasPan(true);
+  }, [tool]);
+  useEffect(() => {
+    const cancelActiveOperation = () => {
+      cancelEntityDrag();
+      cancelBoxSelection();
+      cancelCanvasPan(true);
+    };
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !pointerOperationRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cancelActiveOperation();
+    };
+    window.addEventListener("blur", cancelActiveOperation);
+    window.addEventListener("keydown", cancelOnEscape, true);
+    return () => {
+      window.removeEventListener("blur", cancelActiveOperation);
+      window.removeEventListener("keydown", cancelOnEscape, true);
+      editValidationTokenRef.current += 1;
+      const pointerId = pointerOperationRef.current?.pointerId;
+      if (
+        pointerId != null &&
+        svgRef.current?.hasPointerCapture(pointerId)
+      ) {
+        svgRef.current.releasePointerCapture(pointerId);
+      }
+      dragEntitiesRef.current = null;
+      dragRef.current = null;
+      panRef.current = null;
+      boxSelectionRef.current = null;
+      pointerOperationRef.current = null;
+    };
+  }, []);
+  const terminatePolyline = (reason: "finish" | "cancel") => {
+    const result = terminateSketchPolyline(polylineSessionRef.current, reason);
+    polylineSessionRef.current = result.session;
+    lineInferenceRef.current = null;
+    setPending([]);
+    paintDrawCursor(null);
+  };
+  useEffect(() => {
+    if (tool !== "polyline" || !polylineCommand) return;
+    terminatePolyline(polylineCommand.type);
+  }, [polylineCommand?.id]);
+  const beginEntityPointerOperation = (
+    event: React.PointerEvent,
+    entityId: string,
+    handle: "start" | "end" | "center" | "body",
+  ) => {
+    if (
+      event.button !== 0 ||
+      tool !== "select" ||
+      caseName !== "nominal" ||
+      pendingConflict
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    const rectangle = findSketchRectangleGroup(editDisplayEntities, entityId);
+    if (rectangle && handle === "body") {
+      if (event.shiftKey || event.ctrlKey) {
+        rectangle.entityIds.forEach((id) => onSelect(id, true));
+        return;
+      }
+      onSelect(rectangle.entityIds);
+      startDrag(event, rectangle.entityIds[0], "body", {
+        moveIds: rectangle.entityIds,
+      });
+      return;
+    }
+    if (event.shiftKey || event.ctrlKey) {
+      onSelect(entityId, true);
+      return;
+    }
+    if (!selected.includes(entityId)) onSelect(entityId);
+    startDrag(event, entityId, handle);
+  };
+  const beginControlPointerOperation = (
+    event: React.PointerEvent,
+    control: (typeof entityControls)[number],
+  ) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    if (control.editTarget) {
+      const handle =
+        control.editTarget.kind === "arc-start"
+          ? "start"
+          : control.editTarget.kind === "arc-end"
+            ? "end"
+            : "radius";
+      startDrag(event, control.entityId, handle, {
+        editTarget: control.editTarget,
+        cursor: control.cursor,
+      });
+      return;
+    }
+    startDrag(event, control.entityId, "center", {
+      isHandle: true,
+      cursor: control.cursor,
+    });
   };
   const drawPrimitive = (primitive: (typeof primitives)[number]) => {
-    const active = selected.includes(primitive.id),
-      select = (e: React.PointerEvent) => {
-        e.stopPropagation();
-        onSelect(primitive.id, e.shiftKey || e.ctrlKey);
-      };
+    const active = selected.includes(primitive.id);
     if (primitive.type === "point" && primitive.start) {
       const p = screen(primitive.start);
       return (
@@ -2684,17 +3793,9 @@ function ParametricSketchCanvas({
           cx={p.x}
           cy={p.y}
           r={active ? 6 : 4}
-          onPointerDown={(event) => {
-            if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-              return;
-            }
-            event.stopPropagation();
-            if (active && !event.shiftKey && !event.ctrlKey) {
-              startDrag(event, primitive.id, "start");
-              return;
-            }
-            select(event);
-          }}
+          onPointerDown={(event) =>
+            beginEntityPointerOperation(event, primitive.id, "start")
+          }
         />
       );
     }
@@ -2702,24 +3803,7 @@ function ParametricSketchCanvas({
       const a = screen(primitive.start),
         b = screen(primitive.end);
       const beginBodyDrag = (event: React.PointerEvent) => {
-        if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-          return;
-        }
-        event.stopPropagation();
-        if (event.shiftKey || event.ctrlKey) {
-          onSelect(primitive.id, true);
-          return;
-        }
-        if (event.altKey) {
-          if (!selected.includes(primitive.id)) onSelect(primitive.id);
-          startDrag(event, primitive.id, "body");
-          return;
-        }
-        if (active) {
-          startDrag(event, primitive.id, "body");
-          return;
-        }
-        onSelect(primitive.id);
+        beginEntityPointerOperation(event, primitive.id, "body");
       };
       return (
         <g
@@ -2736,14 +3820,18 @@ function ParametricSketchCanvas({
                 cx={a.x}
                 cy={a.y}
                 r="5"
-                onPointerDown={(e) => startDrag(e, primitive.id, "start")}
+                onPointerDown={(e) =>
+                  startDrag(e, primitive.id, "start", { isHandle: true })
+                }
               />
               <circle
                 className="drag-handle"
                 cx={b.x}
                 cy={b.y}
                 r="5"
-                onPointerDown={(e) => startDrag(e, primitive.id, "end")}
+                onPointerDown={(e) =>
+                  startDrag(e, primitive.id, "end", { isHandle: true })
+                }
               />
             </>
           )}
@@ -2753,29 +3841,8 @@ function ParametricSketchCanvas({
     if (primitive.type === "circle" && primitive.center) {
       const c = screen(primitive.center);
       const radiusPx = (primitive.radius || 0) * scale;
-      const showCenter =
-        hoveredCircleId === primitive.id ||
-        (drag?.id === primitive.id &&
-          (drag.handle === "center" || drag.handle === "body"));
       const beginCircleDrag = (event: React.PointerEvent) => {
-        if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-          return;
-        }
-        event.stopPropagation();
-        if (event.shiftKey || event.ctrlKey) {
-          onSelect(primitive.id, true);
-          return;
-        }
-        if (event.altKey) {
-          if (!selected.includes(primitive.id)) onSelect(primitive.id);
-          startDrag(event, primitive.id, "body");
-          return;
-        }
-        if (active) {
-          startDrag(event, primitive.id, "body");
-          return;
-        }
-        select(event);
+        beginEntityPointerOperation(event, primitive.id, "body");
       };
       return (
         <g
@@ -2795,58 +3862,13 @@ function ParametricSketchCanvas({
             cy={c.y}
             r={radiusPx}
           />
-          <g
-            onPointerEnter={() => setHoveredCircleId(primitive.id)}
-            onPointerLeave={(event) => {
-              const next = event.relatedTarget as Node | null;
-              if (next && event.currentTarget.contains(next)) return;
-              setHoveredCircleId((current) =>
-                current === primitive.id ? null : current,
-              );
-            }}
-          >
-            <circle
-              className="curve-hit-target circle-interior-hit"
-              cx={c.x}
-              cy={c.y}
-              r={Math.max(0, radiusPx - 1)}
-              onPointerDown={(event) => {
-                if (
-                  tool !== "select" ||
-                  caseName !== "nominal" ||
-                  pendingConflict
-                ) {
-                  return;
-                }
-                event.stopPropagation();
-                if (event.shiftKey || event.ctrlKey) {
-                  onSelect(primitive.id, true);
-                  return;
-                }
-                if (!selected.includes(primitive.id)) onSelect(primitive.id);
-                startDrag(event, primitive.id, "center");
-              }}
-            />
-            {showCenter && (
-              <circle
-                className="circle-center-mark"
-                cx={c.x}
-                cy={c.y}
-                r="4"
-                onPointerDown={(event) => {
-                  if (
-                    tool !== "select" ||
-                    caseName !== "nominal" ||
-                    pendingConflict
-                  ) {
-                    return;
-                  }
-                  event.stopPropagation();
-                  startDrag(event, primitive.id, "center");
-                }}
-              />
-            )}
-          </g>
+          <circle
+            className="curve-hit-target circle-interior-hit"
+            cx={c.x}
+            cy={c.y}
+            r={Math.max(0, radiusPx - 1)}
+            onPointerDown={beginCircleDrag}
+          />
         </g>
       );
     }
@@ -2887,28 +3909,8 @@ function ParametricSketchCanvas({
         largeArc,
       });
       const arcPath = arcSvgPath(fromEntity || geometry, screen, scale);
-      const a = screen({ x: geometry.start[0], y: geometry.start[1] });
-      const b = screen({ x: geometry.end[0], y: geometry.end[1] });
-      const c = screen(primitive.center);
       const beginArcDrag = (event: React.PointerEvent) => {
-        if (tool !== "select" || caseName !== "nominal" || pendingConflict) {
-          return;
-        }
-        event.stopPropagation();
-        if (event.shiftKey || event.ctrlKey) {
-          onSelect(primitive.id, true);
-          return;
-        }
-        if (event.altKey) {
-          if (!selected.includes(primitive.id)) onSelect(primitive.id);
-          startDrag(event, primitive.id, "center");
-          return;
-        }
-        if (active) {
-          startDrag(event, primitive.id, "center");
-          return;
-        }
-        select(event);
+        beginEntityPointerOperation(event, primitive.id, "body");
       };
       return (
         <g key={primitive.id} onPointerDown={beginArcDrag}>
@@ -2917,37 +3919,6 @@ function ParametricSketchCanvas({
             className={`sketch-arc ${active ? "selected" : ""} ${primitive.construction ? "construction" : ""}`}
             d={arcPath}
           />
-          {active && selected.length === 1 && caseName === "nominal" && (
-            <>
-              <circle
-                className="drag-handle"
-                cx={a.x}
-                cy={a.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "start")
-                }
-              />
-              <circle
-                className="drag-handle"
-                cx={b.x}
-                cy={b.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "end")
-                }
-              />
-              <circle
-                className="drag-handle center"
-                cx={c.x}
-                cy={c.y}
-                r="5"
-                onPointerDown={(event) =>
-                  startDrag(event, primitive.id, "center")
-                }
-              />
-            </>
-          )}
         </g>
       );
     }
@@ -2956,28 +3927,39 @@ function ParametricSketchCanvas({
   return (
     <svg
       ref={svgRef}
-      className={`semantic-sketch-canvas tool-${tool}`}
+      className={`semantic-sketch-canvas tool-${tool}${
+        isPanning ? " panning" : ""
+      }${drag ? ` ${drag.operationKind}` : ""}${
+        boxSelection ? " box-selecting" : ""
+      }`}
+      style={drag?.editCursor ? { cursor: drag.editCursor } : undefined}
       viewBox="0 0 460 330"
       preserveAspectRatio="xMidYMid meet"
-      onPointerDown={click}
+      onPointerDown={startPan}
       onPointerMove={move}
-      onPointerUp={finishDrag}
-      onPointerCancel={finishDrag}
+      onPointerUp={finishPointer}
+      onPointerCancel={cancelPointer}
       onDoubleClick={(event) => {
         if (tool !== "polyline") return;
         event.preventDefault();
         event.stopPropagation();
-        polylineSessionRef.current = null;
-        setPending([]);
-        paintDrawCursor(null);
+        terminatePolyline("finish");
       }}
       onContextMenu={(event) => {
+        if (
+          tool === "select" &&
+          (suppressNextContextMenuRef.current ||
+            boxSelectionRef.current?.hasMoved)
+        ) {
+          suppressNextContextMenuRef.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (tool !== "polyline") return;
         event.preventDefault();
         event.stopPropagation();
-        polylineSessionRef.current = null;
-        setPending([]);
-        paintDrawCursor(null);
+        terminatePolyline("finish");
       }}
       onPointerLeave={() => {
         onCursorChange(null);
@@ -2999,7 +3981,12 @@ function ParametricSketchCanvas({
           />
         </pattern>
       </defs>
-      <rect width="460" height="330" fill="url(#solverGrid)" />
+      <rect
+        width="460"
+        height="330"
+        fill="url(#solverGrid)"
+        data-sketch-canvas-background="true"
+      />
       <line x1="0" y1={cy} x2="460" y2={cy} className="solver-axis" />
       <line x1={cx} y1="0" x2={cx} y2="330" className="solver-axis" />
       <text x="444" y={Math.max(14, cy - 7)} className="axis-label">
@@ -3009,6 +3996,114 @@ function ParametricSketchCanvas({
         {sketchPlaneAxes(draft.sketch.plane).vertical}
       </text>
       {primitives.map(drawPrimitive)}
+      {boxSelection?.hasMoved ? (() => {
+        const selectionBox = normalizeSketchSelectionBox(
+          boxSelection.originView,
+          boxSelection.currentView,
+        );
+        return (
+          <rect
+            className={`sketch-box-selection ${boxSelection.mode}`}
+            data-sketch-box-selection={boxSelection.mode}
+            x={selectionBox.minimumX}
+            y={selectionBox.minimumY}
+            width={selectionBox.maximumX - selectionBox.minimumX}
+            height={selectionBox.maximumY - selectionBox.minimumY}
+            pointerEvents="none"
+          />
+        );
+      })() : null}
+      {entityControls.map((control) => {
+        const point = screen({ x: control.point[0], y: control.point[1] });
+        const active =
+          drag?.editTarget?.id === control.editTarget?.id ||
+          (!control.editTarget && drag?.id === control.entityId);
+        return (
+          <g
+            key={control.id}
+            className={`sketch-edit-control ${control.kind}${active ? " active" : ""}`}
+            style={{ cursor: control.cursor }}
+            data-sketch-edit-handle={control.kind}
+            onPointerDown={(event) =>
+              beginControlPointerOperation(event, control)
+            }
+          >
+            <circle
+              className="sketch-edit-control-hit"
+              cx={point.x}
+              cy={point.y}
+              r="9"
+            />
+            {control.kind === "corner" ? (
+              <rect
+                className="sketch-edit-control-visible"
+                x={point.x - 4}
+                y={point.y - 4}
+                width="8"
+                height="8"
+              />
+            ) : control.kind === "edge" ? (
+              <rect
+                className="sketch-edit-control-visible"
+                x={point.x - 4}
+                y={point.y - 3}
+                width="8"
+                height="6"
+                rx="1"
+              />
+            ) : control.kind === "radius" ? (
+              <path
+                className="sketch-edit-control-visible"
+                d={`M${point.x},${point.y - 5} L${point.x + 5},${point.y} L${point.x},${point.y + 5} L${point.x - 5},${point.y} Z`}
+              />
+            ) : (
+              <circle
+                className="sketch-edit-control-visible"
+                cx={point.x}
+                cy={point.y}
+                r={control.kind === "center" ? 4 : 5}
+              />
+            )}
+            {control.kind === "center" ? (
+              <>
+                <line
+                  className="sketch-edit-control-cross"
+                  x1={point.x - 7}
+                  y1={point.y}
+                  x2={point.x + 7}
+                  y2={point.y}
+                />
+                <line
+                  className="sketch-edit-control-cross"
+                  x1={point.x}
+                  y1={point.y - 7}
+                  x2={point.x}
+                  y2={point.y + 7}
+                />
+              </>
+            ) : null}
+          </g>
+        );
+      })}
+      {activeEntityEditHint && activeEntityEditHintLayout ? (
+        <g
+          className="line-dimension-hint entity-edit-dimension"
+          transform={`translate(${activeEntityEditHintLayout.x} ${activeEntityEditHintLayout.y})`}
+          pointerEvents="none"
+        >
+          <rect
+            width="116"
+            height={activeEntityEditHint.lines.length > 1 ? 34 : 22}
+            rx="4"
+            fillOpacity={LINE_DIMENSION_HINT_PRESENTATION.backgroundOpacity}
+          />
+          {activeEntityEditHint.lines.map((line, index) => (
+            <text key={line} x="8" y={14 + index * 14} opacity="1">
+              {line}
+            </text>
+          ))}
+        </g>
+      ) : null}
       {pending.map((point, index) => {
         const item = screen({ x: point.x, y: point.y });
         return (
@@ -3027,6 +4122,58 @@ function ParametricSketchCanvas({
         visibility="hidden"
         pointerEvents="none"
       />
+      <line
+        ref={lineInferenceReferenceRef}
+        className="line-inference-reference"
+        visibility="hidden"
+        pointerEvents="none"
+      />
+      <line
+        ref={lineInferenceGuideRef}
+        className="line-inference-guide"
+        visibility="hidden"
+        pointerEvents="none"
+      />
+      <line
+        ref={lineInferenceConnectorRef}
+        className="line-inference-connector"
+        visibility="hidden"
+        pointerEvents="none"
+      />
+      <g
+        ref={lineDimensionGroupRef}
+        className="line-dimension-hint"
+        visibility="hidden"
+        pointerEvents={LINE_DIMENSION_HINT_PRESENTATION.pointerEvents}
+      >
+        <rect
+          width="116"
+          height="34"
+          rx="4"
+          fillOpacity={LINE_DIMENSION_HINT_PRESENTATION.backgroundOpacity}
+        />
+        <text
+          ref={lineDimensionLengthRef}
+          x="8"
+          y="13"
+          opacity={LINE_DIMENSION_HINT_PRESENTATION.textOpacity}
+        />
+        <text
+          ref={lineDimensionAngleRef}
+          x="8"
+          y="27"
+          opacity={LINE_DIMENSION_HINT_PRESENTATION.textOpacity}
+        />
+      </g>
+      <g
+        ref={lineInferenceBadgeRef}
+        className="line-inference-badge"
+        visibility="hidden"
+        pointerEvents="none"
+      >
+        <rect ref={lineInferenceBadgeRectRef} width="58" height="22" rx="4" />
+        <text ref={lineInferenceBadgeTextRef} x="8" y="14" />
+      </g>
       <circle
         ref={circlePreviewRef}
         className="sketch-circle draw-preview"
@@ -3055,6 +4202,12 @@ function ParametricSketchCanvas({
         visibility="hidden"
         pointerEvents="none"
         r="4"
+      />
+      <text
+        ref={snapHintRef}
+        className="snap-hint"
+        visibility="hidden"
+        pointerEvents="none"
       />
       <text x="12" y="20" className="solver-label">
         {caseName.toUpperCase()} · {solved?.valid ? "SOLVED" : "EDITING"} ·{" "}
@@ -6487,8 +7640,12 @@ function GeometryStage({
     draft.sketch.entities[0]?.id ? [draft.sketch.entities[0].id] : [],
   );
   const [tool, setTool] = useState<SketchTool>("select");
-  const [history, setHistory] = useState<Draft["sketch"][]>([]);
-  const [future, setFuture] = useState<Draft["sketch"][]>([]);
+  type SketchHistorySnapshot = {
+    sketch: Draft["sketch"];
+    parameterDefinitions: ParameterDefinition[];
+  };
+  const [history, setHistory] = useState<SketchHistorySnapshot[]>([]);
+  const [future, setFuture] = useState<SketchHistorySnapshot[]>([]);
   const [solving, setSolving] = useState(false);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
   const [polylineCommand, setPolylineCommand] =
@@ -6552,7 +7709,10 @@ function GeometryStage({
   const selectedEntity = selectedEntities[0] || "";
   const selectEntity = (id: string | string[], additive = false) => {
     if (Array.isArray(id)) {
-      setSelectedEntities(id.filter(Boolean));
+      const ids = id.filter(Boolean);
+      setSelectedEntities((items) =>
+        additive ? [...new Set([...items, ...ids])] : ids,
+      );
       return;
     }
     setSelectedEntities((items) =>
@@ -6654,7 +7814,15 @@ function GeometryStage({
       ),
     });
   const beginSketchEdit = () => {
-    setHistory((items) => [...items, draft.sketch].slice(-40));
+    setHistory((items) =>
+      [
+        ...items,
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+      ].slice(-40),
+    );
     setFuture([]);
   };
   const applySketch = (sketch: Draft["sketch"]) => {
@@ -6683,7 +7851,40 @@ function GeometryStage({
         : {}),
     });
   };
-  const resolveSketchEditConflict = (
+  const validateSketchGeometryEdit = async (patch: {
+    sketch: Draft["sketch"];
+    parameterDefinitions?: ParameterDefinition[];
+  }) => {
+    const currentNominal = solution?.cases.find(
+      (entry) => entry.case === "nominal",
+    );
+    if (!currentNominal?.valid) return { valid: true };
+    try {
+      const candidate: Draft = {
+        ...draft,
+        sketch: normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
+        parameterDefinitions:
+          patch.parameterDefinitions || draft.parameterDefinitions,
+      };
+      const validation = await api.solveSketch(candidate);
+      const nominal = validation.cases.find(
+        (entry) => entry.case === "nominal",
+      );
+      return {
+        valid: !!nominal?.valid,
+        message: nominal?.valid
+          ? undefined
+          : nominal?.diagnostics.map((item) => item.message).join("；") ||
+            "约束求解失败，已恢复拖动前的合法几何。",
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+  const resolveSketchEditConflict = async (
     action: "cancel" | "acceptSoftRelease" | "updateParameters",
   ) => {
     const conflict = sketchEditConflict;
@@ -6699,11 +7900,10 @@ function GeometryStage({
       const committed = commitSharedParameterUpdate(
         draft.sketch,
         draft.parameterDefinitions,
-        conflict.entityId,
+        conflict.touchedEntityIds,
         conflict.afterEntities,
       );
-      beginSketchEdit();
-      applyGeometryEdit({
+      const patch = {
         ...committed,
         sketch: {
           ...committed.sketch,
@@ -6714,15 +7914,24 @@ function GeometryStage({
               : constraint,
           ),
         },
-      });
+      };
+      const validation = await validateSketchGeometryEdit(patch);
+      if (!validation.valid) {
+        showError(
+          validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+        );
+        setSketchEditConflict(null);
+        return;
+      }
+      beginSketchEdit();
+      applyGeometryEdit(patch);
       setSketchEditConflict(null);
       return;
     }
-    beginSketchEdit();
-    applyGeometryEdit({
+    const patch = {
       sketch: commitLocalEntityFixedDimensions(
         draft.sketch,
-        conflict.entityId,
+        conflict.touchedEntityIds,
         conflict.afterEntities,
         {
           releaseSoftConstraintIds: conflict.softConstraints.map(
@@ -6730,24 +7939,50 @@ function GeometryStage({
           ),
         },
       ),
-    });
+    };
+    const validation = await validateSketchGeometryEdit(patch);
+    if (!validation.valid) {
+      showError(
+        validation.message || "约束求解失败，已恢复拖动前的合法几何。",
+      );
+      setSketchEditConflict(null);
+      return;
+    }
+    beginSketchEdit();
+    applyGeometryEdit(patch);
     setSketchEditConflict(null);
   };
   const undo = () => {
     const previous = history.at(-1);
     if (!previous) return;
     setSketchEditConflict(null);
-    setFuture((items) => [draft.sketch, ...items].slice(0, 40));
+    setFuture((items) =>
+      [
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+        ...items,
+      ].slice(0, 40),
+    );
     setHistory((items) => items.slice(0, -1));
-    applySketch(previous);
+    applyGeometryEdit(previous);
   };
   const redo = () => {
     const next = future[0];
     if (!next) return;
     setSketchEditConflict(null);
-    setHistory((items) => [...items, draft.sketch].slice(-40));
+    setHistory((items) =>
+      [
+        ...items,
+        {
+          sketch: draft.sketch,
+          parameterDefinitions: draft.parameterDefinitions,
+        },
+      ].slice(-40),
+    );
     setFuture((items) => items.slice(1));
-    applySketch(next);
+    applyGeometryEdit(next);
   };
   const cleanSketchReferences = (
     sketch: Draft["sketch"],
@@ -7070,6 +8305,7 @@ function GeometryStage({
     future,
     sketchEditConflict,
     sketchClipboard,
+    tool,
   ]);
   return (
     <>
@@ -7360,11 +8596,16 @@ function GeometryStage({
               </button>
               <button
                 className={objectSnapEnabled ? "active" : ""}
+                aria-pressed={objectSnapEnabled}
                 onClick={() => setObjectSnapEnabled((value) => !value)}
-                title="对象捕捉：绘制时可吸附端点／最近点／相切点；仅直线端点吸附会自动添加重合约束"
+                title={
+                  objectSnapEnabled
+                    ? "关闭二维草图端点吸附"
+                    : "开启二维草图端点吸附"
+                }
               >
                 <Magnet size={14} />
-                捕捉
+                端点吸附
               </button>
               <button
                 className={orthogonalLock ? "active" : ""}
@@ -7493,6 +8734,8 @@ function GeometryStage({
               onSelect={selectEntity}
               onSketch={applySketch}
               onGeometryEdit={applyGeometryEdit}
+              validateGeometryEdit={validateSketchGeometryEdit}
+              onGeometryEditRejected={showError}
               onEditConflict={setSketchEditConflict}
               pendingConflict={sketchEditConflict}
               beginEdit={beginSketchEdit}

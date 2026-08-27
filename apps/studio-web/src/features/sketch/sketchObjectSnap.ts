@@ -76,6 +76,19 @@ export const DEFAULT_SKETCH_SNAP_OPTIONS: Pick<
   ],
 };
 
+export const ENDPOINT_SNAP_RADIUS_VIEW_PX = 10;
+
+/** Convert a stable SVG-view snap radius to sketch millimetres at the current zoom. */
+export const endpointSnapToleranceMm = (
+  worldToViewScale: number,
+  radiusViewPx = ENDPOINT_SNAP_RADIUS_VIEW_PX,
+) => {
+  if (!Number.isFinite(worldToViewScale) || worldToViewScale <= 0) {
+    return DEFAULT_SKETCH_SNAP_OPTIONS.toleranceMm;
+  }
+  return Math.max(0.25, Math.min(10, radiusViewPx / worldToViewScale));
+};
+
 const roundCoord = (value: number) => Math.round(value * 100) / 100;
 
 const endpointLabel = (handle: SketchSnapEndpointHandle) =>
@@ -212,7 +225,7 @@ const lineEndpointCandidates = (
         kind: "lineEndpoint",
         entityId: entity.id,
         handle,
-        point: [roundCoord(endpoint[0]), roundCoord(endpoint[1])],
+        point: [endpoint[0], endpoint[1]],
         createsConstraint: true,
       });
     }
@@ -233,7 +246,7 @@ const arcEndpointCandidates = (
         kind: "arcEndpoint",
         entityId: entity.id,
         handle,
-        point: [roundCoord(endpoint[0]), roundCoord(endpoint[1])],
+        point: [endpoint[0], endpoint[1]],
         // Line tool may create coincident; circle/arc drawing never does.
         createsConstraint: true,
       });
