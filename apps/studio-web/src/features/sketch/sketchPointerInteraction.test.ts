@@ -26,9 +26,9 @@ describe("二维草图指针操作状态机", () => {
     );
   });
 
-  it("does not start unsupported pointer buttons", () => {
-    expect(resolveSketchPointerIntent(2, "background")).toBeNull();
-    expect(resolveSketchPointerIntent(2, "entity")).toBeNull();
+  it("routes right-button presses to the box-selecting operation", () => {
+    expect(resolveSketchPointerIntent(2, "background")).toBe("box-selecting");
+    expect(resolveSketchPointerIntent(2, "entity")).toBe("box-selecting");
   });
 
   it("allows only one entity-drag or canvas-pan operation at a time", () => {
@@ -48,13 +48,20 @@ describe("二维草图指针操作状态机", () => {
       entityId: "circle.1",
       handleId: "circle.1.radius-control",
     };
+    const box: SketchPointerOperation = {
+      kind: "box-selecting",
+      pointerId: 7,
+      button: 2,
+    };
 
     expect(tryBeginSketchPointerOperation(null, drag)).toEqual(drag);
     expect(tryBeginSketchPointerOperation(null, edit)).toEqual(edit);
+    expect(tryBeginSketchPointerOperation(null, box)).toEqual(box);
     expect(tryBeginSketchPointerOperation(drag, pan)).toBeNull();
     expect(tryBeginSketchPointerOperation(pan, drag)).toBeNull();
     expect(tryBeginSketchPointerOperation(edit, drag)).toBeNull();
     expect(tryBeginSketchPointerOperation(edit, pan)).toBeNull();
+    expect(tryBeginSketchPointerOperation(box, drag)).toBeNull();
   });
 
   it("keeps handle editing distinct from whole-entity dragging", () => {

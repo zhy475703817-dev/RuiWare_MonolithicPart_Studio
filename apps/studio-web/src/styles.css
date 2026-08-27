@@ -2401,6 +2401,24 @@ code {
 .semantic-sketch-canvas.editing-handle * {
   cursor: inherit !important;
 }
+.semantic-sketch-canvas.box-selecting {
+  cursor: crosshair;
+}
+.semantic-sketch-canvas.box-selecting * {
+  cursor: crosshair !important;
+}
+.sketch-box-selection {
+  fill: rgba(30, 120, 149, 0.12);
+  stroke: #1e7895;
+  stroke-width: 1.2;
+  stroke-dasharray: 5 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.sketch-box-selection.cross {
+  fill: rgba(217, 130, 27, 0.12);
+  stroke: #d9821b;
+}
 .solver-axis {
   stroke: #91a8b6;
   stroke-dasharray: 6 5;

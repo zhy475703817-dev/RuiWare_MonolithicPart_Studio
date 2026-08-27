@@ -88,6 +88,12 @@ import {
   type SketchEntityEditTarget,
 } from "./features/sketch/sketchEntityEditing";
 import {
+  normalizeSketchSelectionBox,
+  selectSketchPrimitives,
+  type SketchSelectionBox,
+  type SketchSelectionMode,
+} from "./features/sketch/sketchBoxSelection";
+import {
   panSketchViewport,
   type SketchViewportBounds,
 } from "./features/sketch/sketchViewport";
@@ -558,6 +564,21 @@ type SketchViewCommand =
 type SketchPolylineCommand =
   | { id: number; type: "finish" | "cancel" }
   | null;
+type SketchBoxSelectSession = {
+  pointerId: number;
+  originClientX: number;
+  originClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  originView: { x: number; y: number };
+  currentView: { x: number; y: number };
+  originWorld: { x: number; y: number };
+  currentWorld: { x: number; y: number };
+  mode: SketchSelectionMode;
+  hasMoved: boolean;
+  additive: boolean;
+  subtractive: boolean;
+};
 const cloneSketchEntities = (entities: Draft["sketch"]["entities"]) =>
   entities.map((item) => ({
     ...item,
@@ -1986,6 +2007,10 @@ function ParametricSketchCanvas({
     hasMoved: boolean;
     startedOnBackground: boolean;
   } | null>(null);
+  const [boxSelection, setBoxSelection] = useState<SketchBoxSelectSession | null>(null);
+  const boxSelectionRef = useRef<SketchBoxSelectSession | null>(null);
+  const suppressNextContextMenuRef = useRef(false);
+  boxSelectionRef.current = boxSelection;
   const pointerOperationRef = useRef<SketchPointerOperation | null>(null);
   const editValidationTokenRef = useRef(0);
   const activeToolRef = useRef(tool);
@@ -2805,7 +2830,145 @@ function ParametricSketchCanvas({
       });
     }
   };
+  const clampClientToCanvas = (
+    clientX: number,
+    clientY: number,
+    svg: SVGSVGElement,
+  ) => {
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(clientX, rect.left), rect.right),
+      y: Math.min(Math.max(clientY, rect.top), rect.bottom),
+    };
+  };
+  const beginBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (
+      event.button !== 2 ||
+      pointerOperationRef.current ||
+      dragRef.current ||
+      panRef.current ||
+      tool !== "select" ||
+      caseName !== "nominal" ||
+      pendingConflict
+    ) {
+      return;
+    }
+    const svg = event.currentTarget;
+    // A stale flag can remain when the browser suppresses contextmenu after a drag.
+    // A new right-button press always starts a fresh context-menu decision.
+    suppressNextContextMenuRef.current = false;
+    const client = clampClientToCanvas(event.clientX, event.clientY, svg);
+    const originView = clientToView(client.x, client.y, svg);
+    const originWorld = clientToWorld(client.x, client.y, svg);
+    const operation = tryBeginSketchPointerOperation(
+      pointerOperationRef.current,
+      { kind: "box-selecting", pointerId: event.pointerId, button: 2 },
+    );
+    if (!operation) return;
+    const session: SketchBoxSelectSession = {
+      pointerId: event.pointerId,
+      originClientX: client.x,
+      originClientY: client.y,
+      currentClientX: client.x,
+      currentClientY: client.y,
+      originView,
+      currentView: originView,
+      originWorld,
+      currentWorld: originWorld,
+      mode: "contain",
+      hasMoved: false,
+      additive: event.shiftKey,
+      subtractive: event.ctrlKey || event.metaKey,
+    };
+    pointerOperationRef.current = operation;
+    boxSelectionRef.current = session;
+    setBoxSelection(session);
+    svg.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
+  const updateBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    const active = boxSelectionRef.current;
+    if (!active || active.pointerId !== event.pointerId) return false;
+    const svg = event.currentTarget;
+    const client = clampClientToCanvas(event.clientX, event.clientY, svg);
+    const currentView = clientToView(client.x, client.y, svg);
+    const currentWorld = clientToWorld(client.x, client.y, svg);
+    const hasMoved =
+      active.hasMoved ||
+      sketchPointerMovedPastThreshold(
+        { x: active.originClientX, y: active.originClientY },
+        client,
+      );
+    const next: SketchBoxSelectSession = {
+      ...active,
+      currentClientX: client.x,
+      currentClientY: client.y,
+      currentView,
+      currentWorld,
+      mode: client.x >= active.originClientX ? "contain" : "cross",
+      hasMoved,
+    };
+    boxSelectionRef.current = next;
+    setBoxSelection(next);
+    if (hasMoved) event.preventDefault();
+    return true;
+  };
+  const clearBoxSelection = () => {
+    const active = boxSelectionRef.current;
+    const operation = pointerOperationRef.current;
+    const pointerId =
+      active?.pointerId ??
+      (operation?.kind === "box-selecting" ? operation.pointerId : null);
+    if (pointerId != null && svgRef.current?.hasPointerCapture(pointerId)) {
+      svgRef.current.releasePointerCapture(pointerId);
+    }
+    boxSelectionRef.current = null;
+    setBoxSelection(null);
+  };
+  const cancelBoxSelection = () => {
+    const active = boxSelectionRef.current;
+    clearBoxSelection();
+    if (active) {
+      pointerOperationRef.current = endSketchPointerOperation(
+        pointerOperationRef.current,
+        active.pointerId,
+      );
+    } else if (pointerOperationRef.current?.kind === "box-selecting") {
+      pointerOperationRef.current = null;
+    }
+  };
+  const finishBoxSelection = (event: React.PointerEvent<SVGSVGElement>) => {
+    const active = boxSelectionRef.current;
+    if (!active || active.pointerId !== event.pointerId) {
+      cancelBoxSelection();
+      return;
+    }
+    const ids = active.hasMoved
+      ? selectSketchPrimitives(
+          draftPrimitives,
+          normalizeSketchSelectionBox(active.originWorld, active.currentWorld),
+          active.mode,
+        )
+      : [];
+    suppressNextContextMenuRef.current = active.hasMoved;
+    clearBoxSelection();
+    pointerOperationRef.current = endSketchPointerOperation(
+      pointerOperationRef.current,
+      event.pointerId,
+    );
+    if (!active.hasMoved) return;
+    if (active.subtractive && !active.additive) {
+      onSelect(selected.filter((id) => !ids.includes(id)));
+    } else {
+      onSelect(ids, active.additive);
+    }
+    event.preventDefault();
+  };
   const startPan = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.button === 2) {
+      beginBoxSelection(event);
+      return;
+    }
     const target = event.target;
     const startedOnBackground =
       target === event.currentTarget ||
@@ -3011,6 +3174,10 @@ function ParametricSketchCanvas({
     onCursorChange(pointerWorld);
     const operation = pointerOperationRef.current;
     if (operation && !operationOwnsPointer(operation, event.pointerId)) return;
+    if (operation?.kind === "box-selecting") {
+      updateBoxSelection(event);
+      return;
+    }
     const activePan = panRef.current;
     if (
       operation?.kind === "panning-canvas" &&
@@ -3437,6 +3604,10 @@ function ParametricSketchCanvas({
       else cancelEntityDrag();
       return;
     }
+    if (operation.kind === "box-selecting") {
+      finishBoxSelection(event);
+      return;
+    }
     const activePan = panRef.current;
     if (!activePan || activePan.pointerId !== event.pointerId) {
       cancelCanvasPan(false);
@@ -3466,6 +3637,8 @@ function ParametricSketchCanvas({
       operation?.kind === "editing-handle"
     ) {
       cancelEntityDrag();
+    } else if (operation?.kind === "box-selecting") {
+      cancelBoxSelection();
     } else {
       cancelCanvasPan(true);
     }
@@ -3474,11 +3647,13 @@ function ParametricSketchCanvas({
     if (activeToolRef.current === tool) return;
     activeToolRef.current = tool;
     cancelEntityDrag();
+    cancelBoxSelection();
     cancelCanvasPan(true);
   }, [tool]);
   useEffect(() => {
     const cancelActiveOperation = () => {
       cancelEntityDrag();
+      cancelBoxSelection();
       cancelCanvasPan(true);
     };
     const cancelOnEscape = (event: KeyboardEvent) => {
@@ -3503,6 +3678,7 @@ function ParametricSketchCanvas({
       dragEntitiesRef.current = null;
       dragRef.current = null;
       panRef.current = null;
+      boxSelectionRef.current = null;
       pointerOperationRef.current = null;
     };
   }, []);
@@ -3554,6 +3730,7 @@ function ParametricSketchCanvas({
     event: React.PointerEvent,
     control: (typeof entityControls)[number],
   ) => {
+    if (event.button !== 0) return;
     event.stopPropagation();
     if (control.editTarget) {
       const handle =
@@ -3720,7 +3897,9 @@ function ParametricSketchCanvas({
       ref={svgRef}
       className={`semantic-sketch-canvas tool-${tool}${
         isPanning ? " panning" : ""
-      }${drag ? ` ${drag.operationKind}` : ""}`}
+      }${drag ? ` ${drag.operationKind}` : ""}${
+        boxSelection ? " box-selecting" : ""
+      }`}
       style={drag?.editCursor ? { cursor: drag.editCursor } : undefined}
       viewBox="0 0 460 330"
       preserveAspectRatio="xMidYMid meet"
@@ -3735,6 +3914,16 @@ function ParametricSketchCanvas({
         terminatePolyline("finish");
       }}
       onContextMenu={(event) => {
+        if (
+          tool === "select" &&
+          (suppressNextContextMenuRef.current ||
+            boxSelectionRef.current?.hasMoved)
+        ) {
+          suppressNextContextMenuRef.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (tool !== "polyline") return;
         event.preventDefault();
         event.stopPropagation();
@@ -3775,6 +3964,23 @@ function ParametricSketchCanvas({
         {sketchPlaneAxes(draft.sketch.plane).vertical}
       </text>
       {primitives.map(drawPrimitive)}
+      {boxSelection?.hasMoved ? (() => {
+        const selectionBox = normalizeSketchSelectionBox(
+          boxSelection.originView,
+          boxSelection.currentView,
+        );
+        return (
+          <rect
+            className={`sketch-box-selection ${boxSelection.mode}`}
+            data-sketch-box-selection={boxSelection.mode}
+            x={selectionBox.minimumX}
+            y={selectionBox.minimumY}
+            width={selectionBox.maximumX - selectionBox.minimumX}
+            height={selectionBox.maximumY - selectionBox.minimumY}
+            pointerEvents="none"
+          />
+        );
+      })() : null}
       {entityControls.map((control) => {
         const point = screen({ x: control.point[0], y: control.point[1] });
         const active =
@@ -7738,7 +7944,10 @@ function GeometryStage({
   const selectedEntity = selectedEntities[0] || "";
   const selectEntity = (id: string | string[], additive = false) => {
     if (Array.isArray(id)) {
-      setSelectedEntities(id.filter(Boolean));
+      const ids = id.filter(Boolean);
+      setSelectedEntities((items) =>
+        additive ? [...new Set([...items, ...ids])] : ids,
+      );
       return;
     }
     setSelectedEntities((items) =>

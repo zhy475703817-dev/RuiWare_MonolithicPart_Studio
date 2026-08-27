@@ -18,6 +18,11 @@ export type SketchPointerOperation =
       kind: "panning-canvas";
       pointerId: number;
       button: 0 | 1;
+    }
+  | {
+      kind: "box-selecting";
+      pointerId: number;
+      button: 2;
     };
 
 export function resolveSketchPointerIntent(
@@ -25,6 +30,7 @@ export function resolveSketchPointerIntent(
   hit: SketchPointerHit,
 ): SketchPointerOperation["kind"] | null {
   if (button === 1) return "panning-canvas";
+  if (button === 2) return "box-selecting";
   if (button !== 0) return null;
   if (hit === "control") return "editing-handle";
   if (hit === "entity") return "dragging-entity";
