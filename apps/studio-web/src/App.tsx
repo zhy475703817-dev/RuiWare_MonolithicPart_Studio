@@ -492,64 +492,6 @@ function profileModeSketch(
   };
 }
 
-function Model({ url }: { url: string }) {
-  const geometry = useLoader(STLLoader, url);
-  return (
-    <Center>
-      <mesh geometry={geometry} castShadow receiveShadow>
-        <meshStandardMaterial
-          color="#e99a35"
-          roughness={0.34}
-          metalness={0.4}
-        />
-      </mesh>
-    </Center>
-  );
-}
-
-function CadViewer({ result }: { result: CompileResult | null }) {
-  const stl = result?.artifacts.find((item) => item.kind === "stl");
-  if (!stl)
-    return (
-      <div className="viewer-empty">
-        <Box size={38} />
-        <strong>等待生成三维模型</strong>
-        <span>先保存模板并完成参数求值，再运行 B-Rep 编译</span>
-      </div>
-    );
-  return (
-    <div className="cad-viewer">
-      <Canvas camera={{ position: [160, 140, 220], fov: 42 }} shadows>
-        <color attach="background" args={["#f5f6f7"]} />
-        <ambientLight intensity={1.7} />
-        <directionalLight
-          position={[100, 160, 180]}
-          intensity={2.7}
-          castShadow
-        />
-        <Suspense fallback={null}>
-          <Bounds fit clip observe margin={1.25}>
-            <Model url={stl.url} />
-          </Bounds>
-        </Suspense>
-        <Grid
-          position={[0, -60, 0]}
-          args={[600, 600]}
-          cellSize={20}
-          cellThickness={0.55}
-          cellColor="#d4d9de"
-          sectionSize={100}
-          sectionColor="#aeb7c0"
-          fadeDistance={700}
-          infiniteGrid
-        />
-        <OrbitControls makeDefault />
-      </Canvas>
-      <span className="viewer-hint">拖拽旋转 · 滚轮缩放 · 右键平移</span>
-    </div>
-  );
-}
-
 type SketchTool =
   | "select"
   | "point"
@@ -2669,27 +2611,6 @@ function ParametricSketchCanvas({
         endAngle: null,
         points: [],
       });
-      return;
-    }
-    if (tool === "polyline") {
-      const segmentNumber = (polylineSessionRef.current?.segmentIds.length || 0) + 1;
-      let constraintNumber = 0;
-      const createConstraintId = () =>
-        uid(`constraint.polyline.${segmentNumber}.${++constraintNumber}`);
-      const result = advanceSketchPolyline(
-        polylineSessionRef.current,
-        drawPoint,
-        latestSketchRef.current,
-        () => uid(`polyline.edge.${segmentNumber}`),
-        createConstraintId,
-      );
-      polylineSessionRef.current = result.session;
-      setPending(result.session ? [result.session.lastPoint] : []);
-      paintDrawCursor(null);
-      if (!result.accepted || !result.createdLineId) return;
-      if (result.beginUndo) beginEdit();
-      onSketch(result.sketch);
-      onSelect(result.createdLineId);
       return;
     }
     const needed = tool === "arc" ? 3 : 2;
