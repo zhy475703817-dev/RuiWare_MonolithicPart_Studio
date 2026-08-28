@@ -46,6 +46,8 @@ function toErrorNotice(error: unknown): ErrorNotice {
  */
 export function useDraftWorkspace() {
   const initialized = useRef(false);
+  const errorTimerRef = useRef<number | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [stage, setStage] = useState<StageName>("templateInfo");
@@ -62,7 +64,11 @@ export function useDraftWorkspace() {
 
   function showError(errorValue: unknown) {
     setError(toErrorNotice(errorValue));
-    window.setTimeout(() => setError(null), 9000);
+    if (errorTimerRef.current != null) window.clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = window.setTimeout(() => {
+      setError(null);
+      errorTimerRef.current = null;
+    }, 9000);
   }
 
   function chooseDraft(item: Draft) {
@@ -126,6 +132,14 @@ export function useDraftWorkspace() {
     return () => window.clearTimeout(timer);
   }, [stage, materialSearch, draft?.materialRequirements]);
 
+  useEffect(
+    () => () => {
+      if (errorTimerRef.current != null) window.clearTimeout(errorTimerRef.current);
+      if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
+
   function change(next: Draft) {
     setDraft(next);
     setDirty(true);
@@ -145,7 +159,12 @@ export function useDraftWorkspace() {
       setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
       setDirty(false);
       setNotice("已保存为新修订");
-      window.setTimeout(() => setNotice(""), 2400);
+      if (noticeTimerRef.current != null)
+        window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = window.setTimeout(() => {
+        setNotice("");
+        noticeTimerRef.current = null;
+      }, 2400);
       return saved;
     } catch (errorValue) {
       showError(errorValue);
@@ -183,7 +202,12 @@ export function useDraftWorkspace() {
         const index = STAGES.findIndex((item) => item.id === stage);
         if (index < STAGES.length - 1) setStage(STAGES[index + 1].id);
         setNotice("阶段检查通过");
-        window.setTimeout(() => setNotice(""), 2600);
+        if (noticeTimerRef.current != null)
+          window.clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = window.setTimeout(() => {
+          setNotice("");
+          noticeTimerRef.current = null;
+        }, 2600);
       }
     } catch (errorValue) {
       showError(errorValue);
