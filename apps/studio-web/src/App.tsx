@@ -45,12 +45,80 @@ import {
   Variable,
   X,
 } from "lucide-react";
-import { api, toErrorNotice } from "./api";
+import { api } from "./api";
 import type { ErrorNotice } from "./api/errors";
 import { WorkspaceShell } from "./components/layout/WorkspaceShell";
-import { CadViewer } from "./components/review/CadViewer";
+import { useDraftWorkspace } from "./features/draft/useDraftWorkspace";
 import { CheckList, Field, NumberInput, PanelTitle } from "./components/ui/FormParts";
-import { TemplateInfo } from "./features/stages/TemplateInfo";
+import { TemplateInfo } from "./features/stages/workflow/template/TemplateInfo";
+import { InterfaceEditor } from "./features/stages/workflow/interface/InterfaceEditor";
+import { VariantEditor } from "./features/stages/workflow/variant/VariantEditor";
+import { ReviewStage } from "./features/stages/review/compile/ReviewStage";
+import { AdmissionStage } from "./features/stages/review/admission/AdmissionStage";
+import { RuleLocalPreview } from "./features/stages/review/compile/RuleLocalPreview";
+import { MaterialScopePanel } from "./features/stages/material/MaterialScopePanel";
+import { MaterialSupplyBlankPanel } from "./features/stages/material/MaterialSupplyBlankPanel";
+import { MaterialValidationMatrix } from "./features/stages/material/MaterialValidationMatrix";
+import { SketchWorkspaceToolbar } from "./features/stages/geometry/SketchWorkspaceToolbar";
+import { RulesSimulationPanel } from "./features/stages/review/compile/RulesSimulationPanel";
+import { ContractParametersPanel } from "./features/stages/contract/ContractParametersPanel";
+import { ContractOverridesPanel } from "./features/stages/contract/ContractOverridesPanel";
+import { ContractSimulationWorkspace } from "./features/stages/contract/ContractSimulationWorkspace";
+import { SketchEditConflictDialog } from "./features/stages/geometry/SketchEditConflictDialog";
+import { SketchWorkspaceStatusBar } from "./features/stages/geometry/SketchWorkspaceStatusBar";
+import { SketchModePanel } from "./features/stages/geometry/SketchModePanel";
+import { GeometryAuthoringPanel } from "./features/stages/geometry/GeometryAuthoringPanel";
+import { GeometryRecipePanel } from "./features/stages/geometry/GeometryRecipePanel";
+import { SketchIntentEditor } from "./features/stages/geometry/SketchIntentEditor";
+import { SketchSelectedEntityEditor } from "./features/stages/geometry/SketchSelectedEntityEditor";
+import { useGeometryEditFlow } from "./features/stages/geometry/useGeometryEditFlow";
+import {
+  buildEndToEndJoints,
+  cloneSketchEntities,
+  dimensionTypeSet,
+  endpointChanged,
+  endpointLabel,
+  expandTopologyConstraints,
+  measureDimensionValue,
+  normalizeSketchTopology,
+  suggestCoincidentEndpoints,
+} from "./features/sketch/sketchAuthoringCore";
+import { endFromLengthAndAngle, linePolar } from "./features/sketch/sketchLineMath";
+import {
+  normalizeSketchNumbers,
+  roundSketchPoint,
+} from "./features/sketch/sketchNumberNormalization";
+import {
+  applyCenterlineThinwallOffset,
+  isThinwallOffsetEntity,
+} from "./features/sketch/sketchThinwallOffset";
+import {
+  commitCompletedGeometryEdit,
+  commitLocalEntityFixedDimensions,
+  commitSharedParameterUpdate,
+} from "./features/sketch/sketchGeometryCommit";
+import {
+  CONSTRAINT_CONTRACTS,
+  DIMENSION_CONSTRAINTS,
+  GEOMETRIC_CONSTRAINTS,
+  PARAMETER_SCOPE_LABELS,
+  PARAMETER_SOURCE_BEHAVIOR,
+  type ConstraintType,
+  constraintLabel,
+  defaultReferenceForSource,
+  dimensionDescription,
+  expressionReferencesParameter,
+  instanceParameterEditable,
+  legacyParameterSource,
+  normalizeParameterAliasReferences,
+  parameterDefaultForType,
+  parameterValueType,
+  renameRecordKey,
+  requiredScopeForSource,
+  renameParameterReferences,
+  semanticParameterIds,
+  sketchPlaneAxes,
+} from "./features/authoring/authoringUtils";
 import {
   buildLineSnapCoincidentConstraints,
   DEFAULT_SKETCH_SNAP_OPTIONS,
@@ -521,136 +589,6 @@ type SketchBoxSelectSession = {
   additive: boolean;
   subtractive: boolean;
 };
-const cloneSketchEntities = (entities: Draft["sketch"]["entities"]) =>
-  entities.map((item) => ({
-    ...item,
-    start: item.start ? ([item.start[0], item.start[1]] as [number, number]) : null,
-    end: item.end ? ([item.end[0], item.end[1]] as [number, number]) : null,
-    center: item.center
-      ? ([item.center[0], item.center[1]] as [number, number])
-      : null,
-    points: item.points.map(([x, y]) => [x, y] as [number, number]),
-  }));
-
-/** Expand legacy closed / multi-entity coincident into pairwise end-to-end joints. */
-const expandTopologyConstraints = (
-  constraints: Draft["sketch"]["constraints"],
-): Draft["sketch"]["constraints"] => {
-  const needsExpand = constraints.some(
-    (item) =>
-      item.constraintType === "closed" ||
-      (item.constraintType === "coincident" && item.entityRefs.length > 2),
-  );
-  if (!needsExpand) return constraints;
-  const next: Draft["sketch"]["constraints"] = [];
-  for (const constraint of constraints) {
-    const closeLoop = constraint.constraintType === "closed";
-    const chain =
-      closeLoop ||
-      (constraint.constraintType === "coincident" &&
-        constraint.entityRefs.length > 2);
-    if (!chain || constraint.entityRefs.length < 2) {
-      next.push(constraint);
-      continue;
-    }
-    const refs = constraint.entityRefs;
-    const pairs: [string, string][] = [];
-    for (let index = 0; index < refs.length - 1; index += 1) {
-      pairs.push([refs[index], refs[index + 1]]);
-    }
-    if (closeLoop) pairs.push([refs[refs.length - 1], refs[0]]);
-    pairs.forEach(([first, second], index) => {
-      next.push({
-        ...constraint,
-        id: `${constraint.id}.joint.${index + 1}`,
-        label:
-          constraint.label?.trim() ||
-          (closeLoop ? `首尾相连 ${index + 1}` : `首尾相连 ${index + 1}`),
-        constraintType: "coincident",
-        entityRefs: [first, second],
-        endpointRefs: ["end", "start"],
-      });
-    });
-  }
-  return next;
-};
-
-const normalizeSketchTopology = (sketch: Draft["sketch"]): Draft["sketch"] => {
-  const constraints = expandTopologyConstraints(sketch.constraints);
-  if (constraints === sketch.constraints) return sketch;
-  return { ...sketch, constraints, constraintsReviewed: false };
-};
-
-const buildEndToEndJoints = (
-  entityRefs: string[],
-  options: { closeLoop: boolean; idPrefix?: string },
-): Draft["sketch"]["constraints"] => {
-  if (entityRefs.length < 2) return [];
-  const pairs: [string, string][] = [];
-  for (let index = 0; index < entityRefs.length - 1; index += 1) {
-    pairs.push([entityRefs[index], entityRefs[index + 1]]);
-  }
-  if (options.closeLoop && entityRefs.length > 1) {
-    pairs.push([entityRefs[entityRefs.length - 1], entityRefs[0]]);
-  }
-  const prefix = options.idPrefix || uid("joint");
-  return pairs.map(([first, second], index) => ({
-    id: `${prefix}.${index + 1}`,
-    label: options.closeLoop
-      ? `首尾相连（闭合）${index + 1}`
-      : `首尾相连 ${index + 1}`,
-    constraintType: "coincident" as const,
-    entityRefs: [first, second],
-    endpointRefs: ["end", "start"] as Array<"start" | "end">,
-    expression: null,
-    parameterId: null,
-    value: null,
-    driverMode: null,
-    enabled: true,
-    driving: true,
-  }));
-};
-
-const measureDimensionValue = (
-  constraint: Draft["sketch"]["constraints"][number],
-  entities: Draft["sketch"]["entities"],
-) => {
-  const entity = entities.find((item) => item.id === constraint.entityRefs[0]);
-  if (!entity) return null;
-  if (
-    (constraint.constraintType === "distance" ||
-      constraint.constraintType === "distanceX" ||
-      constraint.constraintType === "distanceY") &&
-    entity.start &&
-    entity.end
-  ) {
-    const dx = entity.end[0] - entity.start[0],
-      dy = entity.end[1] - entity.start[1];
-    if (constraint.constraintType === "distanceX") return Math.round(Math.abs(dx) * 100) / 100;
-    if (constraint.constraintType === "distanceY") return Math.round(Math.abs(dy) * 100) / 100;
-    return Math.round(Math.hypot(dx, dy) * 100) / 100;
-  }
-  if (
-    (constraint.constraintType === "radius" ||
-      constraint.constraintType === "diameter") &&
-    entity.radius != null
-  ) {
-    const radius = Math.round(Math.abs(entity.radius) * 100) / 100;
-    return constraint.constraintType === "diameter" ? radius * 2 : radius;
-  }
-  if (constraint.constraintType === "angle" && entity.start && entity.end) {
-    const degrees =
-      (Math.atan2(entity.end[1] - entity.start[1], entity.end[0] - entity.start[0]) *
-        180) /
-      Math.PI;
-    return Math.round(degrees * 100) / 100;
-  }
-  return null;
-};
-
-const dimensionTypeSet = () =>
-  new Set(DIMENSION_CONSTRAINTS.map(([type]) => type as string));
-
 type SketchEditConflict = {
   entityId: string;
   touchedEntityIds: string[];
@@ -783,6 +721,102 @@ const softConstraintViolated = (
   return false;
 };
 
+const analyzeLocalSketchEdit = (
+  sketch: Draft["sketch"],
+  entityId: string,
+  beforeEntities: Draft["sketch"]["entities"],
+  afterEntities: Draft["sketch"]["entities"],
+  touchedEntityIds: string[] = [entityId],
+): SketchEditConflict | null => {
+  const normalized = normalizeSketchTopology(sketch);
+  const dimensions = dimensionTypeSet();
+  const touched = new Set(touchedEntityIds);
+  const reasons: string[] = [];
+  const softConstraints = normalized.constraints
+    .filter(
+      (item) =>
+        item.enabled &&
+        item.driving &&
+        WEAK_CONSTRAINT_TYPES.has(item.constraintType) &&
+        item.entityRefs.some((ref) => touched.has(ref)) &&
+        softConstraintViolated(item, afterEntities, beforeEntities),
+    )
+    .map((item) => ({
+      id: item.id,
+      label: item.label || item.id,
+      constraintType: item.constraintType,
+    }));
+  const strongConstraints = normalized.constraints
+    .filter(
+      (item) =>
+        item.enabled &&
+        STRONG_CONSTRAINT_TYPES.has(item.constraintType) &&
+        item.entityRefs.some((ref) => touched.has(ref)),
+    )
+    .map((item) => ({
+      id: item.id,
+      label: item.label || item.id,
+      constraintType: item.constraintType,
+    }));
+  if (softConstraints.length) {
+    reasons.push(
+      softConstraints
+        .map(
+          (item) =>
+            item.label ||
+            WEAK_CONSTRAINT_LABELS[item.constraintType] ||
+            item.constraintType,
+        )
+        .join("、"),
+    );
+  }
+  if (strongConstraints.length) {
+    reasons.push("重合／首尾相连将保留");
+  }
+  const localDimensions = normalized.constraints.filter(
+    (item) =>
+      item.enabled &&
+      item.driving &&
+      dimensions.has(item.constraintType) &&
+      item.entityRefs.includes(entityId) &&
+      item.driverMode !== "unset",
+  );
+  const sharedParameterIds = [
+    ...new Set(
+      localDimensions
+        .map((item) => item.parameterId)
+        .filter((id): id is string => !!id)
+        .filter((parameterId) =>
+          normalized.constraints.some(
+            (item) =>
+              item.parameterId === parameterId &&
+              !item.entityRefs.includes(entityId),
+          ) ||
+          sketch.entities.some(
+            (item) =>
+              item.id !== entityId && item.parameterRefs.includes(parameterId),
+          ),
+        ),
+    ),
+  ];
+  if (sharedParameterIds.length) {
+    reasons.push(`共享参数：${sharedParameterIds.join("、")}`);
+  }
+  // Soft-constraint notice alone is enough when strong joints only need reassurance
+  // and there is an actual soft violation or shared-parameter decision.
+  if (!softConstraints.length && !sharedParameterIds.length) return null;
+  return {
+    entityId,
+    touchedEntityIds: [...touched],
+    beforeEntities,
+    afterEntities,
+    reasons: [...new Set(reasons)],
+    softConstraints,
+    strongConstraints,
+    sharedParameterIds,
+  };
+};
+
 type EndpointHandle = "start" | "end";
 
 const coincidentEndpointLinks = (
@@ -829,34 +863,7 @@ const coincidentEndpointLinks = (
     }
   }
   return links;
-};
-
-const endpointLabel = (handle: "start" | "end") =>
-  handle === "start" ? "起点" : "终点";
-
-const suggestCoincidentEndpoints = (
-  first: Draft["sketch"]["entities"][number],
-  second: Draft["sketch"]["entities"][number],
-): ["start" | "end", "start" | "end"] => {
-  const handles: Array<"start" | "end"> = ["start", "end"];
-  let best: ["start" | "end", "start" | "end"] = ["end", "start"];
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const a of handles) {
-    for (const b of handles) {
-      const pa = first[a];
-      const pb = second[b];
-      if (!pa || !pb) continue;
-      const distance = Math.hypot(pa[0] - pb[0], pa[1] - pb[1]);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = [a, b];
-      }
-    }
-  }
-  return best;
-};
-
-/** Keep strong coincident joints when an endpoint (or whole entity) moves. */
+};/** Keep strong coincident joints when an endpoint (or whole entity) moves. */
 const propagateCoincidentMove = (
   constraints: Draft["sketch"]["constraints"],
   entities: Draft["sketch"]["entities"],
@@ -927,14 +934,6 @@ const propagateCoincidentMove = (
   return { entities: next, touchedIds: [...touched] };
 };
 
-const endpointChanged = (
-  before: [number, number] | null | undefined,
-  after: [number, number] | null | undefined,
-) =>
-  !!before &&
-  !!after &&
-  Math.hypot(after[0] - before[0], after[1] - before[1]) > 1e-9;
-
 /** Propagate every endpoint changed by a shape handle through existing joints. */
 const propagateShapeHandleEdit = (
   constraints: Draft["sketch"]["constraints"],
@@ -997,157 +996,6 @@ const changedSketchEntityIds = (
       );
     })
     .map((entity) => entity.id);
-};
-
-const analyzeLocalSketchEdit = (
-  sketch: Draft["sketch"],
-  entityId: string,
-  beforeEntities: Draft["sketch"]["entities"],
-  afterEntities: Draft["sketch"]["entities"],
-  touchedEntityIds: string[] = [entityId],
-): SketchEditConflict | null => {
-  const normalized = normalizeSketchTopology(sketch);
-  const dimensions = dimensionTypeSet();
-  const touched = new Set(touchedEntityIds);
-  const reasons: string[] = [];
-  const softConstraints = normalized.constraints
-    .filter(
-      (item) =>
-        item.enabled &&
-        item.driving &&
-        WEAK_CONSTRAINT_TYPES.has(item.constraintType) &&
-        item.entityRefs.some((ref) => touched.has(ref)) &&
-        softConstraintViolated(item, afterEntities, beforeEntities),
-    )
-    .map((item) => ({
-      id: item.id,
-      label: item.label || item.id,
-      constraintType: item.constraintType,
-    }));
-  const strongConstraints = normalized.constraints
-    .filter(
-      (item) =>
-        item.enabled &&
-        STRONG_CONSTRAINT_TYPES.has(item.constraintType) &&
-        item.entityRefs.some((ref) => touched.has(ref)),
-    )
-    .map((item) => ({
-      id: item.id,
-      label: item.label || item.id,
-      constraintType: item.constraintType,
-    }));
-  if (softConstraints.length) {
-    reasons.push(
-      softConstraints
-        .map(
-          (item) =>
-            item.label ||
-            WEAK_CONSTRAINT_LABELS[item.constraintType] ||
-            item.constraintType,
-        )
-        .join("、"),
-    );
-  }
-  if (strongConstraints.length) {
-    reasons.push("重合／首尾相连将保留");
-  }
-  const localDimensions = normalized.constraints.filter(
-    (item) =>
-      item.enabled &&
-      item.driving &&
-      dimensions.has(item.constraintType) &&
-      item.entityRefs.some((ref) => touched.has(ref)) &&
-      item.driverMode !== "unset",
-  );
-  const sharedParameterIds = [
-    ...new Set(
-      localDimensions
-        .map((item) => item.parameterId)
-        .filter((id): id is string => !!id)
-        .filter((parameterId) =>
-          normalized.constraints.some(
-            (item) =>
-              item.parameterId === parameterId &&
-              !item.entityRefs.some((ref) => touched.has(ref)),
-          ) ||
-          sketch.entities.some(
-            (item) =>
-              !touched.has(item.id) && item.parameterRefs.includes(parameterId),
-          ),
-        ),
-    ),
-  ];
-  if (sharedParameterIds.length) {
-    reasons.push(`共享参数：${sharedParameterIds.join("、")}`);
-  }
-  // Soft-constraint notice alone is enough when strong joints only need reassurance
-  // and there is an actual soft violation or shared-parameter decision.
-  if (!softConstraints.length && !sharedParameterIds.length) return null;
-  return {
-    entityId,
-    touchedEntityIds: [...touched],
-    beforeEntities,
-    afterEntities,
-    reasons: [...new Set(reasons)],
-    softConstraints,
-    strongConstraints,
-    sharedParameterIds,
-  };
-};
-
-const commitLocalEntityFixedDimensions = (
-  sketch: Draft["sketch"],
-  entityIds: string | string[],
-  entities: Draft["sketch"]["entities"],
-  options: {
-    releaseSoftConstraintIds?: string[];
-    preserveParameterizedDimensions?: boolean;
-  } = {},
-) => {
-  const dimensions = dimensionTypeSet();
-  const normalized = normalizeSketchTopology(sketch);
-  const releaseIds = new Set(options.releaseSoftConstraintIds || []);
-  const editedIds = new Set(
-    Array.isArray(entityIds) ? entityIds : [entityIds],
-  );
-  const nextConstraints = normalized.constraints.map((constraint) => {
-    // Strong topology constraints are never auto-released here.
-    if (
-      releaseIds.has(constraint.id) &&
-      WEAK_CONSTRAINT_TYPES.has(constraint.constraintType)
-    ) {
-      return { ...constraint, enabled: false, driving: false };
-    }
-    if (
-      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
-      !dimensions.has(constraint.constraintType)
-    ) {
-      return constraint;
-    }
-    if (options.preserveParameterizedDimensions && constraint.parameterId) {
-      return constraint;
-    }
-    if (constraint.driverMode === "expression" && constraint.expression) {
-      return constraint;
-    }
-    const measured = measureDimensionValue(constraint, entities);
-    if (measured == null) return constraint;
-    return {
-      ...constraint,
-      driverMode: "fixed" as const,
-      parameterId: null,
-      expression: null,
-      value: measured,
-      driving: true,
-      enabled: true,
-    };
-  });
-  return {
-    ...normalized,
-    entities,
-    constraints: nextConstraints,
-    constraintsReviewed: false,
-  };
 };
 
 const entitiesToPrimitives = (entities: Draft["sketch"]["entities"]) =>
@@ -1213,573 +1061,6 @@ const alignEntitiesToPrimitives = (
         : entity.points,
     };
   });
-};
-
-/** Normalize any degree value into [0, 360). */
-const normalizeDegrees = (degrees: number) => {
-  if (!Number.isFinite(degrees)) return 0;
-  const mod = degrees % 360;
-  return mod < 0 ? mod + 360 : mod;
-};
-
-const linePolar = (
-  start: [number, number],
-  end: [number, number],
-): { length: number; angleDegrees: number } => {
-  const dx = end[0] - start[0],
-    dy = end[1] - start[1],
-    length = Math.hypot(dx, dy);
-  const angleDegrees = normalizeDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
-  return {
-    length: Math.round(length * 100) / 100,
-    angleDegrees: Math.round(angleDegrees * 100) / 100,
-  };
-};
-
-const endFromLengthAndAngle = (
-  start: [number, number],
-  length: number,
-  angleDegrees: number,
-): [number, number] => {
-  const safeLength = Math.max(0, length);
-  const radians = (normalizeDegrees(angleDegrees) * Math.PI) / 180;
-  return [
-    Math.round((start[0] + safeLength * Math.cos(radians)) * 100) / 100,
-    Math.round((start[1] + safeLength * Math.sin(radians)) * 100) / 100,
-  ];
-};
-
-const SKETCH_COORD_EPS = 1e-3;
-const roundSketchCoord = (value: number) => Math.round(value * 100) / 100;
-const roundSketchPoint = (point: [number, number]): [number, number] => [
-  roundSketchCoord(point[0]),
-  roundSketchCoord(point[1]),
-];
-const normalizeSketchEntityNumbers = (
-  entity: Draft["sketch"]["entities"][number],
-): Draft["sketch"]["entities"][number] => ({
-  ...entity,
-  start: entity.start ? roundSketchPoint(entity.start) : null,
-  end: entity.end ? roundSketchPoint(entity.end) : null,
-  center: entity.center ? roundSketchPoint(entity.center) : null,
-  radius: entity.radius == null ? null : roundSketchCoord(entity.radius),
-  startAngle:
-    entity.startAngle == null ? null : roundSketchCoord(entity.startAngle),
-  endAngle: entity.endAngle == null ? null : roundSketchCoord(entity.endAngle),
-  points: entity.points.map((point) => roundSketchPoint(point)),
-});
-const normalizeSketchNumbers = (sketch: Draft["sketch"]): Draft["sketch"] => ({
-  ...sketch,
-  entities: sketch.entities.map(normalizeSketchEntityNumbers),
-  constraints: sketch.constraints.map((constraint) => ({
-    ...constraint,
-    value:
-      constraint.value == null ? null : roundSketchCoord(constraint.value),
-  })),
-});
-const pointsNear = (
-  a: [number, number] | null | undefined,
-  b: [number, number] | null | undefined,
-  eps = SKETCH_COORD_EPS,
-) => !!a && !!b && Math.hypot(a[0] - b[0], a[1] - b[1]) < eps;
-
-const isThinwallOffsetEntity = (
-  entity: Draft["sketch"]["entities"][number],
-) =>
-  entity.id.startsWith("thinwall.offset.") ||
-  entity.role.startsWith("section.thinwall.");
-
-const lineLineIntersection = (
-  a0: [number, number],
-  a1: [number, number],
-  b0: [number, number],
-  b1: [number, number],
-): [number, number] | null => {
-  const dax = a1[0] - a0[0],
-    day = a1[1] - a0[1],
-    dbx = b1[0] - b0[0],
-    dby = b1[1] - b0[1],
-    denom = dax * dby - day * dbx;
-  if (Math.abs(denom) < 1e-12) return null;
-  const t = ((b0[0] - a0[0]) * dby - (b0[1] - a0[1]) * dbx) / denom;
-  return [a0[0] + t * dax, a0[1] + t * day];
-};
-
-const offsetLineSegment = (
-  start: [number, number],
-  end: [number, number],
-  distance: number,
-  side: 1 | -1,
-): { start: [number, number]; end: [number, number] } | null => {
-  const dx = end[0] - start[0],
-    dy = end[1] - start[1],
-    length = Math.hypot(dx, dy);
-  if (length < SKETCH_COORD_EPS) return null;
-  const nx = (-dy / length) * side * distance,
-    ny = (dx / length) * side * distance;
-  return {
-    start: roundSketchPoint([start[0] + nx, start[1] + ny]),
-    end: roundSketchPoint([end[0] + nx, end[1] + ny]),
-  };
-};
-
-/** Join consecutive same-side offset segments by extending/trimming to intersections. */
-const joinOffsetSegments = (
-  segments: { start: [number, number]; end: [number, number] }[],
-) => {
-  const next = segments.map((item) => ({
-    start: [...item.start] as [number, number],
-    end: [...item.end] as [number, number],
-  }));
-  for (let index = 0; index < next.length - 1; index += 1) {
-    const current = next[index],
-      following = next[index + 1];
-    const hit = lineLineIntersection(
-      current.start,
-      current.end,
-      following.start,
-      following.end,
-    );
-    if (hit) {
-      const point = roundSketchPoint(hit);
-      current.end = point;
-      following.start = point;
-    } else {
-      const mid = roundSketchPoint([
-        (current.end[0] + following.start[0]) / 2,
-        (current.end[1] + following.start[1]) / 2,
-      ]);
-      current.end = mid;
-      following.start = mid;
-    }
-  }
-  return next;
-};
-
-type CenterlineChainSegment = {
-  id: string;
-  start: [number, number];
-  end: [number, number];
-};
-
-/** Walk centerline lines into open polylines using geometric endpoint connectivity. */
-const buildCenterlineChains = (
-  entities: Draft["sketch"]["entities"],
-): CenterlineChainSegment[][] => {
-  const lines = entities.filter(
-    (item) =>
-      !isThinwallOffsetEntity(item) &&
-      item.geometryType === "line" &&
-      item.start &&
-      item.end &&
-      Math.hypot(item.end[0] - item.start[0], item.end[1] - item.start[1]) >
-        SKETCH_COORD_EPS,
-  ) as Array<
-    Draft["sketch"]["entities"][number] & {
-      start: [number, number];
-      end: [number, number];
-    }
-  >;
-  if (!lines.length) return [];
-  const adjacency = new Map<string, string[]>();
-  const touch = (
-    a: (typeof lines)[number],
-    b: (typeof lines)[number],
-  ): boolean =>
-    pointsNear(a.start, b.start) ||
-    pointsNear(a.start, b.end) ||
-    pointsNear(a.end, b.start) ||
-    pointsNear(a.end, b.end);
-  for (const line of lines) adjacency.set(line.id, []);
-  for (let i = 0; i < lines.length; i += 1) {
-    for (let j = i + 1; j < lines.length; j += 1) {
-      if (!touch(lines[i], lines[j])) continue;
-      adjacency.get(lines[i].id)!.push(lines[j].id);
-      adjacency.get(lines[j].id)!.push(lines[i].id);
-    }
-  }
-  const byId = new Map(lines.map((item) => [item.id, item]));
-  const used = new Set<string>();
-  const chains: CenterlineChainSegment[][] = [];
-  const orientedNext = (
-    current: CenterlineChainSegment,
-    candidateId: string,
-  ): CenterlineChainSegment | null => {
-    const candidate = byId.get(candidateId);
-    if (!candidate) return null;
-    if (pointsNear(current.end, candidate.start))
-      return {
-        id: candidate.id,
-        start: [...candidate.start] as [number, number],
-        end: [...candidate.end] as [number, number],
-      };
-    if (pointsNear(current.end, candidate.end))
-      return {
-        id: candidate.id,
-        start: [...candidate.end] as [number, number],
-        end: [...candidate.start] as [number, number],
-      };
-    return null;
-  };
-  const grow = (seedId: string) => {
-    const seed = byId.get(seedId);
-    if (!seed || used.has(seedId)) return;
-    let head: CenterlineChainSegment = {
-      id: seed.id,
-      start: [...seed.start] as [number, number],
-      end: [...seed.end] as [number, number],
-    };
-    used.add(seed.id);
-    const forward: CenterlineChainSegment[] = [head];
-    while (true) {
-      const tip = forward[forward.length - 1];
-      const nextId = (adjacency.get(tip.id) || []).find(
-        (id) => !used.has(id) && orientedNext(tip, id),
-      );
-      if (!nextId) break;
-      const oriented = orientedNext(tip, nextId)!;
-      used.add(oriented.id);
-      forward.push(oriented);
-    }
-    // Grow backward from the seed start so open ends become chain terminals.
-    while (true) {
-      const tip = forward[0];
-      const reversedTip: CenterlineChainSegment = {
-        id: tip.id,
-        start: tip.end,
-        end: tip.start,
-      };
-      const prevId = (adjacency.get(tip.id) || []).find((id) => {
-        if (used.has(id)) return false;
-        return !!orientedNext(reversedTip, id);
-      });
-      if (!prevId) break;
-      const oriented = orientedNext(reversedTip, prevId)!;
-      used.add(oriented.id);
-      forward.unshift({
-        id: oriented.id,
-        start: oriented.end,
-        end: oriented.start,
-      });
-    }
-    chains.push(forward);
-  };
-  const endpoints = lines
-    .filter((item) => (adjacency.get(item.id) || []).length <= 1)
-    .map((item) => item.id);
-  for (const id of endpoints.length ? endpoints : lines.map((item) => item.id))
-    grow(id);
-  for (const line of lines) grow(line.id);
-  return chains;
-};
-
-const makeSketchLineEntity = (
-  id: string,
-  role: string,
-  start: [number, number],
-  end: [number, number],
-  construction = false,
-): Draft["sketch"]["entities"][number] => ({
-  id,
-  role,
-  geometryType: "line",
-  parameterRefs: [],
-  construction,
-  start: roundSketchPoint(start),
-  end: roundSketchPoint(end),
-  center: null,
-  radius: null,
-  startAngle: null,
-  endAngle: null,
-  points: [],
-});
-
-/**
- * Bilateral centerline offset with miter joins at connected vertices and
- * straight end caps on free terminals. Original centerlines become construction.
- */
-const applyCenterlineThinwallOffset = (
-  sketch: Draft["sketch"],
-  distance1: number,
-  distance2: number,
-): { sketch: Draft["sketch"]; message?: string } => {
-  const d1 = Math.max(0, distance1),
-    d2 = Math.max(0, distance2);
-  if (d1 <= 0 && d2 <= 0) {
-    return { sketch, message: "偏移距离 1 与偏移距离 2 不能同时为 0。" };
-  }
-  const chains = buildCenterlineChains(sketch.entities);
-  if (!chains.length) {
-    return {
-      sketch,
-      message: "未找到可偏移的中心线直线段（请先绘制相连的中心线）。",
-    };
-  }
-  const stamp = Date.now().toString(36);
-  const offsetEntities: Draft["sketch"]["entities"] = [];
-  const offsetConstraints: Draft["sketch"]["constraints"] = [];
-  const regions: Draft["sketch"]["regions"] = [];
-  let segmentIndex = 0;
-  let constraintIndex = 0;
-  const pushConstraint = (
-    constraintType: Draft["sketch"]["constraints"][number]["constraintType"],
-    entityRefs: string[],
-    label: string,
-    endpointRefs: Array<"start" | "end"> = [],
-  ) => {
-    constraintIndex += 1;
-    offsetConstraints.push({
-      id: `constraint.thinwall.${stamp}.${constraintIndex}`,
-      label,
-      constraintType,
-      entityRefs,
-      endpointRefs,
-      expression: null,
-      parameterId: null,
-      value: null,
-      driverMode: null,
-      enabled: true,
-      driving: true,
-    });
-  };
-  const pushLine = (
-    roleSuffix: string,
-    start: [number, number],
-    end: [number, number],
-  ) => {
-    segmentIndex += 1;
-    const id = `thinwall.offset.${stamp}.${segmentIndex}`;
-    const entity = makeSketchLineEntity(
-      id,
-      `section.thinwall.${roleSuffix}`,
-      start,
-      end,
-      false,
-    );
-    offsetEntities.push(entity);
-    return entity.id;
-  };
-  for (const [chainIndex, chain] of chains.entries()) {
-    const side1Raw = chain
-      .map((item) => offsetLineSegment(item.start, item.end, d1 || 0, 1))
-      .filter(
-        (item): item is { start: [number, number]; end: [number, number] } =>
-          !!item,
-      );
-    const side2Raw = chain
-      .map((item) => offsetLineSegment(item.start, item.end, d2 || 0, -1))
-      .filter(
-        (item): item is { start: [number, number]; end: [number, number] } =>
-          !!item,
-      );
-    if (!side1Raw.length || !side2Raw.length) continue;
-    // Zero distance collapses that side onto the centerline; still join for caps.
-    const side1 = joinOffsetSegments(
-      side1Raw.map((item, index) =>
-        d1 > 0
-          ? item
-          : {
-              start: [...chain[index].start] as [number, number],
-              end: [...chain[index].end] as [number, number],
-            },
-      ),
-    );
-    const side2 = joinOffsetSegments(
-      side2Raw.map((item, index) =>
-        d2 > 0
-          ? item
-          : {
-              start: [...chain[index].start] as [number, number],
-              end: [...chain[index].end] as [number, number],
-            },
-      ),
-    );
-    const chainClosed = pointsNear(
-      chain[0].start,
-      chain[chain.length - 1].end,
-    );
-    if (chainClosed && side1.length > 1) {
-      const hit1 = lineLineIntersection(
-        side1[side1.length - 1].start,
-        side1[side1.length - 1].end,
-        side1[0].start,
-        side1[0].end,
-      );
-      if (hit1) {
-        const point = roundSketchPoint(hit1);
-        side1[side1.length - 1].end = point;
-        side1[0].start = point;
-      }
-      const hit2 = lineLineIntersection(
-        side2[side2.length - 1].start,
-        side2[side2.length - 1].end,
-        side2[0].start,
-        side2[0].end,
-      );
-      if (hit2) {
-        const point = roundSketchPoint(hit2);
-        side2[side2.length - 1].end = point;
-        side2[0].start = point;
-      }
-    }
-    const boundaryRefs: string[] = [];
-    const side1Ids: string[] = [];
-    const side2Ids: string[] = [];
-    for (let index = 0; index < side1.length; index += 1) {
-      const id = pushLine(
-        `side1.${chainIndex + 1}.${index + 1}`,
-        side1[index].start,
-        side1[index].end,
-      );
-      side1Ids.push(id);
-      boundaryRefs.push(id);
-      // Offset wall stays parallel to its source centerline.
-      pushConstraint(
-        "parallel",
-        [id, chain[index].id],
-        `薄壁平行 侧1-${chainIndex + 1}.${index + 1}`,
-      );
-    }
-    if (!chainClosed) {
-      boundaryRefs.push(
-        pushLine(`cap.end.${chainIndex + 1}`, side1[side1.length - 1].end, side2[side2.length - 1].end),
-      );
-    }
-    for (let index = side2.length - 1; index >= 0; index -= 1) {
-      const id = pushLine(
-        `side2.${chainIndex + 1}.${index + 1}`,
-        side2[index].end,
-        side2[index].start,
-      );
-      side2Ids[index] = id;
-      boundaryRefs.push(id);
-    }
-    for (let index = 0; index < side2Ids.length; index += 1) {
-      pushConstraint(
-        "parallel",
-        [side2Ids[index], chain[index].id],
-        `薄壁平行 侧2-${chainIndex + 1}.${index + 1}`,
-      );
-    }
-    if (!chainClosed) {
-      boundaryRefs.push(
-        pushLine(`cap.start.${chainIndex + 1}`, side2[0].start, side1[0].start),
-      );
-    }
-    // Connected endpoints along the closed thin-wall loop (including caps).
-    for (let index = 0; index < boundaryRefs.length; index += 1) {
-      const a = boundaryRefs[index],
-        b = boundaryRefs[(index + 1) % boundaryRefs.length];
-      pushConstraint(
-        "coincident",
-        [a, b],
-        `薄壁首尾相连 ${chainIndex + 1}.${index + 1}`,
-        ["end", "start"],
-      );
-    }
-    regions.push({
-      id: `section.region.thinwall.${chainIndex + 1}`,
-      boundaryRefs,
-      closed: true,
-      role: "section.materialRegion",
-      operation: "add",
-    });
-  }
-  if (!offsetEntities.length) {
-    return { sketch, message: "偏移失败：中心线段退化或距离无效。" };
-  }
-  const keptEntities = sketch.entities
-    .filter((item) => !isThinwallOffsetEntity(item))
-    .map((item) =>
-      item.geometryType === "line" && item.start && item.end
-        ? { ...item, construction: true }
-        : item,
-    );
-  const keptConstraints = sketch.constraints.filter(
-    (item) =>
-      !item.id.startsWith("constraint.thinwall.") &&
-      item.entityRefs.every((ref) => !ref.startsWith("thinwall.offset.")),
-  );
-  return {
-    sketch: {
-      ...sketch,
-      entities: [...keptEntities, ...offsetEntities],
-      constraints: [...keptConstraints, ...offsetConstraints],
-      regions,
-      constraintsReviewed: false,
-    },
-  };
-};
-
-const commitSharedParameterUpdate = (
-  sketch: Draft["sketch"],
-  parameterDefinitions: ParameterDefinition[],
-  entityIds: string | string[],
-  entities: Draft["sketch"]["entities"],
-) => {
-  const dimensions = dimensionTypeSet();
-  const editedIds = new Set(
-    Array.isArray(entityIds) ? entityIds : [entityIds],
-  );
-  let nextParameters = parameterDefinitions;
-  const nextConstraints = sketch.constraints.map((constraint) => {
-    if (
-      !constraint.entityRefs.some((id) => editedIds.has(id)) ||
-      !dimensions.has(constraint.constraintType) ||
-      !constraint.parameterId
-    ) {
-      return constraint;
-    }
-    const measured = measureDimensionValue(constraint, entities);
-    if (measured == null) return constraint;
-    nextParameters = nextParameters.map((parameter) => {
-      if (parameter.id !== constraint.parameterId) return parameter;
-      const minimum =
-        typeof parameter.minimum === "number" ? parameter.minimum : measured;
-      const maximum =
-        typeof parameter.maximum === "number" ? parameter.maximum : measured;
-      const nextDefault = Math.min(maximum, Math.max(minimum, measured));
-      return {
-        ...parameter,
-        default: nextDefault,
-        sourceDefinition: parameter.sourceDefinition
-          ? { ...parameter.sourceDefinition, fallback: nextDefault }
-          : parameter.sourceDefinition,
-      };
-    });
-    return constraint;
-  });
-  return {
-    sketch: {
-      ...sketch,
-      entities,
-      constraints: nextConstraints,
-      constraintsReviewed: false,
-    },
-    parameterDefinitions: nextParameters,
-  };
-};
-
-const commitCompletedGeometryEdit = (
-  draft: Draft,
-  entityIds: string[],
-  entities: Draft["sketch"]["entities"],
-) => {
-  const parameterCommit = commitSharedParameterUpdate(
-    draft.sketch,
-    draft.parameterDefinitions,
-    entityIds,
-    entities,
-  );
-  return {
-    sketch: commitLocalEntityFixedDimensions(
-      parameterCommit.sketch,
-      entityIds,
-      entities,
-      { preserveParameterizedDimensions: true },
-    ),
-    parameterDefinitions: parameterCommit.parameterDefinitions,
-  };
 };
 
 function ParametricSketchCanvas({
@@ -4138,2537 +3419,472 @@ function ParametricSketchCanvas({
   );
 }
 
-const GEOMETRIC_CONSTRAINTS = [
-  ["coincident", "重合（单对首尾）"],
-  ["horizontal", "水平（相对 X 轴）"],
-  ["vertical", "竖直（相对 Y 轴）"],
-  ["parallel", "平行"],
-  ["perpendicular", "正交（两线互相垂直）"],
-  ["tangent", "相切"],
-  ["concentric", "同心"],
-  ["symmetric", "对称"],
-  ["equal", "相等"],
-  ["fixed", "固定"],
-  ["pointOn", "点在曲线上"],
-] as const;
-const DIMENSION_CONSTRAINTS = [
-  ["distance", "线段长度"],
-  ["distanceX", "水平跨度 ΔX"],
-  ["distanceY", "垂直跨度 ΔY"],
-  ["radius", "半径"],
-  ["diameter", "直径"],
-  ["angle", "相对 X 轴角度"],
-] as const;
-const sketchPlaneAxes = (plane: Draft["sketch"]["plane"]) =>
-  plane === "XZ"
-    ? { horizontal: "X", vertical: "Z", normal: "Y" }
-    : plane === "YZ"
-      ? { horizontal: "Y", vertical: "Z", normal: "X" }
-      : { horizontal: "X", vertical: "Y", normal: "Z" };
-const constraintLabel = (type: string, plane: Draft["sketch"]["plane"] = "XY") => {
-  const axes = sketchPlaneAxes(plane);
-  const planeLabels: Record<string, string> = {
-    horizontal: `沿 ${axes.horizontal} 轴`,
-    vertical: `沿 ${axes.vertical} 轴`,
-    distanceX: `${axes.horizontal} 向跨度 Δ${axes.horizontal}`,
-    distanceY: `${axes.vertical} 向跨度 Δ${axes.vertical}`,
-    angle: `相对 ${axes.horizontal} 轴角度`,
-  };
-  return (
-    planeLabels[type] ||
-    [...GEOMETRIC_CONSTRAINTS, ...DIMENSION_CONSTRAINTS].find(
-      (item) => item[0] === type,
-    )?.[1] ||
-    (type === "closed" ? "闭环（已弃用，请用首尾相连）" : type)
-  );
-};
-const dimensionDescription = (
-  type: string,
-  plane: Draft["sketch"]["plane"],
-) => {
-  const axes = sketchPlaneAxes(plane);
-  const descriptions: Record<string, string> = {
-    distance: "线段起点到终点的实际长度",
-    distanceX: `线段终点 ${axes.horizontal} 与起点 ${axes.horizontal} 的差值`,
-    distanceY: `线段终点 ${axes.vertical} 与起点 ${axes.vertical} 的差值`,
-    radius: "圆或圆弧的半径",
-    diameter: "圆或圆弧的直径",
-    angle: `直线相对于草图 ${axes.horizontal} 轴的角度`,
-  };
-  return descriptions[type] || type;
-};
-const PARAMETER_SCOPE_LABELS: Record<NonNullable<ParameterDefinition["scope"]>, string> = {
-  template: "模板内部",
-  partInstance: "零部件实例",
-  component: "组件传入",
-  product: "产品传入",
-  projectZone: "项目区域传入",
-};
-const PARAMETER_SOURCE_BEHAVIOR: Partial<Record<ParameterSource["type"], string>> = {
-  userInput: "实例表单以默认值初始化，用户可在允许范围内修改。",
-  componentConfig: "由所属组件实例传入；同一零件模板在不同组件中可得到不同值。",
-  productConfig: "由产品实例统一传入；可跨多个组件和零件共享同一产品级参数。",
-  projectZone: "由项目区域配置传入；用于同一产品在不同区域采用不同配置。",
-  materialProperty: "从本实例选定材料读取；缺失时使用回退值或默认值。",
-  formula: "由其他参数求值，不在零部件实例中直接填写。",
-  constant: "固定在模板内，不在实例中开放。",
-};
-const legacyParameterSource = (
-  type: ParameterSource["type"],
-): ParameterDefinition["source"] =>
-  type === "formula"
-    ? "formula"
-    : type === "materialProperty"
-      ? "material"
-      : type === "lookup"
-        ? "lookup"
-        : "user";
-const parameterValueType = (parameter: ParameterDefinition) => parameter.valueType || "number";
-const parameterDefaultForType = (type: NonNullable<ParameterDefinition["valueType"]>) =>
-  type === "boolean" ? false : type === "enum" ? "option1" : type === "string" ? "" : 0;
-const expressionReferencesParameter = (
-  expression: string | null | undefined,
-  parameterId: string,
-) =>
-  (expression?.match(/[A-Za-z][A-Za-z0-9_]*/g) ?? ([] as string[])).includes(
-    parameterId,
-  );
-
-const replaceExpressionParameter = (
-  expression: string | null | undefined,
-  previousId: string,
-  nextId: string,
-) =>
-  expression?.replace(/[A-Za-z][A-Za-z0-9_]*/g, (token) =>
-    token === previousId ? nextId : token,
-  ) ?? expression;
-
-const escapeRegExp = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const replaceExpressionAliasesWithParameterId = (
-  expression: string | null | undefined,
-  aliases: string[],
-  parameterId: string,
-) => {
-  let nextExpression = expression ?? "";
-  for (const alias of [...new Set(aliases.map((item) => item.trim()).filter(Boolean))]) {
-    if (alias === parameterId) continue;
-    if (/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) {
-      nextExpression = replaceExpressionParameter(nextExpression, alias, parameterId) || "";
-      continue;
-    }
-    nextExpression = nextExpression.replace(
-      new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(alias)}(?=$|[^A-Za-z0-9_])`, "g"),
-      (_match, prefix) => `${prefix}${parameterId}`,
-    );
-  }
-  return nextExpression;
-};
-
-const renameRecordKey = <T,>(
-  record: Record<string, T>,
-  previousId: string,
-  nextId: string,
-) =>
-  Object.fromEntries(
-    Object.entries(record).map(([key, value]) => [
-      key === previousId ? nextId : key,
-      value,
-    ]),
-  ) as Record<string, T>;
-
-const defaultScopedReferenceForParameter = (
-  type: ParameterSource["type"],
-  parameterId: string,
-) =>
-  type === "componentConfig"
-    ? `component.${parameterId}`
-    : type === "productConfig"
-      ? `product.${parameterId}`
-      : type === "projectZone"
-        ? `projectZone.${parameterId}`
-        : null;
-
-const replaceParameterSourceReference = (
-  source: ParameterSource,
-  previousId: string,
-  nextId: string,
-) => {
-  if (source.type === "lookup") {
-    return replaceExpressionParameter(source.reference, previousId, nextId);
-  }
-  if (
-    source.reference &&
-    source.reference === defaultScopedReferenceForParameter(source.type, previousId)
-  ) {
-    return defaultScopedReferenceForParameter(source.type, nextId);
-  }
-  return source.reference;
-};
-
-const normalizeParameterAliasReferences = (
-  draft: Draft,
-  parameterId: string,
-  aliases: string[],
-): Draft => ({
-  ...draft,
-  parameterDefinitions: draft.parameterDefinitions.map((parameter) => ({
-    ...parameter,
-    sourceDefinition: parameter.sourceDefinition
-      ? {
-          ...parameter.sourceDefinition,
-          expression: replaceExpressionAliasesWithParameterId(
-            parameter.sourceDefinition.expression,
-            aliases,
-            parameterId,
-          ),
-          reference:
-            parameter.sourceDefinition.type === "lookup"
-              ? replaceExpressionAliasesWithParameterId(
-                  parameter.sourceDefinition.reference,
-                  aliases,
-                  parameterId,
-                )
-              : parameter.sourceDefinition.reference,
-        }
-      : parameter.sourceDefinition,
-  })),
-  blank: {
-    ...draft.blank,
-    lengthExpression: replaceExpressionAliasesWithParameterId(
-      draft.blank.lengthExpression,
-      aliases,
-      parameterId,
-    ),
-    widthExpression: replaceExpressionAliasesWithParameterId(
-      draft.blank.widthExpression,
-      aliases,
-      parameterId,
-    ),
-    thicknessExpression: replaceExpressionAliasesWithParameterId(
-      draft.blank.thicknessExpression,
-      aliases,
-      parameterId,
-    ),
-  },
-  sketch: {
-    ...draft.sketch,
-    constraints: draft.sketch.constraints.map((constraint) => ({
-      ...constraint,
-      expression: replaceExpressionAliasesWithParameterId(
-        constraint.expression,
-        aliases,
-        parameterId,
-      ),
-    })),
-  },
-  geometryRecipe: {
-    ...draft.geometryRecipe,
-    semanticFaces: draft.geometryRecipe.semanticFaces.map((face) => ({
-      ...face,
-      uStartExpression: replaceExpressionAliasesWithParameterId(
-        face.uStartExpression,
-        aliases,
-        parameterId,
-      ),
-      uSpanExpression: replaceExpressionAliasesWithParameterId(
-        face.uSpanExpression,
-        aliases,
-        parameterId,
-      ),
-      vStartExpression: replaceExpressionAliasesWithParameterId(
-        face.vStartExpression,
-        aliases,
-        parameterId,
-      ),
-      vSpanExpression: replaceExpressionAliasesWithParameterId(
-        face.vSpanExpression,
-        aliases,
-        parameterId,
-      ),
-    })),
-    operations: draft.geometryRecipe.operations.map((operation) => ({
-      ...operation,
-      arguments: Object.fromEntries(
-        Object.entries(operation.arguments).map(([key, value]) => [
-          key,
-          typeof value === "string"
-            ? replaceExpressionAliasesWithParameterId(value, aliases, parameterId)
-            : value,
-        ]),
-      ),
-      argumentExpressions: Object.fromEntries(
-        Object.entries(operation.argumentExpressions).map(([key, value]) => [
-          key,
-          replaceExpressionAliasesWithParameterId(value, aliases, parameterId),
-        ]),
-      ),
-      conditionExpression: replaceExpressionAliasesWithParameterId(
-        operation.conditionExpression,
-        aliases,
-        parameterId,
-      ),
-    })),
-  },
-  featureRules: draft.featureRules.map((rule) => ({
-    ...rule,
-    conditionExpression: replaceExpressionAliasesWithParameterId(
-      rule.conditionExpression,
-      aliases,
-      parameterId,
-    ),
-    countExpression: replaceExpressionAliasesWithParameterId(
-      rule.countExpression,
-      aliases,
-      parameterId,
-    ),
-    arguments: Object.fromEntries(
-      Object.entries(rule.arguments).map(([key, value]) => [
-        key,
-        typeof value === "string"
-          ? replaceExpressionAliasesWithParameterId(value, aliases, parameterId)
-          : value,
-      ]),
-    ),
-    placement: {
-      ...rule.placement,
-      pitchExpression: replaceExpressionAliasesWithParameterId(
-        rule.placement.pitchExpression,
-        aliases,
-        parameterId,
-      ),
-      startMarginExpression: replaceExpressionAliasesWithParameterId(
-        rule.placement.startMarginExpression,
-        aliases,
-        parameterId,
-      ),
-      endMarginExpression: replaceExpressionAliasesWithParameterId(
-        rule.placement.endMarginExpression,
-        aliases,
-        parameterId,
-      ),
-      maximumPitchExpression: replaceExpressionAliasesWithParameterId(
-        rule.placement.maximumPitchExpression,
-        aliases,
-        parameterId,
-      ),
-    },
-    argumentExpressions: Object.fromEntries(
-      Object.entries(rule.argumentExpressions).map(([key, value]) => [
-        key,
-        replaceExpressionAliasesWithParameterId(value, aliases, parameterId),
-      ]),
-    ),
-    polygonVertices: rule.polygonVertices.map((vertex) => ({
-      uExpression: replaceExpressionAliasesWithParameterId(
-        vertex.uExpression,
-        aliases,
-        parameterId,
-      ),
-      vExpression: replaceExpressionAliasesWithParameterId(
-        vertex.vExpression,
-        aliases,
-        parameterId,
-      ),
-    })),
-  })),
-});
-
-const renameParameterReferences = (
-  draft: Draft,
-  previousId: string,
-  nextId: string,
-): Draft => ({
-  ...draft,
-  parameterDefinitions: draft.parameterDefinitions.map((parameter) => ({
-    ...parameter,
-    id: parameter.id === previousId ? nextId : parameter.id,
-    aliases:
-      parameter.id === previousId
-        ? [...new Set([...(parameter.aliases || []), previousId])]
-        : parameter.aliases,
-    sourceDefinition: parameter.sourceDefinition
-      ? {
-          ...parameter.sourceDefinition,
-          expression: replaceExpressionParameter(
-            parameter.sourceDefinition.expression,
-            previousId,
-            nextId,
-          ),
-          reference: replaceParameterSourceReference(
-            parameter.sourceDefinition,
-            previousId,
-            nextId,
-          ),
-          dependencies: parameter.sourceDefinition.dependencies.map((id) =>
-            id === previousId ? nextId : id,
-          ),
-        }
-      : parameter.sourceDefinition,
-  })),
-  materialRequirements: draft.materialRequirements.map((requirement) => ({
-    ...requirement,
-    thickness: {
-      ...requirement.thickness,
-      parameterId:
-        requirement.thickness.parameterId === previousId
-          ? nextId
-          : requirement.thickness.parameterId,
-    },
-  })),
-  blank: {
-    ...draft.blank,
-    lengthExpression: replaceExpressionParameter(
-      draft.blank.lengthExpression,
-      previousId,
-      nextId,
-    ) || "",
-    widthExpression: replaceExpressionParameter(
-      draft.blank.widthExpression,
-      previousId,
-      nextId,
-    ) || "",
-    thicknessExpression: replaceExpressionParameter(
-      draft.blank.thicknessExpression,
-      previousId,
-      nextId,
-    ) || "",
-  },
-  sketch: {
-    ...draft.sketch,
-    drivingParameters: draft.sketch.drivingParameters.map((id) =>
-      id === previousId ? nextId : id,
-    ),
-    entities: draft.sketch.entities.map((entity) => ({
-      ...entity,
-      parameterRefs: entity.parameterRefs.map((id) =>
-        id === previousId ? nextId : id,
-      ),
-    })),
-    constraints: draft.sketch.constraints.map((constraint) => ({
-      ...constraint,
-      parameterId:
-        constraint.parameterId === previousId
-          ? nextId
-          : constraint.parameterId,
-      expression: replaceExpressionParameter(
-        constraint.expression,
-        previousId,
-        nextId,
-      ),
-    })),
-    constraintsReviewed: false,
-  },
-  geometryRecipe: {
-    ...draft.geometryRecipe,
-    reviewed: false,
-    semanticFaces: draft.geometryRecipe.semanticFaces.map((face) => ({
-      ...face,
-      uStartExpression:
-        replaceExpressionParameter(face.uStartExpression, previousId, nextId) || "0",
-      uSpanExpression:
-        replaceExpressionParameter(face.uSpanExpression, previousId, nextId) || "0",
-      vStartExpression:
-        replaceExpressionParameter(face.vStartExpression, previousId, nextId) || "0",
-      vSpanExpression:
-        replaceExpressionParameter(face.vSpanExpression, previousId, nextId) || "0",
-    })),
-    operations: draft.geometryRecipe.operations.map((operation) => ({
-      ...operation,
-      arguments: Object.fromEntries(
-        Object.entries(operation.arguments).map(([key, value]) => [
-          key,
-          value === previousId ? nextId : value,
-        ]),
-      ),
-      argumentExpressions: Object.fromEntries(
-        Object.entries(operation.argumentExpressions).map(([key, value]) => [
-          key,
-          replaceExpressionParameter(value, previousId, nextId) || "",
-        ]),
-      ),
-      conditionExpression:
-        replaceExpressionParameter(
-          operation.conditionExpression,
-          previousId,
-          nextId,
-        ) || "True",
-    })),
-  },
-  featureRules: draft.featureRules.map((rule) => ({
-    ...rule,
-    conditionExpression:
-      replaceExpressionParameter(
-        rule.conditionExpression,
-        previousId,
-        nextId,
-      ) || "True",
-    countExpression:
-      replaceExpressionParameter(rule.countExpression, previousId, nextId) ||
-      "0",
-    arguments: Object.fromEntries(
-      Object.entries(rule.arguments).map(([key, value]) => [
-        key,
-        value === previousId ? nextId : value,
-      ]),
-    ),
-    placement: {
-      ...rule.placement,
-      pitchExpression:
-        replaceExpressionParameter(rule.placement.pitchExpression, previousId, nextId) || "0",
-      startMarginExpression:
-        replaceExpressionParameter(rule.placement.startMarginExpression, previousId, nextId) || "0",
-      endMarginExpression:
-        replaceExpressionParameter(rule.placement.endMarginExpression, previousId, nextId) || "0",
-      maximumPitchExpression:
-        replaceExpressionParameter(rule.placement.maximumPitchExpression, previousId, nextId) || "0",
-    },
-    argumentExpressions: Object.fromEntries(
-      Object.entries(rule.argumentExpressions).map(([key, value]) => [
-        key,
-        replaceExpressionParameter(value, previousId, nextId) || "",
-      ]),
-    ),
-    polygonVertices: rule.polygonVertices.map((vertex) => ({
-      uExpression:
-        replaceExpressionParameter(vertex.uExpression, previousId, nextId) || "0",
-      vExpression:
-        replaceExpressionParameter(vertex.vExpression, previousId, nextId) || "0",
-    })),
-    profileDimensions: rule.profileDimensions.map((dimension) => ({
-      ...dimension,
-      parameterId: dimension.parameterId === previousId ? nextId : dimension.parameterId,
-    })),
-  })),
-  interfaces: draft.interfaces.map((item) => ({
-    ...item,
-    parameterRefs: item.parameterRefs.map((id) => id === previousId ? nextId : id),
-  })),
-  variants: draft.variants.map((variant) => ({
-    ...variant,
-    overrides: renameRecordKey(variant.overrides, previousId, nextId),
-  })),
-});
-
-const requiredScopeForSource = (
-  type: ParameterSource["type"],
-): NonNullable<ParameterDefinition["scope"]> | null =>
-  type === "userInput"
-    ? "partInstance"
-    : type === "componentConfig"
-      ? "component"
-      : type === "productConfig"
-        ? "product"
-        : type === "projectZone"
-          ? "projectZone"
-          : type === "constant" || type === "formula"
-            ? "template"
-            : null;
-
-const defaultReferenceForSource = (
-  type: ParameterSource["type"],
-  parameterId: string,
-) =>
-  type === "componentConfig"
-    ? `component.${parameterId}`
-    : type === "productConfig"
-      ? `product.${parameterId}`
-      : type === "projectZone"
-        ? `projectZone.${parameterId}`
-        : type === "materialProperty"
-          ? "material.thickness"
-          : null;
-
-const instanceParameterEditable = (parameter: ParameterDefinition) =>
-  (parameter.sourceDefinition?.type || "userInput") === "userInput" &&
-  (parameter.scope || "partInstance") === "partInstance";
-
-const semanticParameterIds = (draft: Draft) =>
-  Object.fromEntries(
-    (["length", "sectionWidth", "sectionHeight", "thickness"] as const).map(
-      (semanticId) => [
-        semanticId,
-        draft.parameterDefinitions.find(
-          (parameter) =>
-            parameter.id === semanticId ||
-            parameter.aliases?.includes(semanticId),
-        )?.id || semanticId,
-      ],
-    ),
-  );
-
-type ConstraintType = Draft["sketch"]["constraints"][number]["constraintType"];
-const CONSTRAINT_CONTRACTS: Record<
-  ConstraintType,
-  {
-    minimum: number;
-    maximum?: number;
-    types?: Draft["sketch"]["entities"][number]["geometryType"][];
-    selection: string;
-  }
-> = {
-  coincident: {
-    minimum: 2,
-    maximum: 2,
-    selection:
-      "恰好 2 个图元；下方选择各自起点或终点。多段顺序连接请用「首尾相连」",
-  },
-  horizontal: { minimum: 1, types: ["line"], selection: "1 条或多条直线；每条直线分别与 X 轴平行" },
-  vertical: { minimum: 1, types: ["line"], selection: "1 条或多条直线；每条直线分别与 Y 轴平行" },
-  parallel: { minimum: 2, types: ["line"], selection: "至少 2 条直线；后续直线相对第一条平行" },
-  perpendicular: { minimum: 2, types: ["line"], selection: "至少 2 条直线；后续直线相对第一条成 90°" },
-  tangent: { minimum: 2, maximum: 2, types: ["line", "arc", "circle"], selection: "恰好 2 个可相切对象" },
-  concentric: { minimum: 2, types: ["arc", "circle"], selection: "至少 2 个圆或圆弧" },
-  symmetric: { minimum: 3, maximum: 3, selection: "依次选择两个对象，再选择一条构造直线作为对称轴" },
-  equal: { minimum: 2, types: ["line", "arc", "circle"], selection: "至少 2 个同类尺寸对象" },
-  fixed: { minimum: 1, selection: "1 个或多个需要锚定的对象" },
-  pointOn: { minimum: 2, maximum: 2, selection: "先选择点，再选择直线、圆或圆弧" },
-  closed: {
-    minimum: 3,
-    types: ["line", "arc"],
-    selection: "已弃用：请改用「首尾相连并闭合」",
-  },
-  distance: { minimum: 1, maximum: 1, types: ["line"], selection: "恰好 1 条直线" },
-  distanceX: { minimum: 1, maximum: 1, types: ["line"], selection: "恰好 1 条直线" },
-  distanceY: { minimum: 1, maximum: 1, types: ["line"], selection: "恰好 1 条直线" },
-  radius: { minimum: 1, maximum: 1, types: ["arc", "circle"], selection: "恰好 1 个圆或圆弧" },
-  diameter: { minimum: 1, maximum: 1, types: ["arc", "circle"], selection: "恰好 1 个圆或圆弧" },
-  angle: { minimum: 1, maximum: 1, types: ["line"], selection: "恰好 1 条直线；角度相对 X 轴" },
-};
-
-function SketchIntentEditor({
+function GeometryStage({
   draft,
-  solution,
-  selected,
-  onSelect,
-  setSketch,
   change,
+  showError,
 }: {
   draft: Draft;
-  solution: SketchSolveResult | null;
-  selected: string[];
-  onSelect: (id: string | string[], additive?: boolean) => void;
-  setSketch: (patch: Partial<Draft["sketch"]>) => void;
-  change: (draft: Draft) => void;
+  change: (d: Draft) => void;
+  showError: (e: unknown) => void;
 }) {
-  const [tab, setTab] = useState<
-    "entities" | "constraints" | "dimensions" | "regions" | "diagnostics"
-  >("constraints");
-  const [newConstraintType, setNewConstraintType] = useState<
-    Draft["sketch"]["constraints"][number]["constraintType"]
-  >("coincident");
-  const [coincidentEnds, setCoincidentEnds] = useState<
-    ["start" | "end", "start" | "end"]
-  >(["end", "start"]);
-  const [newDimensionType, setNewDimensionType] = useState<
-    Draft["sketch"]["constraints"][number]["constraintType"]
-  >("distance");
-  const [parameterCreator, setParameterCreator] = useState(false);
-  const [constraintTypeFilter, setConstraintTypeFilter] = useState<string>("");
-  const [parameterError, setParameterError] = useState("");
-  const [parameterRenameErrors, setParameterRenameErrors] = useState<
-    Record<string, string>
-  >({});
-  const [newParameter, setNewParameter] = useState({
-    id: "",
-    displayName: "",
-    unit: "mm",
-    default: 100,
-    minimum: 10,
-    maximum: 1000,
-    sourceType: "userInput" as ParameterSource["type"],
-    scope: "partInstance" as NonNullable<ParameterDefinition["scope"]>,
-    exposed: true,
-  });
-  const selectionError = (type: ConstraintType) => {
-    const contract = CONSTRAINT_CONTRACTS[type],
-      axes = sketchPlaneAxes(draft.sketch.plane),
-      selectionHint =
-        type === "horizontal"
-          ? `选择 1 条需要沿 ${axes.horizontal} 轴对齐的直线。`
-          : type === "vertical"
-            ? `选择 1 条需要沿 ${axes.vertical} 轴对齐的直线。`
-            : contract.selection,
-      selectedEntities = draft.sketch.entities.filter((item) =>
-        selected.includes(item.id),
-      );
-    if (selected.length < contract.minimum) return selectionHint;
-    if (contract.maximum != null && selected.length > contract.maximum)
-      return selectionHint;
-    if (
-      contract.types &&
-      selectedEntities.some((item) => !contract.types!.includes(item.geometryType))
-    )
-      return `图元类型不匹配；${selectionHint}`;
-    if (type === "symmetric") {
-      const axis = selectedEntities[2];
-      if (!axis || axis.geometryType !== "line" || !axis.construction)
-        return selectionHint;
-    }
-    if (type === "pointOn" && selectedEntities[0]?.geometryType !== "point")
-      return selectionHint;
-    return "";
-  };
-  useEffect(() => {
-    if (selected.length !== 2) return;
-    const first = draft.sketch.entities.find((item) => item.id === selected[0]);
-    const second = draft.sketch.entities.find((item) => item.id === selected[1]);
-    if (!first || !second) return;
-    setCoincidentEnds(suggestCoincidentEndpoints(first, second));
-  }, [selected.join("|"), draft.sketch.entities]);
-  const editConstraint = (
+  const recipe = draft.geometryRecipe;
+  const {
+    solution,
+    solveCase,
+    setSolveCase,
+    selectedEntities,
+    setSelectedEntities,
+    selectedEntity,
+    tool,
+    setTool,
+    solving,
+    viewCommand,
+    setViewCommand,
+    polylineCommand,
+    setPolylineCommand,
+    cursorPoint,
+    publishCursorPoint,
+    moveOffset,
+    setMoveOffset,
+    orthogonalLock,
+    setOrthogonalLock,
+    arcDrawMode,
+    setArcDrawMode,
+    objectSnapEnabled,
+    setObjectSnapEnabled,
+    thinwallOffset,
+    setThinwallOffset,
+    thinwallOffsetNote,
+    setThinwallOffsetNote,
+    history,
+    future,
+    sketchClipboard,
+    setSketchClipboard,
+    sketchEditConflict,
+    setSketchEditConflict,
+    selectEntity,
+    beginSketchEdit,
+    applySketch,
+    applyGeometryEdit,
+    validateSketchGeometryEdit,
+    resolveSketchEditConflict,
+    undo,
+    redo,
+    deleteSelectedEntities,
+    applyThinwallOffset,
+    moveSelectedEntities,
+    copySelectedEntities,
+    pasteClipboardEntities,
+    issueViewCommand,
+  } = useGeometryEditFlow({ draft, change, showError });
+  const [pendingProfileMode, setPendingProfileMode] = useState<
+    Draft["sketch"]["profileMode"] | null
+  >(null);
+  const setRecipe = (patch: Partial<GeometryRecipe>) =>
+    change({ ...draft, geometryRecipe: { ...recipe, ...patch } });
+  const editOp = (
+    i: number,
+    patch: Partial<GeometryRecipe["operations"][number]>,
+  ) =>
+    setRecipe({
+      operations: recipe.operations.map((op, n) =>
+        n === i ? { ...op, ...patch } : op,
+      ),
+    });
+  const addOp = () =>
+    setRecipe({
+      operations: [
+        ...recipe.operations,
+        {
+          id: uid("body"),
+          operator: "sketch.region_extrude",
+          sourceRefs: ["sketch.section.main"],
+          arguments: {},
+          argumentExpressions: {
+            length: semanticParameterIds(draft).length,
+          },
+          conditionExpression: "True",
+          semanticOutputs: ["part.body"],
+        },
+      ],
+    });
+  const editSemanticFace = (
     index: number,
-    patch: Partial<Draft["sketch"]["constraints"][number]>,
+    patch: Partial<GeometryRecipe["semanticFaces"][number]>,
+  ) =>
+    setRecipe({
+      semanticFaces: recipe.semanticFaces.map((face, n) =>
+        n === index ? { ...face, ...patch } : face,
+      ),
+    });
+  const addSemanticFace = () =>
+    setRecipe({
+      semanticFaces: [
+        ...recipe.semanticFaces,
+        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
+      ],
+    });
+  const setSketch = (patch: Partial<Draft["sketch"]>) =>
+    change({
+      ...draft,
+      sketch: normalizeSketchNumbers(
+        normalizeSketchTopology({
+          ...draft.sketch,
+          ...patch,
+          constraintsReviewed: false,
+        }),
+      ),
+    });
+  const acquisitionLabels = {
+    manual: "交互绘制",
+    imported: "导入转换",
+    reused: "复用受控截面",
+  };
+  const selectAcquisition = (method: Draft["sketch"]["acquisitionMethod"]) => {
+    setSketch({
+      acquisitionMethod: method,
+      sourceAttachmentId: null,
+      sourceProfileId: null,
+      sourceHash: null,
+      importUnit: method === "imported" ? "mm" : null,
+      importScale: method === "imported" ? 1 : null,
+      conversionReviewed: method === "manual",
+    });
+  };
+  const requestProfileMode = (mode: Draft["sketch"]["profileMode"]) => {
+    if (mode === draft.sketch.profileMode) return;
+    setPendingProfileMode(mode);
+  };
+  const applyProfileMode = (reset: boolean) => {
+    if (!pendingProfileMode) return;
+    const semanticIds = semanticParameterIds(draft);
+    beginSketchEdit();
+    const nextSketch = reset
+        ? profileModeSketch(
+            pendingProfileMode,
+            draft.sketch,
+            semanticParameterIds(draft),
+          )
+        : {
+            ...draft.sketch,
+            profileMode: pendingProfileMode,
+            constraintsReviewed: false,
+          };
+    change({
+      ...draft,
+      sketch: nextSketch,
+      geometryRecipe: {
+        ...draft.geometryRecipe,
+        operations: draft.geometryRecipe.operations.map((operation, index) =>
+          index
+            ? operation
+            : {
+                ...operation,
+                operator: "sketch.region_extrude",
+                argumentExpressions: {
+                  ...operation.argumentExpressions,
+                  length:
+                    operation.argumentExpressions.length || semanticIds.length,
+                },
+              },
+        ),
+        reviewed: false,
+      },
+    });
+    setSelectedEntities([]);
+    setPendingProfileMode(null);
+  };
+  const editEntity = (
+    index: number,
+    patch: Partial<Draft["sketch"]["entities"][number]>,
   ) =>
     setSketch({
-      constraints: draft.sketch.constraints.map((item, i) =>
+      entities: draft.sketch.entities.map((item, i) =>
         i === index ? { ...item, ...patch } : item,
       ),
     });
-  const addConstraint = (
-    constraintType: Draft["sketch"]["constraints"][number]["constraintType"],
-  ) => {
-    if (selectionError(constraintType)) return;
-    if (constraintType === "coincident" && selected.length > 2) {
-      addEndToEndConnection(false);
-      return;
-    }
-    if (constraintType === "closed") {
-      addEndToEndConnection(true);
-      return;
-    }
-    const endpointRefs =
-      constraintType === "coincident" && selected.length === 2
-        ? [...coincidentEnds]
-        : undefined;
-    const firstName =
-      draft.sketch.entities.find((item) => item.id === selected[0])?.role ||
-      selected[0];
-    const secondName =
-      draft.sketch.entities.find((item) => item.id === selected[1])?.role ||
-      selected[1];
-    const coincidentLabel =
-      constraintType === "coincident" && selected.length === 2
-        ? `重合 · ${firstName}${endpointLabel(coincidentEnds[0])} ↔ ${secondName}${endpointLabel(coincidentEnds[1])}`
-        : constraintLabel(constraintType, draft.sketch.plane);
-    setSketch({
-      constraints: [
-        ...draft.sketch.constraints,
-        {
-          id: uid("constraint"),
-          label: coincidentLabel,
-          constraintType,
-          entityRefs: selected,
-          ...(endpointRefs ? { endpointRefs } : {}),
-          expression: null,
-          parameterId: null,
-          value: null,
-          driverMode: null,
-          enabled: true,
-          driving: true,
-        },
-      ],
-    });
-    setTab(
-      DIMENSION_CONSTRAINTS.some((item) => item[0] === constraintType)
-        ? "dimensions"
-        : "constraints",
-    );
-  };
-  const addEndToEndConnection = (closeLoop: boolean) => {
-    const minimum = closeLoop ? 3 : 2;
-    if (selected.length < minimum) return;
-    setSketch({
-      constraints: [
-        ...draft.sketch.constraints,
-        ...buildEndToEndJoints(selected, {
-          closeLoop,
-          idPrefix: uid(closeLoop ? "loop" : "chain"),
-        }),
-      ],
-    });
-    setTab("constraints");
-  };
-  const addDimension = () => {
-    if (selectionError(newDimensionType)) return;
-    const entity = draft.sketch.entities.find((item) => item.id === selected[0]);
-    const baseName = entity?.role || "草图图元";
-    setSketch({
-      constraints: [
-        ...draft.sketch.constraints,
-        {
-          id: uid("dimension"),
-          label: `${baseName} · ${constraintLabel(newDimensionType, draft.sketch.plane)}`,
-          constraintType: newDimensionType,
-          entityRefs: [...selected],
-          expression: null,
-          parameterId: null,
-          value: null,
-          driverMode: "unset",
-          enabled: true,
-          driving: false,
-        },
-      ],
-    });
-    setTab("dimensions");
-  };
-  const editParameter = (id: string, patch: Partial<ParameterDefinition>) =>
+  const renameEntity = (oldId: string, rawId: string) => {
+    const nextId = rawId.trim();
+    if (
+      !/^[A-Za-z][A-Za-z0-9_.-]*$/.test(nextId) ||
+      (nextId !== oldId &&
+        draft.sketch.entities.some((item) => item.id === nextId))
+    )
+      return false;
+    if (nextId === oldId) return true;
+    beginSketchEdit();
     change({
       ...draft,
-      parameterDefinitions: draft.parameterDefinitions.map((item) =>
-        item.id === id ? { ...item, ...patch } : item,
-      ),
-      sketch: { ...draft.sketch, constraintsReviewed: false },
-    });
-  const renameParameter = (previousId: string, rawNextId: string) => {
-    const nextId = rawNextId.trim();
-    if (nextId === previousId) {
-      setParameterRenameErrors((errors) => {
-        const next = { ...errors };
-        delete next[previousId];
-        return next;
-      });
-      return true;
-    }
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(nextId)) {
-      setParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "ID 须以字母开头，只能包含字母、数字和下划线。",
-      }));
-      return false;
-    }
-    if (draft.parameterDefinitions.some((item) => item.id === nextId)) {
-      setParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "该参数 ID 已存在。",
-      }));
-      return false;
-    }
-    change(renameParameterReferences(draft, previousId, nextId));
-    setParameterRenameErrors((errors) => {
-      const next = { ...errors };
-      delete next[previousId];
-      return next;
-    });
-    return true;
-  };
-  const deleteParameter = (id: string) => {
-    change({
-      ...draft,
-      parameterDefinitions: draft.parameterDefinitions.filter(
-        (item) => item.id !== id,
-      ),
       sketch: {
         ...draft.sketch,
-        drivingParameters: draft.sketch.drivingParameters.filter(
-          (item) => item !== id,
+        entities: draft.sketch.entities.map((item) =>
+          item.id === oldId ? { ...item, id: nextId } : item,
         ),
-        entities: draft.sketch.entities.map((item) => ({
-          ...item,
-          parameterRefs: item.parameterRefs.filter((ref) => ref !== id),
-        })),
         constraints: draft.sketch.constraints.map((item) => ({
           ...item,
-          parameterId: item.parameterId === id ? null : item.parameterId,
-          expression: expressionReferencesParameter(item.expression, id)
-            ? null
-            : item.expression,
+          entityRefs: item.entityRefs.map((ref) =>
+            ref === oldId ? nextId : ref,
+          ),
+        })),
+        regions: draft.sketch.regions.map((item) => ({
+          ...item,
+          boundaryRefs: item.boundaryRefs.map((ref) =>
+            ref === oldId ? nextId : ref,
+          ),
         })),
         constraintsReviewed: false,
       },
     });
-  };
-  const createParameter = () => {
-    const id = newParameter.id.trim();
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
-      setParameterError("参数 ID 需以字母开头，只使用字母、数字或下划线。");
-      return;
-    }
-    if (draft.parameterDefinitions.some((item) => item.id === id)) {
-      setParameterError("参数 ID 已存在。");
-      return;
-    }
-    if (
-      newParameter.minimum > newParameter.default ||
-      newParameter.default > newParameter.maximum
-    ) {
-      setParameterError("需满足最小值 ≤ 标称值 ≤ 最大值。");
-      return;
-    }
-    const parameter: ParameterDefinition = {
-      id,
-      label: newParameter.displayName.trim() || id,
-      displayName: newParameter.displayName.trim() || id,
-      valueType: "number",
-      unit: newParameter.unit.trim() || "mm",
-      default: newParameter.default,
-      minimum: newParameter.minimum,
-      maximum: newParameter.maximum,
-      source: legacyParameterSource(newParameter.sourceType),
-      sourceDefinition: {
-        type: newParameter.sourceType,
-        reference: defaultReferenceForSource(newParameter.sourceType, id),
-        expression: null,
-        dependencies: [],
-        lookupTable: {},
-        fallback: newParameter.default,
-      },
-      scope: newParameter.scope,
-      exposed:
-        newParameter.sourceType === "userInput" &&
-        newParameter.scope === "partInstance" &&
-        newParameter.exposed,
-    };
-    change({
-      ...draft,
-      parameterDefinitions: [...draft.parameterDefinitions, parameter],
-      sketch: {
-        ...draft.sketch,
-        drivingParameters: [
-          ...new Set([...draft.sketch.drivingParameters, parameter.id]),
-        ],
-        constraintsReviewed: false,
-      },
-    });
-    setParameterCreator(false);
-    setParameterError("");
-  };
-  const assignSelection = (index: number) => {
-    if (!selected.length) return;
-    const current = draft.sketch.constraints[index];
-    if (!current) return;
-    if (current.constraintType === "coincident" && selected.length === 2) {
-      const first = draft.sketch.entities.find((item) => item.id === selected[0]);
-      const second = draft.sketch.entities.find(
-        (item) => item.id === selected[1],
-      );
-      const ends =
-        first && second
-          ? suggestCoincidentEndpoints(first, second)
-          : coincidentEnds;
-      editConstraint(index, {
-        entityRefs: selected,
-        endpointRefs: [...ends],
-        label: `重合 · ${(first?.role || selected[0])}${endpointLabel(ends[0])} ↔ ${(second?.role || selected[1])}${endpointLabel(ends[1])}`,
-      });
-      return;
-    }
-    editConstraint(index, { entityRefs: selected });
-  };
-  const deleteEntity = (id: string) => {
-    setSketch({
-      entities: draft.sketch.entities.filter((item) => item.id !== id),
-      constraints: draft.sketch.constraints
-        .map((item) => ({
-          ...item,
-          entityRefs: item.entityRefs.filter((ref) => ref !== id),
-        }))
-        .filter((item) => item.entityRefs.length),
-      regions: draft.sketch.regions
-        .map((item) => ({
-          ...item,
-          boundaryRefs: item.boundaryRefs.filter((ref) => ref !== id),
-        }))
-        .filter((item) => item.boundaryRefs.length),
-    });
-    onSelect("");
-  };
-  const point = (
-    entity: Draft["sketch"]["entities"][number],
-    end: "start" | "end",
-  ) => entity[end] || entity.center || null;
-  const detectRegions = () => {
-    const remaining = draft.sketch.entities.filter(
-      (item) =>
-        !item.construction &&
-        ["line", "arc", "circle"].includes(item.geometryType),
+    setSelectedEntities((items) =>
+      items.map((item) => (item === oldId ? nextId : item)),
     );
-    const loops: { refs: string[]; closed: boolean }[] = remaining
-      .filter((item) => item.geometryType === "circle")
-      .map((item) => ({ refs: [item.id], closed: true }));
-    const edges = remaining.filter((item) => item.geometryType !== "circle"),
-      used = new Set<string>(),
-      near = (a: [number, number] | null, b: [number, number] | null) =>
-        !!a && !!b && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-3;
-    for (const seed of edges) {
-      if (used.has(seed.id)) continue;
-      const refs = [seed.id];
-      used.add(seed.id);
-      const first = point(seed, "start");
-      let tail = point(seed, "end");
-      while (tail) {
-        const next = edges.find(
-          (item) => !used.has(item.id) && near(point(item, "start"), tail),
-        );
-        if (!next) break;
-        refs.push(next.id);
-        used.add(next.id);
-        tail = point(next, "end");
-        if (near(first, tail)) break;
-      }
-      loops.push({ refs, closed: near(first, tail) });
-    }
-    const closed = loops.filter((item) => item.closed);
-    setSketch({
-      regions: closed.map((item, index) => ({
-        id: `section.region.${index + 1}`,
-        boundaryRefs: item.refs,
-        closed: true,
-        role: "section.materialRegion",
-        operation: index ? "subtract" : "add",
-      })),
-    });
-    setTab("regions");
+    return true;
   };
-  const constraintList = draft.sketch.constraints.filter(
-    (item) =>
-      !DIMENSION_CONSTRAINTS.some((type) => type[0] === item.constraintType),
+  const selected = draft.sketch.entities.find(
+    (item) => item.id === selectedEntity,
   );
-  const constraintFilterOptions = useMemo(() => {
-    const types = new Set(constraintList.map((item) => item.constraintType));
-    return [...types].sort((a, b) =>
-      constraintLabel(a, draft.sketch.plane).localeCompare(
-        constraintLabel(b, draft.sketch.plane),
-        "zh-CN",
-      ),
-    );
-  }, [constraintList, draft.sketch.plane]);
-  const filteredConstraintList = constraintTypeFilter
-    ? constraintList.filter(
-        (item) => item.constraintType === constraintTypeFilter,
+  const planeAxes = sketchPlaneAxes(draft.sketch.plane);
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.matches("input, textarea, select") ||
+        target?.isContentEditable
       )
-    : constraintList;
-  const dimensions = draft.sketch.constraints.filter((item) =>
-    DIMENSION_CONSTRAINTS.some((type) => type[0] === item.constraintType),
-  );
-  const entityById = new Map(
-    draft.sketch.entities.map((entity) => [entity.id, entity]),
-  );
-  const entityName = (id: string) => entityById.get(id)?.role || id;
-  const dimensionName = (constraint: (typeof dimensions)[number]) => {
-    if (constraint.label?.trim()) return constraint.label.trim();
-    const knownNames: Record<string, string> = {
-      "dimension.width": "截面宽度",
-      "dimension.height": "截面高度",
-      "dimension.outer.width":
-        draft.sketch.profileMode === "multiRegion" ? "管材外宽" : "截面宽度",
-      "dimension.outer.height":
-        draft.sketch.profileMode === "multiRegion" ? "管材外高" : "截面高度",
-      "dimension.inner.width": "管材内宽",
-      "dimension.inner.height": "管材内高",
-      "dimension.centerline.flange": "翼缘长度",
-      "dimension.centerline.width": "中心线底宽",
-      "dimension.centerline.height": "中心线高度",
-    };
-    return (
-      knownNames[constraint.id] ||
-      constraintLabel(constraint.constraintType, draft.sketch.plane)
-    );
-  };
-  const operatorsForParameter = (parameterId: string) =>
-    draft.geometryRecipe.operations.filter(
-      (operation) =>
-        Object.values(operation.argumentExpressions).some((expression) =>
-          expressionReferencesParameter(expression, parameterId),
-        ) ||
-        expressionReferencesParameter(operation.conditionExpression, parameterId) ||
-        Object.values(operation.arguments).some((value) => value === parameterId),
-    );
-  const tabs: [typeof tab, string, number][] = [
-    ["entities", "图元", draft.sketch.entities.length],
-    ["constraints", "几何约束", constraintList.length],
-    ["dimensions", "尺寸与参数", dimensions.length],
-    ["regions", "截面区域", draft.sketch.regions.length],
-    ["diagnostics", "诊断", solution?.diagnostics.length || 0],
-  ];
-  const renderRefs = (refs: string[]) => (
-    <div className="reference-chips">
-      {refs.length ? (
-        refs.map((id) => (
-          <button key={id} title={id} onClick={() => onSelect(id)}>
-            <strong>{entityName(id)}</strong>
-            <code>{id}</code>
-          </button>
-        ))
-      ) : (
-        <span>请先在画布选择图元</span>
-      )}
-    </div>
-  );
-  const renderCompactEntityRefs = (refs: string[]) =>
-    refs.length ? (
-      <div className="constraint-entities-compact">
-        {refs.map((id) => (
-          <button
-            key={id}
-            type="button"
-            title={id}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelect(id);
-            }}
-          >
-            {entityName(id)}
-          </button>
-        ))}
-      </div>
-    ) : (
-      <span className="constraint-entities-empty">未绑定图元</span>
-    );
-  return (
-    <div className="panel sketch-intent-panel">
-      <PanelTitle
-        icon={GitBranch}
-        title="3. 草图设计意图"
-        subtitle="将绘制出的形状固化为可参数化、可验证的工程模型。"
-        actions={
-          <span className={`review-chip ${draft.sketch.constraintsReviewed ? "ok" : ""}`}>
-            {draft.sketch.constraintsReviewed ? "已复核" : "待复核"}
-          </span>
+        return;
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedEntities.length) {
+        event.preventDefault();
+        deleteSelectedEntities();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "c" &&
+        selectedEntities.length
+      ) {
+        event.preventDefault();
+        copySelectedEntities();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "v" &&
+        sketchClipboard?.entities.length
+      ) {
+        event.preventDefault();
+        pasteClipboardEntities();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "z" &&
+        !event.shiftKey
+      ) {
+        event.preventDefault();
+        undo();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        (event.key.toLowerCase() === "y" ||
+          (event.key.toLowerCase() === "z" && event.shiftKey))
+      ) {
+        event.preventDefault();
+        redo();
+      } else if (tool === "polyline" && event.key === "Enter") {
+        event.preventDefault();
+        setPolylineCommand({ id: Date.now(), type: "finish" });
+      } else if (event.key === "Escape") {
+        if (sketchEditConflict) {
+          event.preventDefault();
+          setSketchEditConflict(null);
+          return;
         }
+        if (tool === "polyline") {
+          event.preventDefault();
+          setPolylineCommand({ id: Date.now(), type: "cancel" });
+          return;
+        }
+        setSelectedEntities([]);
+        setTool("select");
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [
+    draft.sketch,
+    selectedEntities,
+    moveOffset,
+    history,
+    future,
+    sketchEditConflict,
+    sketchClipboard,
+    tool,
+  ]);
+  return (
+    <>
+      <GeometryAuthoringPanel
+        draft={draft}
+        change={change}
+        showError={showError}
+        setSketch={setSketch}
+        pendingProfileMode={pendingProfileMode}
+        setPendingProfileMode={setPendingProfileMode}
+        applyProfileMode={applyProfileMode}
+        thinwallOffset={thinwallOffset}
+        setThinwallOffset={setThinwallOffset}
+        applyThinwallOffset={applyThinwallOffset}
+        thinwallOffsetNote={thinwallOffsetNote}
       />
-      <div className="intent-tabs">
-        {tabs.map(([id, label, count]) => (
-          <button
-            key={id}
-            className={tab === id ? "active" : ""}
-            onClick={() => setTab(id)}
-          >
-            {label}
-            <b>{count}</b>
-          </button>
-        ))}
+      <div className="geometry-studio">
+        <div className="solver-workbench">
+          <div className="panel solver-canvas-panel">
+            <SketchWorkspaceToolbar
+              solution={solution}
+              solveCase={solveCase}
+              setSolveCase={setSolveCase}
+              tool={tool}
+              setTool={setTool}
+              arcDrawMode={arcDrawMode}
+              setArcDrawMode={setArcDrawMode}
+              historyLength={history.length}
+              futureLength={future.length}
+              selectedCount={selectedEntities.length}
+              moveOffset={moveOffset}
+              setMoveOffset={setMoveOffset}
+              objectSnapEnabled={objectSnapEnabled}
+              setObjectSnapEnabled={setObjectSnapEnabled}
+              orthogonalLock={orthogonalLock}
+              setOrthogonalLock={setOrthogonalLock}
+              sketchClipboardSize={sketchClipboard?.entities.length || 0}
+              onUndo={undo}
+              onRedo={redo}
+              onMove={moveSelectedEntities}
+              onCopy={copySelectedEntities}
+              onPaste={pasteClipboardEntities}
+              onDelete={deleteSelectedEntities}
+              issueViewCommand={issueViewCommand}
+              planeAxes={planeAxes}
+            />
+            {sketchEditConflict ? (
+              <SketchEditConflictDialog
+                conflict={sketchEditConflict}
+                onResolve={resolveSketchEditConflict}
+              />
+            ) : null}
+            <ParametricSketchCanvas
+              draft={draft}
+              solution={solution}
+              caseName={solveCase}
+              selected={selectedEntities}
+              tool={tool}
+              onSelect={selectEntity}
+              onSketch={applySketch}
+              onGeometryEdit={applyGeometryEdit}
+              validateGeometryEdit={validateSketchGeometryEdit}
+              onGeometryEditRejected={showError}
+              onEditConflict={setSketchEditConflict}
+              pendingConflict={sketchEditConflict}
+              beginEdit={beginSketchEdit}
+              viewCommand={viewCommand}
+              polylineCommand={polylineCommand}
+              onCursorChange={publishCursorPoint}
+              orthogonalLock={orthogonalLock}
+              objectSnapEnabled={objectSnapEnabled}
+              arcDrawMode={arcDrawMode}
+            />
+            <SketchWorkspaceStatusBar
+              solution={solution}
+              solving={solving}
+              solveCase={solveCase}
+              plane={draft.sketch.plane}
+              planeAxes={planeAxes}
+              cursorPoint={cursorPoint}
+              selectedEntity={selectedEntity || "未选择"}
+            />
+          </div>
+          <div className="panel parameter-editor">
+            <SketchModePanel
+              draft={draft}
+              requestProfileMode={requestProfileMode}
+              setSketch={setSketch}
+              solveCase={solveCase}
+              thinwallOffset={thinwallOffset}
+              setThinwallOffset={setThinwallOffset}
+              applyThinwallOffset={applyThinwallOffset}
+              thinwallOffsetNote={thinwallOffsetNote}
+            />
+            <SketchSelectedEntityEditor
+              selected={selected || null}
+              selectedCount={selectedEntities.length}
+              draft={draft}
+              planeAxes={planeAxes}
+              renameEntity={renameEntity}
+              editEntity={editEntity}
+              deleteSelectedEntities={deleteSelectedEntities}
+              linePolar={linePolar}
+              endFromLengthAndAngle={endFromLengthAndAngle}
+              pointAngleDegrees={pointAngleDegrees}
+            />
+          </div>
+        </div>
       </div>
-      {tab === "entities" && (
-        <div className="intent-list">
-          {draft.sketch.entities.map((entity) => (
-            <div
-              className={`intent-card ${selected.includes(entity.id) ? "selected" : ""}`}
-              key={entity.id}
-              onClick={(event) =>
-                onSelect(entity.id, event.shiftKey || event.ctrlKey)
-              }
-            >
-              <div className="intent-card-main">
-                <strong>{entity.role}</strong>
-                <code>{entity.id}</code>
-                <small>
-                  {entity.geometryType === "line"
-                    ? "直线"
-                    : entity.geometryType === "arc"
-                      ? "圆弧"
-                      : entity.geometryType === "circle"
-                        ? "圆"
-                        : "点"}{" "}
-                  · {entity.construction ? "构造图元" : "轮廓图元"}
-                </small>
-              </div>
-              <div className="intent-card-actions">
-                <label onClick={(event) => event.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={entity.construction}
-                    onChange={(event) =>
-                      setSketch({
-                        entities: draft.sketch.entities.map((item) =>
-                          item.id === entity.id
-                            ? { ...item, construction: event.target.checked }
-                            : item,
-                        ),
-                      })
-                    }
-                  />
-                  构造
-                </label>
-                <button
-                  className="delete-icon"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    deleteEntity(entity.id);
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {tab === "constraints" && (
-        <>
-          <div className="quick-constraint-bar">
-            <span>选中 {selected.length} 个图元</span>
-            <select
-              value={newConstraintType}
-              onChange={(event) =>
-                setNewConstraintType(
-                  event.target.value as typeof newConstraintType,
-                )
-              }
-            >
-              {GEOMETRIC_CONSTRAINTS.map(([type]) => (
-                <option key={type} value={type}>
-                  {constraintLabel(type, draft.sketch.plane)}
-                </option>
-              ))}
-            </select>
-            <button
-              className="primary-add"
-              disabled={!!selectionError(newConstraintType)}
-              onClick={() => addConstraint(newConstraintType)}
-            >
-              <Plus size={13} />
-              新增几何约束
-            </button>
-            <button
-              type="button"
-              disabled={selected.length < 2}
-              title="按选择顺序生成相邻图元的成对重合约束"
-              onClick={() => addEndToEndConnection(false)}
-            >
-              <Link2 size={13} />
-              首尾相连
-            </button>
-            <button
-              type="button"
-              disabled={selected.length < 3}
-              title="按选择顺序首尾相连，并连接最后一段与第一段形成闭合环"
-              onClick={() => addEndToEndConnection(true)}
-            >
-              <Link2 size={13} />
-              首尾相连并闭合
-            </button>
-          </div>
-          <div className={`selection-contract ${selectionError(newConstraintType) ? "waiting" : "ready"}`}>
-            {selectionError(newConstraintType) ||
-              "当前选择符合该约束的图元契约。多段轮廓请优先使用「首尾相连／并闭合」，避免整环闭环约束。"}
-          </div>
-          {newConstraintType === "coincident" && selected.length === 2 ? (
-            <div className="coincident-endpoint-picker">
-              <span>连接端点</span>
-              {([0, 1] as const).map((slot) => {
-                const entity = draft.sketch.entities.find(
-                  (item) => item.id === selected[slot],
-                );
-                const name = entity?.role || selected[slot];
-                return (
-                  <label key={selected[slot]}>
-                    <span>{name}</span>
-                    <select
-                      value={coincidentEnds[slot]}
-                      onChange={(event) => {
-                        const handle = event.target.value as "start" | "end";
-                        setCoincidentEnds((current) =>
-                          slot === 0
-                            ? [handle, current[1]]
-                            : [current[0], handle],
-                        );
-                      }}
-                    >
-                      <option value="start">起点</option>
-                      <option value="end">终点</option>
-                    </select>
-                  </label>
-                );
-              })}
-              <small>
-                将连接：{endpointLabel(coincidentEnds[0])} ↔{" "}
-                {endpointLabel(coincidentEnds[1])}
-                （已按最近端点预填，可改）
-              </small>
-            </div>
-          ) : null}
-          <div className="constraint-filter-bar">
-            <label>
-              <span>约束类型</span>
-              <select
-                value={constraintTypeFilter}
-                onChange={(event) => setConstraintTypeFilter(event.target.value)}
-              >
-                <option value="">
-                  全部（{constraintList.length}）
-                </option>
-                {constraintFilterOptions.map((type) => (
-                  <option key={type} value={type}>
-                    {constraintLabel(type, draft.sketch.plane)}（
-                    {
-                      constraintList.filter((item) => item.constraintType === type)
-                        .length
-                    }
-                    ）
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="intent-list constraint-list-compact">
-            {filteredConstraintList.map((constraint) => {
-              const index = draft.sketch.constraints.indexOf(constraint);
-              const endpointHandles =
-                constraint.endpointRefs && constraint.endpointRefs.length >= 2
-                  ? constraint.endpointRefs
-                  : (["end", "start"] as Array<"start" | "end">);
-              const showCoincidentEndpoints =
-                constraint.constraintType === "coincident" &&
-                constraint.entityRefs.length === 2;
-              return (
-                <div
-                  className={`constraint-card ${constraint.enabled ? "" : "disabled"}`}
-                  key={constraint.id}
-                >
-                  <div className="constraint-card-row constraint-card-row-main">
-                    <label className="constraint-enable" title="启用约束">
-                      <input
-                        type="checkbox"
-                        checked={constraint.enabled}
-                        onChange={(event) =>
-                          editConstraint(index, {
-                            enabled: event.target.checked,
-                          })
-                        }
-                      />
-                    </label>
-                    {renderCompactEntityRefs(constraint.entityRefs)}
-                    <span
-                      className="constraint-type-badge"
-                      title={constraint.id}
-                    >
-                      {constraintLabel(
-                        constraint.constraintType,
-                        draft.sketch.plane,
-                      )}
-                    </span>
-                    <input
-                      className="constraint-name-input"
-                      value={constraint.label || ""}
-                      placeholder={constraint.id}
-                      title={`约束名称 · ${constraint.id}`}
-                      onChange={(event) =>
-                        editConstraint(index, { label: event.target.value })
-                      }
-                    />
-                    <button
-                      className="delete-icon"
-                      title="删除约束"
-                      onClick={() =>
-                        setSketch({
-                          constraints: draft.sketch.constraints.filter(
-                            (_, i) => i !== index,
-                          ),
-                        })
-                      }
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                  <div className="constraint-card-row constraint-card-row-sub">
-                    {showCoincidentEndpoints ? (
-                      <div className="coincident-endpoint-edit compact">
-                        {constraint.entityRefs.map((ref, slot) => {
-                          const entity = draft.sketch.entities.find(
-                            (item) => item.id === ref,
-                          );
-                          return (
-                            <label key={`${constraint.id}-${ref}`}>
-                              <span>{entity?.role || ref}</span>
-                              <select
-                                value={endpointHandles[slot] || "end"}
-                                onChange={(event) => {
-                                  const handle = event.target
-                                    .value as "start" | "end";
-                                  const next: Array<"start" | "end"> = [
-                                    endpointHandles[0] || "end",
-                                    endpointHandles[1] || "start",
-                                  ];
-                                  next[slot] = handle;
-                                  const left =
-                                    draft.sketch.entities.find(
-                                      (item) =>
-                                        item.id === constraint.entityRefs[0],
-                                    )?.role || constraint.entityRefs[0];
-                                  const right =
-                                    draft.sketch.entities.find(
-                                      (item) =>
-                                        item.id === constraint.entityRefs[1],
-                                    )?.role || constraint.entityRefs[1];
-                                  editConstraint(index, {
-                                    endpointRefs: next,
-                                    label: `重合 · ${left}${endpointLabel(next[0])} ↔ ${right}${endpointLabel(next[1])}`,
-                                  });
-                                }}
-                              >
-                                <option value="start">起点</option>
-                                <option value="end">终点</option>
-                              </select>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    <button
-                      className="selection-apply compact"
-                      disabled={!selected.length}
-                      onClick={() => assignSelection(index)}
-                    >
-                      <MousePointer2 size={13} />
-                      用当前选择替换作用图元
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {!constraintList.length && (
-              <div className="empty-note">
-                先在画布中选择图元，再点击上方约束，无需输入图元 ID。
-              </div>
-            )}
-            {constraintList.length > 0 && !filteredConstraintList.length && (
-              <div className="empty-note">
-                当前筛选下没有约束，请切换约束类型或清除筛选。
-              </div>
-            )}
-          </div>
-        </>
-      )}
-      {tab === "dimensions" && (
-        <>
-          <div className="dimension-workflow">
-            <div className={`dimension-step ${selected.length ? "complete" : "active"}`}>
-              <b>1</b>
-              <span>
-                <strong>选择图元</strong>
-                <small>
-                  {selected.length
-                    ? selected.map(entityName).join("、")
-                    : "先在画布中选择要标注尺寸的图元"}
-                </small>
-              </span>
-            </div>
-            <ArrowRight size={14} />
-            <div className={`dimension-step ${selected.length ? "active" : ""}`}>
-              <b>2</b>
-              <span>
-                <strong>选择几何量</strong>
-                <small>
-                  {dimensionDescription(newDimensionType, draft.sketch.plane)}
-                </small>
-              </span>
-              <select
-                aria-label="新增尺寸的几何量"
-                value={newDimensionType}
-                onChange={(event) =>
-                  setNewDimensionType(event.target.value as typeof newDimensionType)
-                }
-              >
-                {DIMENSION_CONSTRAINTS.map(([type, label]) => (
-                  <option key={type} value={type}>
-                    {constraintLabel(type, draft.sketch.plane) || label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <ArrowRight size={14} />
-            <div className="dimension-step">
-              <b>3</b>
-              <span>
-                <strong>绑定驱动值</strong>
-                <small>尺寸创建后绑定固定值、参数或表达式</small>
-              </span>
-            </div>
-          </div>
-          <div className="quick-constraint-bar dimension-actions">
-            <button
-              className="primary-add"
-              disabled={!!selectionError(newDimensionType)}
-              onClick={addDimension}
-            >
-              <Plus size={13} />
-              为当前选择建立尺寸
-            </button>
-            <button
-              onClick={() => {
-                const index = draft.parameterDefinitions.length + 1;
-                setNewParameter((item) => ({
-                  ...item,
-                  id: item.id || `dimension${index}`,
-                  displayName: item.displayName || `尺寸参数 ${index}`,
-                }));
-                setParameterCreator((value) => !value);
-              }}
-            >
-              <Variable size={13} />
-              定义新参数
-            </button>
-            <span>
-              {selectionError(newDimensionType) ||
-                `将创建“${constraintLabel(newDimensionType, draft.sketch.plane)}”尺寸`}
-            </span>
-          </div>
-          {parameterCreator && (
-            <div className="parameter-create-card">
-              <div className="form-grid three">
-                <Field label="参数 ID">
-                  <input
-                    value={newParameter.id}
-                    onChange={(event) =>
-                      setNewParameter({ ...newParameter, id: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="参数名称">
-                  <input
-                    value={newParameter.displayName}
-                    onChange={(event) =>
-                      setNewParameter({
-                        ...newParameter,
-                        displayName: event.target.value,
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="单位">
-                  <input
-                    value={newParameter.unit}
-                    onChange={(event) =>
-                      setNewParameter({ ...newParameter, unit: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="参数来源">
-                  <select
-                    value={newParameter.sourceType}
-                    onChange={(event) => {
-                      const sourceType = event.target
-                        .value as ParameterSource["type"];
-                      const requiredScope = requiredScopeForSource(sourceType);
-                      setNewParameter({
-                        ...newParameter,
-                        sourceType,
-                        scope: requiredScope || newParameter.scope,
-                        exposed:
-                          sourceType === "userInput" &&
-                          (requiredScope || newParameter.scope) === "partInstance",
-                      });
-                    }}
-                  >
-                    {Object.entries(SOURCE_LABELS).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="作用域">
-                  <select
-                    value={newParameter.scope}
-                    disabled={requiredScopeForSource(newParameter.sourceType) != null}
-                    onChange={(event) => {
-                      const scope = event.target
-                        .value as NonNullable<ParameterDefinition["scope"]>;
-                      setNewParameter({
-                        ...newParameter,
-                        scope,
-                        exposed:
-                          newParameter.sourceType === "userInput" &&
-                          scope === "partInstance",
-                      });
-                    }}
-                  >
-                    {Object.entries(PARAMETER_SCOPE_LABELS).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="最小值">
-                  <NumberInput
-                    value={newParameter.minimum}
-                    onChange={(minimum) =>
-                      setNewParameter({ ...newParameter, minimum })
-                    }
-                  />
-                </Field>
-                <Field label="标称值">
-                  <NumberInput
-                    value={newParameter.default}
-                    onChange={(value) =>
-                      setNewParameter({ ...newParameter, default: value })
-                    }
-                  />
-                </Field>
-                <Field label="最大值">
-                  <NumberInput
-                    value={newParameter.maximum}
-                    onChange={(maximum) =>
-                      setNewParameter({ ...newParameter, maximum })
-                    }
-                  />
-                </Field>
-              </div>
-              <div className="parameter-create-link">
-                <Variable size={13} />
-                <span>
-                  <strong>参数只定义可求值变量，不会因当前选中图元而自动建立几何关系。</strong>
-                  创建后，在尺寸卡片的“驱动方式”中绑定该参数。
-                </span>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={newParameter.exposed}
-                    disabled={
-                      newParameter.sourceType !== "userInput" ||
-                      newParameter.scope !== "partInstance"
-                    }
-                    onChange={(event) =>
-                      setNewParameter({
-                        ...newParameter,
-                        exposed: event.target.checked,
-                      })
-                    }
-                  />
-                  在零部件实例生成时开放输入
-                </label>
-              </div>
-              {parameterError && <p className="inline-error">{parameterError}</p>}
-              <div className="card-actions">
-                <button onClick={() => setParameterCreator(false)}>取消</button>
-                <button className="primary" onClick={createParameter}>
-                  创建参数
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="parameter-contract-list">
-            {draft.parameterDefinitions.map((parameter) => {
-              const linkedDimensions = draft.sketch.constraints.filter(
-                  (item) =>
-                    DIMENSION_CONSTRAINTS.some(
-                      ([type]) => type === item.constraintType,
-                    ) &&
-                    (item.parameterId === parameter.id ||
-                      expressionReferencesParameter(
-                        item.expression,
-                        parameter.id,
-                      )),
-                ),
-                linkedOperators = operatorsForParameter(parameter.id),
-                linkedEntityIds = new Set(
-                  linkedDimensions.flatMap((item) => item.entityRefs),
-                ),
-                linkedEntities = draft.sketch.entities.filter((item) =>
-                  linkedEntityIds.has(item.id),
-                ),
-                sourceType = parameter.sourceDefinition?.type || "userInput",
-                instanceEditable = instanceParameterEditable(parameter);
-              return (
-                <details className="parameter-contract-card" key={parameter.id}>
-                  <summary>
-                    <span>
-                      <strong>{parameter.displayName || parameter.label}</strong>
-                      <code>{parameter.id}</code>
-                    </span>
-                    <small>
-                      {parameter.exposed && instanceEditable
-                        ? "实例可输入"
-                        : "实例只读／隐藏"}
-                      {" · "}{linkedDimensions.length} 个尺寸 · {linkedEntities.length} 个影响图元 · {linkedOperators.length} 个算子
-                    </small>
-                  </summary>
-                  <div className="form-grid three">
-                    <Field label="稳定 ID" hint="修改后自动迁移草图、公式、规则、接口及变体中的引用">
-                      <input
-                        key={parameter.id}
-                        defaultValue={parameter.id}
-                        onBlur={(event) => {
-                          if (!renameParameter(parameter.id, event.target.value))
-                            event.currentTarget.value = parameter.id;
-                        }}
-                        aria-invalid={!!parameterRenameErrors[parameter.id]}
-                      />
-                      {parameterRenameErrors[parameter.id] && (
-                        <small className="field-error" role="alert">
-                          {parameterRenameErrors[parameter.id]}
-                        </small>
-                      )}
-                    </Field>
-                    <Field label="参数名称">
-                      <input
-                        value={parameter.displayName || parameter.label}
-                        onChange={(event) =>
-                          editParameter(parameter.id, {
-                            label: event.target.value,
-                            displayName: event.target.value,
-                          })
-                        }
-                      />
-                    </Field>
-                    <Field label="单位">
-                      <input
-                        value={parameter.unit}
-                        onChange={(event) =>
-                          editParameter(parameter.id, { unit: event.target.value })
-                        }
-                      />
-                    </Field>
-                    <Field label="参数来源">
-                      <select
-                        value={sourceType}
-                        onChange={(event) => {
-                          const nextType = event.target
-                            .value as ParameterSource["type"];
-                          const nextScope =
-                            requiredScopeForSource(nextType) ||
-                            parameter.scope ||
-                            "partInstance";
-                          editParameter(parameter.id, {
-                            source: legacyParameterSource(nextType),
-                            exposed:
-                              nextType === "userInput" &&
-                              nextScope === "partInstance"
-                                ? parameter.exposed
-                                : false,
-                            scope: nextScope,
-                            sourceDefinition: {
-                              ...(parameter.sourceDefinition || {
-                                dependencies: [],
-                                lookupTable: {},
-                              }),
-                              type: nextType,
-                              reference:
-                                defaultReferenceForSource(
-                                  nextType,
-                                  parameter.id,
-                                ) ?? parameter.sourceDefinition?.reference ?? null,
-                              fallback: parameter.default,
-                            },
-                          });
-                        }}
-                      >
-                        {Object.entries(SOURCE_LABELS).map(([id, label]) => (
-                          <option key={id} value={id}>{label}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    {sourceType !== "userInput" &&
-                      sourceType !== "formula" &&
-                      sourceType !== "constant" && (
-                        <Field label="上游参数路径">
-                          <input
-                            value={parameter.sourceDefinition?.reference || ""}
-                            onChange={(event) =>
-                              editParameter(parameter.id, {
-                                sourceDefinition: {
-                                  ...(parameter.sourceDefinition || {
-                                    type: sourceType,
-                                    dependencies: [],
-                                    lookupTable: {},
-                                  }),
-                                  reference: event.target.value,
-                                  fallback: parameter.default,
-                                },
-                              })
-                            }
-                            placeholder={
-                              defaultReferenceForSource(sourceType, parameter.id) ||
-                              "例如 standard.profileWidth"
-                            }
-                          />
-                        </Field>
-                      )}
-                    {sourceType === "formula" && (
-                      <Field label="来源表达式">
-                        <input
-                          value={parameter.sourceDefinition?.expression || ""}
-                          onChange={(event) =>
-                            editParameter(parameter.id, {
-                              sourceDefinition: {
-                                ...(parameter.sourceDefinition || {
-                                  type: "formula",
-                                  dependencies: [],
-                                  lookupTable: {},
-                                }),
-                                expression: event.target.value,
-                              },
-                            })
-                          }
-                          placeholder="例如 sectionWidth - 2 * thickness"
-                        />
-                      </Field>
-                    )}
-                    <Field label="作用域">
-                      <select
-                        value={parameter.scope || "partInstance"}
-                        disabled={requiredScopeForSource(sourceType) != null}
-                        onChange={(event) => {
-                          const scope = event.target
-                            .value as NonNullable<ParameterDefinition["scope"]>;
-                          editParameter(parameter.id, {
-                            scope,
-                            exposed:
-                              sourceType === "userInput" &&
-                              scope === "partInstance"
-                                ? parameter.exposed
-                                : false,
-                          });
-                        }}
-                      >
-                        {Object.entries(PARAMETER_SCOPE_LABELS).map(([id, label]) => (
-                          <option key={id} value={id}>{label}</option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="最小值">
-                      <NumberInput value={parameter.minimum} onChange={(minimum) => editParameter(parameter.id, { minimum })} />
-                    </Field>
-                    <Field label="默认／标称值" hint="实例初始值；上游值和来源回退值都缺失时使用">
-                      <NumberInput
-                        value={Number(parameter.default)}
-                        onChange={(value) =>
-                          editParameter(parameter.id, {
-                            default: value,
-                            sourceDefinition: parameter.sourceDefinition
-                              ? {
-                                  ...parameter.sourceDefinition,
-                                  fallback: value,
-                                }
-                              : parameter.sourceDefinition,
-                          })
-                        }
-                      />
-                    </Field>
-                    <Field label="最大值">
-                      <NumberInput value={parameter.maximum} onChange={(maximum) => editParameter(parameter.id, { maximum })} />
-                    </Field>
-                  </div>
-                  {PARAMETER_SOURCE_BEHAVIOR[sourceType] && (
-                    <div className="parameter-source-note">
-                      <strong>{SOURCE_LABELS[sourceType]}</strong>
-                      <span>{PARAMETER_SOURCE_BEHAVIOR[sourceType]}</span>
-                    </div>
-                  )}
-                  <label className="instance-exposure-control">
-                    <input
-                      type="checkbox"
-                      checked={parameter.exposed && instanceEditable}
-                      disabled={!instanceEditable}
-                      onChange={(event) =>
-                        editParameter(parameter.id, {
-                          exposed: event.target.checked,
-                        })
-                      }
-                    />
-                    <span>
-                      <strong>实例生成时开放输入</strong>
-                      <small>
-                        {instanceEditable
-                          ? "只控制实例配置页是否允许用户填写，不影响该参数参与几何求值。"
-                          : "只有“实例输入＋零部件实例”参数可以开放；当前参数由材料、公式或上层配置提供。"}
-                      </small>
-                    </span>
-                  </label>
-                  <div className="parameter-drive-map">
-                    <strong>实际驱动关系（由尺寸和算子自动生成）</strong>
-                    {linkedDimensions.map((dimension) => (
-                      <div className="drive-chain" key={dimension.id}>
-                        <span className="drive-node parameter-node">
-                          {parameter.displayName || parameter.label}
-                        </span>
-                        <ArrowRight size={13} />
-                        <span className="drive-node dimension-node">
-                          <b>{dimensionName(dimension)}</b>
-                          <small>
-                            {dimension.parameterId === parameter.id
-                              ? "直接绑定"
-                              : `公式：${dimension.expression}`}
-                          </small>
-                        </span>
-                        <ArrowRight size={13} />
-                        <span className="drive-node entity-node">
-                          {dimension.entityRefs.map(entityName).join("、")}
-                        </span>
-                      </div>
-                    ))}
-                    {linkedOperators.map((operation) => (
-                      <div className="drive-chain" key={operation.id}>
-                        <span className="drive-node parameter-node">
-                          {parameter.displayName || parameter.label}
-                        </span>
-                        <ArrowRight size={13} />
-                        <span className="drive-node operator-node">
-                          <b>{operation.id}</b>
-                          <small>{operation.operator}</small>
-                        </span>
-                        <ArrowRight size={13} />
-                        <span className="drive-node entity-node">三维几何</span>
-                      </div>
-                    ))}
-                    {!linkedDimensions.length && !linkedOperators.length && (
-                      <div className="drive-map-empty">
-                        尚未绑定任何尺寸或几何算子；该参数目前不会改变几何。
-                      </div>
-                    )}
-                  </div>
-                  <button className="danger-text" onClick={() => deleteParameter(parameter.id)}>
-                    <Trash2 size={13} />删除参数并清理引用
-                  </button>
-                </details>
-              );
-            })}
-          </div>
-          <div className="dimension-list">
-            {dimensions.map((constraint) => {
-              const index = draft.sketch.constraints.indexOf(constraint);
-              const driverMode =
-                constraint.driverMode ||
-                (constraint.parameterId
-                  ? "parameter"
-                  : constraint.expression != null
-                    ? "expression"
-                    : constraint.value != null
-                      ? "fixed"
-                      : "unset");
-              return (
-                <div className="dimension-card" key={constraint.id}>
-                  <div className="dimension-identity">
-                    <span>
-                      <strong>{dimensionName(constraint)}</strong>
-                      <code>{constraint.id}</code>
-                    </span>
-                    <small>
-                      {constraintLabel(
-                        constraint.constraintType,
-                        draft.sketch.plane,
-                      )}
-                      ：
-                      {dimensionDescription(
-                        constraint.constraintType,
-                        draft.sketch.plane,
-                      )}
-                    </small>
-                    {renderRefs(constraint.entityRefs)}
-                  </div>
-                  <Field label="尺寸名称">
-                    <input
-                      value={constraint.label || dimensionName(constraint)}
-                      onChange={(event) =>
-                        editConstraint(index, { label: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label="驱动方式">
-                    <select
-                      value={driverMode}
-                      onChange={(event) => {
-                        const mode = event.target.value;
-                        editConstraint(
-                          index,
-                          mode === "parameter"
-                            ? {
-                                driverMode: "parameter",
-                                parameterId:
-                                  draft.parameterDefinitions.find(
-                                    (item) =>
-                                      item.valueType === "number" ||
-                                      item.valueType === "integer" ||
-                                      !item.valueType,
-                                  )?.id || null,
-                                expression: null,
-                                value: null,
-                                driving: true,
-                              }
-                            : mode === "expression"
-                              ? {
-                                  driverMode: "expression",
-                                  parameterId: null,
-                                  expression: constraint.expression || "",
-                                  value: null,
-                                  driving: true,
-                                }
-                              : mode === "fixed"
-                                ? {
-                                    driverMode: "fixed",
-                                    parameterId: null,
-                                    expression: null,
-                                    value: constraint.value ?? 0,
-                                    driving: true,
-                                  }
-                                : {
-                                    driverMode: "unset",
-                                    parameterId: null,
-                                    expression: null,
-                                    value: null,
-                                    driving: false,
-                                  },
-                        );
-                      }}
-                    >
-                      <option value="unset">参考尺寸（不驱动）</option>
-                      <option value="fixed">固定值</option>
-                      <option value="parameter">驱动参数</option>
-                      <option value="expression">参数表达式</option>
-                    </select>
-                  </Field>
-                  <Field
-                    label={
-                      driverMode === "parameter"
-                        ? "选择参数"
-                        : driverMode === "expression"
-                          ? "参数表达式"
-                          : driverMode === "fixed"
-                            ? "固定尺寸值"
-                            : "尺寸状态"
-                    }
-                  >
-                    {driverMode === "parameter" ? (
-                      <select
-                        value={constraint.parameterId || ""}
-                        onChange={(event) =>
-                          editConstraint(index, {
-                            driverMode: "parameter",
-                            parameterId: event.target.value || null,
-                            expression: null,
-                            value: null,
-                            driving: true,
-                          })
-                        }
-                      >
-                        {draft.parameterDefinitions
-                          .filter(
-                            (item) =>
-                              item.valueType === "number" ||
-                              item.valueType === "integer" ||
-                              !item.valueType,
-                          )
-                          .map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.displayName || item.label} · {item.id}
-                            </option>
-                          ))}
-                      </select>
-                    ) : driverMode === "expression" ? (
-                      <span className="expression-driver-input">
-                        <input
-                          value={constraint.expression || ""}
-                          onChange={(event) =>
-                            editConstraint(index, {
-                              driverMode: "expression",
-                              expression: event.target.value,
-                              parameterId: null,
-                              value: null,
-                              driving: true,
-                            })
-                          }
-                          placeholder="sectionWidth - 2 * thickness"
-                          aria-invalid={!constraint.expression?.trim()}
-                        />
-                        {!constraint.expression?.trim() && (
-                          <small className="field-error" role="alert">
-                            请输入由一个或多个参数组成的表达式。
-                          </small>
-                        )}
-                      </span>
-                    ) : driverMode === "fixed" ? (
-                      <NumberInput
-                        value={constraint.value ?? 0}
-                        onChange={(value) =>
-                          editConstraint(index, {
-                            driverMode: "fixed",
-                            value,
-                            parameterId: null,
-                            expression: null,
-                            driving: true,
-                          })
-                        }
-                      />
-                    ) : (
-                      <span className="dimension-driver-status">
-                        仅显示当前求解尺寸，不向草图施加数值约束。
-                      </span>
-                    )}
-                  </Field>
-                  <button
-                    className="selection-apply"
-                    disabled={!selected.length}
-                    onClick={() => assignSelection(index)}
-                  >
-                    <MousePointer2 size={13} />
-                    替换为当前选择
-                  </button>
-                  <button
-                    className="delete-icon"
-                    onClick={() =>
-                      setSketch({
-                        constraints: draft.sketch.constraints.filter(
-                          (_, i) => i !== index,
-                        ),
-                      })
-                    }
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              );
-            })}
-            {!dimensions.length && (
-              <div className="empty-note">
-                选择直线、圆弧或圆后创建尺寸，尺寸可绑定模板参数。
-              </div>
-            )}
-          </div>
-        </>
-      )}
-      {tab === "regions" && (
-        <>
-          <div className="region-guidance">
-            <div>
-              <strong>自动识别闭合环</strong>
-              <span>按轮廓连续性生成截面区域，圆会直接识别为闭合环。</span>
-            </div>
-            <button onClick={detectRegions}>
-              <RefreshCw size={14} />
-              重新识别
-            </button>
-          </div>
-          <div className="region-visual-list">
-            {draft.sketch.regions.map((region, index) => (
-              <div
-                className={`region-visual-card ${region.operation}`}
-                key={region.id}
-              >
-                <span className="region-swatch" />
-                <div>
-                  <code>{region.id}</code>
-                  <strong>
-                    {region.operation === "add" ? "实体外环" : "孔洞／减材内环"}
-                  </strong>
-                  {renderRefs(region.boundaryRefs)}
-                </div>
-                <select
-                  value={region.operation}
-                  onChange={(event) =>
-                    setSketch({
-                      regions: draft.sketch.regions.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              operation: event.target
-                                .value as typeof region.operation,
-                            }
-                          : item,
-                      ),
-                    })
-                  }
-                >
-                  <option value="add">生成实体</option>
-                  <option value="subtract">作为孔洞</option>
-                </select>
-                <button
-                  className="selection-apply"
-                  disabled={!selected.length}
-                  onClick={() =>
-                    setSketch({
-                      regions: draft.sketch.regions.map((item, i) =>
-                        i === index
-                          ? { ...item, boundaryRefs: selected }
-                          : item,
-                      ),
-                    })
-                  }
-                >
-                  使用当前选择
-                </button>
-                <button
-                  className="delete-icon"
-                  onClick={() =>
-                    setSketch({
-                      regions: draft.sketch.regions.filter(
-                        (_, i) => i !== index,
-                      ),
-                    })
-                  }
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-            {!draft.sketch.regions.length && (
-              <div className="empty-note">
-                尚未定义截面区域，点击“重新识别”从闭合轮廓生成。
-              </div>
-            )}
-          </div>
-        </>
-      )}
-      {tab === "diagnostics" && (
-        <div className="diagnostic-workbench">
-          <div className="diagnostic-summary">
-            <span className={solution?.valid ? "ok" : "bad"}>
-              <strong>{solution?.valid ? "所有工况通过" : "需要处理"}</strong>
-              <small>几何与拓扑</small>
-            </span>
-            <span>
-              <strong>{solution?.degreesOfFreedom ?? "—"}</strong>
-              <small>剩余自由度</small>
-            </span>
-            <span>
-              <strong>{solution?.redundantConstraints.length || 0}</strong>
-              <small>冗余约束</small>
-            </span>
-          </div>
-          <div className="case-validation-matrix">
-            <div className="case-validation-head">
-              <span>工况</span>
-              <span>求解</span>
-              <span>自由度</span>
-              <span>闭合区域</span>
-              <span>驱动参数值</span>
-            </div>
-            {solution?.cases.map((item) => {
-              const values = Object.entries(item.values).filter(([id]) =>
-                draft.sketch.drivingParameters.includes(id),
-              );
-              return (
-                <div className="case-validation-row" key={item.case}>
-                  <strong>
-                    {item.case === "minimum"
-                      ? "最小"
-                      : item.case === "nominal"
-                        ? "标称"
-                        : "最大"}
-                  </strong>
-                  <span className={item.valid ? "ok" : "bad"}>
-                    {item.valid ? <CheckCircle2 size={13} /> : <CircleAlert size={13} />}
-                    {item.valid ? "通过" : "失败"}
-                  </span>
-                  <span>{item.degreesOfFreedom}</span>
-                  <span>{item.regions.filter((region) => region.closed).length}</span>
-                  <code>
-                    {values.length
-                      ? values.map(([id, value]) => `${id}=${value}`).join(" · ")
-                      : "—"}
-                  </code>
-                </div>
-              );
-            })}
-          </div>
-          <div className="solver-diagnostics">
-            {solution?.diagnostics.length ? (
-              solution.diagnostics.map((item, index) => (
-                <button
-                  key={`${item.code}-${index}`}
-                  className={item.severity}
-                  onClick={() => {
-                    const match = draft.sketch.entities.find((entity) =>
-                      item.path.includes(entity.id),
-                    );
-                    if (match) onSelect(match.id);
-                  }}
-                >
-                  <CircleAlert size={14} />
-                  <span>
-                    <strong>{item.code}</strong>
-                    {item.message}
-                  </span>
-                </button>
-              ))
-            ) : (
-              <div className="diagnostic-clear">
-                <CheckCircle2 size={20} />
-                <strong>未发现约束、闭环或拓扑错误</strong>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      <label className="confirm-box intent-confirm">
-        <input
-          type="checkbox"
-          checked={draft.sketch.constraintsReviewed}
-          disabled={!solution?.valid || !solution.fullyConstrained}
-          onChange={(event) =>
-            change({
-              ...draft,
-              sketch: {
-                ...draft.sketch,
-                constraintsReviewed: event.target.checked,
-              },
-            })
-          }
-        />
-        <span>
-          <strong>草图设计意图已复核</strong>
-          <small>
-            仅在最小、标称、最大工况全部通过且剩余自由度为 0 时可确认。
-          </small>
-        </span>
-      </label>
-    </div>
+      <SketchIntentEditor
+        draft={draft}
+        solution={solution}
+        selected={selectedEntities}
+        onSelect={selectEntity}
+        setSketch={setSketch}
+        change={change}
+      />
+      <GeometryRecipePanel
+        draft={draft}
+        recipe={recipe}
+        setRecipe={setRecipe}
+        editOp={editOp}
+        addOp={addOp}
+        editSemanticFace={editSemanticFace}
+        addSemanticFace={addSemanticFace}
+        pendingProfileMode={pendingProfileMode}
+        setPendingProfileMode={setPendingProfileMode}
+        applyProfileMode={applyProfileMode}
+        operators={OPERATORS}
+        operatorStatus={operatorStatus}
+        operatorDefaults={operatorDefaults}
+      />
+    </>
   );
 }
 
 export default function App() {
-  const initialized = useRef(false);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [stage, setStage] = useState<StageName>("templateInfo");
-  const [validation, setValidation] = useState<StageValidation | null>(null);
-  const [compile, setCompile] = useState<CompileResult | null>(null);
-  const [versions, setVersions] = useState<PublishedVersion[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
-  const [registry, setRegistry] = useState<TemplateAuthoringRegistry | null>(
-    null,
-  );
-  const [materialSearch, setMaterialSearch] = useState("");
-  const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState<ErrorNotice | null>(null);
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    void loadDrafts();
-    void api.templateAuthoringRegistry().then(setRegistry).catch(showError);
-  }, []);
-  useEffect(() => {
-    if (!draft?.id) return;
-    setValidation(null);
-    if (stage === "material")
-      void api
-        .materials(materialSearch, draft.id)
-        .then(setMaterials)
-        .catch(showError);
-    if (stage === "review")
-      void api.latestCompile(draft.id).then(setCompile).catch(showError);
-    if (stage === "admission")
-      void api.versions(draft.id).then(setVersions).catch(showError);
-  }, [stage, draft?.id]);
-  useEffect(() => {
-    if (stage !== "material" || !draft?.materialRequirements[0]) return;
-    const timer = setTimeout(
-      () =>
-        void api
-          .searchMaterials(materialSearch, draft.materialRequirements[0])
-          .then(setMaterials)
-          .catch(showError),
-      250,
-    );
-    return () => clearTimeout(timer);
-  }, [stage, materialSearch, draft?.materialRequirements]);
-
-  async function loadDrafts(selectId?: string) {
-    try {
-      const rows = await api.drafts();
-      setDrafts(rows);
-      const selected =
-        rows.find((x) => x.id === selectId) ||
-        rows[0] ||
-        (await api.createBlank("Ω型立柱模板"));
-      if (!rows.length) setDrafts([selected]);
-      chooseDraft(selected);
-    } catch (e) {
-      showError(e);
-    }
-  }
-  function chooseDraft(item: Draft) {
-    setDraft(structuredClone(item));
-    setDirty(false);
-    setValidation(null);
-    setCompile(null);
-    setVersions([]);
-    const next = STAGES.find((s) => item.stageStatus[s.id] !== "complete");
-    setStage(next?.id || "variants");
-    if (item.id) {
-      void api.latestCompile(item.id).then(setCompile).catch(showError);
-      void api.versions(item.id).then(setVersions).catch(showError);
-    }
-  }
-  function showError(e: unknown) {
-    setError(toErrorNotice(e));
-    setTimeout(() => setError(null), 7000);
-  }
-  function change(next: Draft) {
-    setDraft(next);
-    setDirty(true);
-    setValidation(null);
-  }
-  function update<K extends keyof Draft>(key: K, value: Draft[K]) {
-    if (draft) change({ ...draft, [key]: value });
-  }
-  async function save(current = draft) {
-    if (!current?.id) return current;
-    setBusy("save");
-    try {
-      const saved = await api.saveDraft(current);
-      setDraft(saved);
-      setDrafts((x) => x.map((d) => (d.id === saved.id ? saved : d)));
-      setDirty(false);
-      setNotice("已保存为新修订");
-      setTimeout(() => setNotice(""), 2400);
-      return saved;
-    } catch (e) {
-      showError(e);
-      return null;
-    } finally {
-      setBusy("");
-    }
-  }
-  async function check() {
-    if (!draft?.id) return;
-    const saved = dirty ? await save() : draft;
-    if (!saved?.id) return;
-    setBusy("check");
-    try {
-      setValidation(await api.validateStage(saved.id, stage));
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function completeStage() {
-    if (!draft?.id) return;
-    const saved = dirty ? await save() : draft;
-    if (!saved?.id) return;
-    setBusy("complete");
-    try {
-      const result = await api.completeStage(saved.id, stage);
-      setDraft(result.draft);
-      setDrafts((x) =>
-        x.map((d) => (d.id === result.draft.id ? result.draft : d)),
-      );
-      setValidation(result.validation);
-      if (result.validation.complete) {
-        const i = STAGES.findIndex((s) => s.id === stage);
-        if (i < 6) setStage(STAGES[i + 1].id);
-        setNotice("阶段检查通过");
-        setTimeout(() => setNotice(""), 2600);
-      }
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function createDraft() {
-    setBusy("create");
-    try {
-      const d = await api.createBlank();
-      setDrafts((x) => [d, ...x]);
-      chooseDraft(d);
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function duplicate() {
-    if (!draft?.id) return;
-    try {
-      const d = await api.duplicateDraft(draft.id);
-      setDrafts((x) => [d, ...x]);
-      chooseDraft(d);
-    } catch (e) {
-      showError(e);
-    }
-  }
-  async function archive() {
-    if (!draft?.id || !confirm(`归档“${draft.name}”？`)) return;
-    try {
-      await api.archiveDraft(draft.id);
-      await loadDrafts();
-    } catch (e) {
-      showError(e);
-    }
-  }
-  async function bindMaterial(
-    material: Material,
-    mode: "reference" | "copy",
-    role: MaterialValidationSample["role"] = "nominal",
-  ) {
-    if (!draft) return;
-    setBusy(`mat-${material.id}`);
-    try {
-      const binding = await api.bindMaterial(material.id, mode);
-      const sample: MaterialValidationSample = {
-        id: `material.${role}`,
-        role,
-        name: {
-          minimum: "最小边界",
-          nominal: "标称样例",
-          maximum: "最大边界",
-          special: "特殊工况",
-        }[role],
-        bindingId: binding.id,
-        bindingMode: mode,
-        materialCode: material.code,
-        materialName: material.name,
-        materialThickness: material.thickness,
-        variantId:
-          role === "minimum"
-            ? "minimum"
-            : role === "maximum"
-              ? "maximum"
-              : "nominal",
-        requiredForAdmission: role === "nominal",
-        reviewed: !!material.requirementMatch?.compatible,
-      };
-      const samples = [
-        ...draft.materialValidationSamples.filter((item) => item.role !== role),
-        sample,
-      ];
-      const requirements = draft.materialRequirements.map((r, i) =>
-        i
-          ? r
-          : r.selectionMode === "specificRecord"
-            ? { ...r, specificBindingId: binding.id, reviewed: true }
-            : r,
-      );
-      change({
-        ...draft,
-        materialValidationSamples: samples,
-        materialRequirements: requirements,
-      });
-      setNotice(`${material.code} 已加入${sample.name}`);
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function runCompile() {
-    if (!draft?.id) return;
-    const saved = dirty ? await save() : draft;
-    if (!saved?.id) return;
-    setBusy("compile");
-    try {
-      const result = await api.compile(saved.id);
-      setCompile(result);
-      setValidation(await api.validateStage(saved.id, "review"));
-      if (!result.success)
-        showError(result.diagnostics.map((x) => x.message).join("；"));
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function publish() {
-    if (!draft?.id) return;
-    const saved = dirty ? await save() : draft;
-    if (!saved?.id) return;
-    setBusy("publish");
-    try {
-      const result = await api.publish(saved.id);
-      setDraft(result.draft);
-      setDrafts((x) =>
-        x.map((d) => (d.id === result.draft.id ? result.draft : d)),
-      );
-      setVersions(await api.versions(saved.id));
-      setNotice(`V${result.version.version} 已发布并冻结`);
-    } catch (e) {
-      showError(e);
-    } finally {
-      setBusy("");
-    }
-  }
+  const {
+    drafts,
+    draft,
+    stage,
+    validation,
+    compile,
+    versions,
+    materials,
+    registry,
+    materialSearch,
+    dirty,
+    busy,
+    notice,
+    error,
+    setStage,
+    setMaterials,
+    setMaterialSearch,
+    setError,
+    setNotice,
+    chooseDraft,
+    change,
+    update,
+    save,
+    check,
+    completeStage,
+    createDraft,
+    duplicate,
+    archive,
+    bindMaterial,
+    runCompile,
+    publish,
+    showError,
+  } = useDraftWorkspace();
   if (!draft)
     return (
       <div className="loading-screen">
@@ -7543,1965 +4759,6 @@ function MaterialStage({
   );
 }
 
-function GeometryStage({
-  draft,
-  change,
-  showError,
-}: {
-  draft: Draft;
-  change: (d: Draft) => void;
-  showError: (e: unknown) => void;
-}) {
-  const recipe = draft.geometryRecipe;
-  const [solution, setSolution] = useState<SketchSolveResult | null>(null);
-  const [solveCase, setSolveCase] = useState<"minimum" | "nominal" | "maximum">(
-    "nominal",
-  );
-  const [selectedEntities, setSelectedEntities] = useState<string[]>(
-    draft.sketch.entities[0]?.id ? [draft.sketch.entities[0].id] : [],
-  );
-  const [tool, setTool] = useState<SketchTool>("select");
-  type SketchHistorySnapshot = {
-    sketch: Draft["sketch"];
-    parameterDefinitions: ParameterDefinition[];
-  };
-  const [history, setHistory] = useState<SketchHistorySnapshot[]>([]);
-  const [future, setFuture] = useState<SketchHistorySnapshot[]>([]);
-  const [solving, setSolving] = useState(false);
-  const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
-  const [polylineCommand, setPolylineCommand] =
-    useState<SketchPolylineCommand>(null);
-  const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(
-    null,
-  );
-  const cursorPointRef = useRef<{ x: number; y: number } | null>(null);
-  const cursorRafRef = useRef(0);
-  const publishCursorPoint = (point: { x: number; y: number } | null) => {
-    cursorPointRef.current = point;
-    if (cursorRafRef.current) return;
-    cursorRafRef.current = window.requestAnimationFrame(() => {
-      cursorRafRef.current = 0;
-      setCursorPoint(cursorPointRef.current);
-    });
-  };
-  useEffect(
-    () => () => {
-      if (cursorRafRef.current) window.cancelAnimationFrame(cursorRafRef.current);
-    },
-    [],
-  );
-  const [moveOffset, setMoveOffset] = useState({ horizontal: 10, vertical: 0 });
-  const [orthogonalLock, setOrthogonalLock] = useState(false);
-  const [arcDrawMode, setArcDrawMode] = useState<ArcDrawMode>("centerEndpoints");
-  const [objectSnapEnabled, setObjectSnapEnabled] = useState(true);
-  const [thinwallOffset, setThinwallOffset] = useState({
-    side1: 1,
-    side2: 1,
-  });
-  const [thinwallOffsetNote, setThinwallOffsetNote] = useState<string | null>(
-    null,
-  );
-  const [sketchClipboard, setSketchClipboard] = useState<{
-    entities: Draft["sketch"]["entities"];
-    constraints: Draft["sketch"]["constraints"];
-    regions: Draft["sketch"]["regions"];
-  } | null>(null);
-  const [sketchEditConflict, setSketchEditConflict] =
-    useState<SketchEditConflict | null>(null);
-  const solveRequest = useRef(0);
-  const [pendingProfileMode, setPendingProfileMode] = useState<
-    Draft["sketch"]["profileMode"] | null
-  >(null);
-  useEffect(() => {
-    if (draft.sketch.profileMode !== "centerlineThinWall") {
-      setThinwallOffsetNote(null);
-      return;
-    }
-    const thickness = draft.parameterDefinitions.find(
-      (item) => item.id === (semanticParameterIds(draft).thickness || "thickness"),
-    );
-    const raw = Number(thickness?.default);
-    const half =
-      Number.isFinite(raw) && raw > 0
-        ? Math.round((raw / 2) * 100) / 100
-        : 1;
-    setThinwallOffset({ side1: half, side2: half });
-  }, [draft.id, draft.sketch.profileMode]);
-  const selectedEntity = selectedEntities[0] || "";
-  const selectEntity = (id: string | string[], additive = false) => {
-    if (Array.isArray(id)) {
-      const ids = id.filter(Boolean);
-      setSelectedEntities((items) =>
-        additive ? [...new Set([...items, ...ids])] : ids,
-      );
-      return;
-    }
-    setSelectedEntities((items) =>
-      !id
-        ? []
-        : additive
-          ? items.includes(id)
-            ? items.filter((item) => item !== id)
-            : [...items, id]
-          : [id],
-    );
-  };
-  useEffect(() => {
-    if (sketchEditConflict) return;
-    const requestId = ++solveRequest.current;
-    setSolution(null);
-    const timer = setTimeout(() => {
-      setSolving(true);
-      void api
-        .solveSketch(draft)
-        .then((result) => {
-          if (requestId === solveRequest.current) setSolution(result);
-        })
-        .catch((error) => {
-          if (requestId === solveRequest.current) showError(error);
-        })
-        .finally(() => {
-          if (requestId === solveRequest.current) setSolving(false);
-        });
-    }, 180);
-    return () => clearTimeout(timer);
-  }, [
-    draft.sketch,
-    draft.parameterDefinitions,
-    draft.geometryPrototypeId,
-    draft.geometryRecipe.operations,
-    sketchEditConflict,
-  ]);
-  useEffect(() => {
-    const normalized = normalizeSketchNumbers(
-      normalizeSketchTopology(draft.sketch),
-    );
-    if (JSON.stringify(normalized) === JSON.stringify(draft.sketch)) return;
-    change({ ...draft, sketch: normalized });
-  }, [draft.id]);
-  const setRecipe = (patch: Partial<GeometryRecipe>) =>
-    change({ ...draft, geometryRecipe: { ...recipe, ...patch } });
-  const editOp = (
-    i: number,
-    patch: Partial<GeometryRecipe["operations"][number]>,
-  ) =>
-    setRecipe({
-      operations: recipe.operations.map((op, n) =>
-        n === i ? { ...op, ...patch } : op,
-      ),
-    });
-  const addOp = () =>
-    setRecipe({
-      operations: [
-        ...recipe.operations,
-        {
-          id: uid("body"),
-          operator: "sketch.region_extrude",
-          sourceRefs: ["sketch.section.main"],
-          arguments: {},
-          argumentExpressions: {
-            length: semanticParameterIds(draft).length,
-          },
-          conditionExpression: "True",
-          semanticOutputs: ["part.body"],
-        },
-      ],
-    });
-  const editSemanticFace = (
-    index: number,
-    patch: Partial<GeometryRecipe["semanticFaces"][number]>,
-  ) =>
-    setRecipe({
-      semanticFaces: recipe.semanticFaces.map((face, n) =>
-        n === index ? { ...face, ...patch } : face,
-      ),
-    });
-  const addSemanticFace = () =>
-    setRecipe({
-      semanticFaces: [
-        ...recipe.semanticFaces,
-        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
-      ],
-    });
-  const setSketch = (patch: Partial<Draft["sketch"]>) =>
-    change({
-      ...draft,
-      sketch: normalizeSketchNumbers(
-        normalizeSketchTopology({
-          ...draft.sketch,
-          ...patch,
-          constraintsReviewed: false,
-        }),
-      ),
-    });
-  const beginSketchEdit = () => {
-    setHistory((items) =>
-      [
-        ...items,
-        {
-          sketch: draft.sketch,
-          parameterDefinitions: draft.parameterDefinitions,
-        },
-      ].slice(-40),
-    );
-    setFuture([]);
-  };
-  const applySketch = (sketch: Draft["sketch"]) => {
-    setSolution(null);
-    change({
-      ...draft,
-      sketch: {
-        ...normalizeSketchNumbers(normalizeSketchTopology(sketch)),
-        constraintsReviewed: false,
-      },
-    });
-  };
-  const applyGeometryEdit = (patch: {
-    sketch: Draft["sketch"];
-    parameterDefinitions?: ParameterDefinition[];
-  }) => {
-    setSolution(null);
-    change({
-      ...draft,
-      sketch: {
-        ...normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
-        constraintsReviewed: false,
-      },
-      ...(patch.parameterDefinitions
-        ? { parameterDefinitions: patch.parameterDefinitions }
-        : {}),
-    });
-  };
-  const validateSketchGeometryEdit = async (patch: {
-    sketch: Draft["sketch"];
-    parameterDefinitions?: ParameterDefinition[];
-  }) => {
-    const currentNominal = solution?.cases.find(
-      (entry) => entry.case === "nominal",
-    );
-    if (!currentNominal?.valid) return { valid: true };
-    try {
-      const candidate: Draft = {
-        ...draft,
-        sketch: normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
-        parameterDefinitions:
-          patch.parameterDefinitions || draft.parameterDefinitions,
-      };
-      const validation = await api.solveSketch(candidate);
-      const nominal = validation.cases.find(
-        (entry) => entry.case === "nominal",
-      );
-      return {
-        valid: !!nominal?.valid,
-        message: nominal?.valid
-          ? undefined
-          : nominal?.diagnostics.map((item) => item.message).join("；") ||
-            "约束求解失败，已恢复拖动前的合法几何。",
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
-  };
-  const resolveSketchEditConflict = async (
-    action: "cancel" | "acceptSoftRelease" | "updateParameters",
-  ) => {
-    const conflict = sketchEditConflict;
-    if (!conflict) return;
-    if (action === "cancel") {
-      setSketchEditConflict(null);
-      return;
-    }
-    if (action === "updateParameters") {
-      const softIds = new Set(
-        conflict.softConstraints.map((item) => item.id),
-      );
-      const committed = commitSharedParameterUpdate(
-        draft.sketch,
-        draft.parameterDefinitions,
-        conflict.touchedEntityIds,
-        conflict.afterEntities,
-      );
-      const patch = {
-        ...committed,
-        sketch: {
-          ...committed.sketch,
-          constraints: committed.sketch.constraints.map((constraint) =>
-            softIds.has(constraint.id) &&
-            WEAK_CONSTRAINT_TYPES.has(constraint.constraintType)
-              ? { ...constraint, enabled: false, driving: false }
-              : constraint,
-          ),
-        },
-      };
-      const validation = await validateSketchGeometryEdit(patch);
-      if (!validation.valid) {
-        showError(
-          validation.message || "约束求解失败，已恢复拖动前的合法几何。",
-        );
-        setSketchEditConflict(null);
-        return;
-      }
-      beginSketchEdit();
-      applyGeometryEdit(patch);
-      setSketchEditConflict(null);
-      return;
-    }
-    const patch = {
-      sketch: commitLocalEntityFixedDimensions(
-        draft.sketch,
-        conflict.touchedEntityIds,
-        conflict.afterEntities,
-        {
-          releaseSoftConstraintIds: conflict.softConstraints.map(
-            (item) => item.id,
-          ),
-        },
-      ),
-    };
-    const validation = await validateSketchGeometryEdit(patch);
-    if (!validation.valid) {
-      showError(
-        validation.message || "约束求解失败，已恢复拖动前的合法几何。",
-      );
-      setSketchEditConflict(null);
-      return;
-    }
-    beginSketchEdit();
-    applyGeometryEdit(patch);
-    setSketchEditConflict(null);
-  };
-  const undo = () => {
-    const previous = history.at(-1);
-    if (!previous) return;
-    setSketchEditConflict(null);
-    setFuture((items) =>
-      [
-        {
-          sketch: draft.sketch,
-          parameterDefinitions: draft.parameterDefinitions,
-        },
-        ...items,
-      ].slice(0, 40),
-    );
-    setHistory((items) => items.slice(0, -1));
-    applyGeometryEdit(previous);
-  };
-  const redo = () => {
-    const next = future[0];
-    if (!next) return;
-    setSketchEditConflict(null);
-    setHistory((items) =>
-      [
-        ...items,
-        {
-          sketch: draft.sketch,
-          parameterDefinitions: draft.parameterDefinitions,
-        },
-      ].slice(-40),
-    );
-    setFuture((items) => items.slice(1));
-    applyGeometryEdit(next);
-  };
-  const cleanSketchReferences = (
-    sketch: Draft["sketch"],
-    removedIds: Set<string>,
-  ): Draft["sketch"] => ({
-    ...sketch,
-    entities: sketch.entities.filter((item) => !removedIds.has(item.id)),
-    constraints: sketch.constraints
-      .map((item) => ({
-        ...item,
-        entityRefs: item.entityRefs.filter((id) => !removedIds.has(id)),
-      }))
-      .filter(
-        (item) =>
-          item.entityRefs.length >=
-          (CONSTRAINT_CONTRACTS[item.constraintType as ConstraintType]?.minimum ?? 1),
-      ),
-    regions: sketch.regions.filter((item) =>
-      item.boundaryRefs.every((id) => !removedIds.has(id)),
-    ),
-    constraintsReviewed: false,
-  });
-  const deleteSelectedEntities = () => {
-    if (!selectedEntities.length) return;
-    beginSketchEdit();
-    applySketch(cleanSketchReferences(draft.sketch, new Set(selectedEntities)));
-    setSelectedEntities([]);
-  };
-  const applyThinwallOffset = () => {
-    const result = applyCenterlineThinwallOffset(
-      draft.sketch,
-      thinwallOffset.side1,
-      thinwallOffset.side2,
-    );
-    if (result.message) {
-      setThinwallOffsetNote(result.message);
-      return;
-    }
-    beginSketchEdit();
-    applySketch(result.sketch);
-    setThinwallOffsetNote(
-      `已按两侧 ${thinwallOffset.side1} / ${thinwallOffset.side2} mm 生成薄壁轮廓，并自动添加首尾重合与相对中心线的平行约束。中心线已转为构造线。`,
-    );
-    setSelectedEntities(
-      result.sketch.entities
-        .filter((item) => isThinwallOffsetEntity(item))
-        .map((item) => item.id)
-        .slice(0, 1),
-    );
-  };
-  const translateEntity = (
-    entity: Draft["sketch"]["entities"][number],
-    horizontal: number,
-    vertical: number,
-  ) => {
-    const point = (
-      value: [number, number] | null | undefined,
-    ): [number, number] | null =>
-      value ? [value[0] + horizontal, value[1] + vertical] : null;
-    return {
-      ...entity,
-      start: point(entity.start),
-      end: point(entity.end),
-      center: point(entity.center),
-      points: entity.points.map(([x, y]) => [
-        x + horizontal,
-        y + vertical,
-      ] as [number, number]),
-    };
-  };
-  const moveSelectedEntities = () => {
-    if (!selectedEntities.length) return;
-    beginSketchEdit();
-    applySketch({
-      ...draft.sketch,
-      entities: draft.sketch.entities.map((entity) =>
-        selectedEntities.includes(entity.id)
-          ? translateEntity(entity, moveOffset.horizontal, moveOffset.vertical)
-          : entity,
-      ),
-    });
-  };
-  const copySelectedEntities = () => {
-    if (!selectedEntities.length) return;
-    const idSet = new Set(selectedEntities);
-    setSketchClipboard({
-      entities: cloneSketchEntities(
-        draft.sketch.entities.filter((entity) => idSet.has(entity.id)),
-      ),
-      constraints: draft.sketch.constraints
-        .filter(
-          (constraint) =>
-            constraint.entityRefs.length > 0 &&
-            constraint.entityRefs.every((id) => idSet.has(id)),
-        )
-        .map((constraint) => ({
-          ...constraint,
-          endpointRefs: constraint.endpointRefs
-            ? [...constraint.endpointRefs]
-            : constraint.endpointRefs,
-        })),
-      regions: draft.sketch.regions
-        .filter(
-          (region) =>
-            region.boundaryRefs.length > 0 &&
-            region.boundaryRefs.every((id) => idSet.has(id)),
-        )
-        .map((region) => ({ ...region, boundaryRefs: [...region.boundaryRefs] })),
-    });
-  };
-  const pasteClipboardEntities = () => {
-    if (!sketchClipboard?.entities.length) return;
-    beginSketchEdit();
-    const idMap = new Map<string, string>();
-    sketchClipboard.entities.forEach((entity) =>
-      idMap.set(entity.id, uid(`${entity.id}.paste`)),
-    );
-    const copies = sketchClipboard.entities.map((entity) => ({
-      ...translateEntity(entity, moveOffset.horizontal, moveOffset.vertical),
-      id: idMap.get(entity.id)!,
-      role: `${entity.role}.copy`,
-    }));
-    const copiedConstraints = sketchClipboard.constraints.map((constraint) => ({
-      ...constraint,
-      id: uid(`${constraint.id}.paste`),
-      entityRefs: constraint.entityRefs.map((id) => idMap.get(id)!),
-      label: constraint.label ? `${constraint.label} 副本` : constraint.label,
-    }));
-    const copiedRegions = sketchClipboard.regions.map((region) => ({
-      ...region,
-      id: uid(`${region.id}.paste`),
-      boundaryRefs: region.boundaryRefs.map((id) => idMap.get(id)!),
-      role: `${region.role}.copy`,
-    }));
-    applySketch({
-      ...draft.sketch,
-      entities: [...draft.sketch.entities, ...copies],
-      constraints: [...draft.sketch.constraints, ...copiedConstraints],
-      regions: [...draft.sketch.regions, ...copiedRegions],
-    });
-    setSelectedEntities(copies.map((item) => item.id));
-  };
-  const issueViewCommand = (type: NonNullable<SketchViewCommand>["type"]) =>
-    setViewCommand({ id: Date.now(), type });
-  const acquisitionLabels = {
-    manual: "交互绘制",
-    imported: "导入转换",
-    reused: "复用受控截面",
-  };
-  const selectAcquisition = (method: Draft["sketch"]["acquisitionMethod"]) => {
-    setSketch({
-      acquisitionMethod: method,
-      sourceAttachmentId: null,
-      sourceProfileId: null,
-      sourceHash: null,
-      importUnit: method === "imported" ? "mm" : null,
-      importScale: method === "imported" ? 1 : null,
-      conversionReviewed: method === "manual",
-    });
-  };
-  const requestProfileMode = (mode: Draft["sketch"]["profileMode"]) => {
-    if (mode === draft.sketch.profileMode) return;
-    setPendingProfileMode(mode);
-  };
-  const applyProfileMode = (reset: boolean) => {
-    if (!pendingProfileMode) return;
-    const semanticIds = semanticParameterIds(draft);
-    beginSketchEdit();
-    const nextSketch = reset
-        ? profileModeSketch(
-            pendingProfileMode,
-            draft.sketch,
-            semanticParameterIds(draft),
-          )
-        : {
-            ...draft.sketch,
-            profileMode: pendingProfileMode,
-            constraintsReviewed: false,
-          };
-    change({
-      ...draft,
-      sketch: nextSketch,
-      geometryRecipe: {
-        ...draft.geometryRecipe,
-        operations: draft.geometryRecipe.operations.map((operation, index) =>
-          index
-            ? operation
-            : {
-                ...operation,
-                operator: "sketch.region_extrude",
-                argumentExpressions: {
-                  ...operation.argumentExpressions,
-                  length:
-                    operation.argumentExpressions.length || semanticIds.length,
-                },
-              },
-        ),
-        reviewed: false,
-      },
-    });
-    setSelectedEntities([]);
-    setPendingProfileMode(null);
-  };
-  const editEntity = (
-    index: number,
-    patch: Partial<Draft["sketch"]["entities"][number]>,
-  ) =>
-    setSketch({
-      entities: draft.sketch.entities.map((item, i) =>
-        i === index ? { ...item, ...patch } : item,
-      ),
-    });
-  const renameEntity = (oldId: string, rawId: string) => {
-    const nextId = rawId.trim();
-    if (
-      !/^[A-Za-z][A-Za-z0-9_.-]*$/.test(nextId) ||
-      (nextId !== oldId &&
-        draft.sketch.entities.some((item) => item.id === nextId))
-    )
-      return false;
-    if (nextId === oldId) return true;
-    beginSketchEdit();
-    change({
-      ...draft,
-      sketch: {
-        ...draft.sketch,
-        entities: draft.sketch.entities.map((item) =>
-          item.id === oldId ? { ...item, id: nextId } : item,
-        ),
-        constraints: draft.sketch.constraints.map((item) => ({
-          ...item,
-          entityRefs: item.entityRefs.map((ref) =>
-            ref === oldId ? nextId : ref,
-          ),
-        })),
-        regions: draft.sketch.regions.map((item) => ({
-          ...item,
-          boundaryRefs: item.boundaryRefs.map((ref) =>
-            ref === oldId ? nextId : ref,
-          ),
-        })),
-        constraintsReviewed: false,
-      },
-    });
-    setSelectedEntities((items) =>
-      items.map((item) => (item === oldId ? nextId : item)),
-    );
-    return true;
-  };
-  const selected = draft.sketch.entities.find(
-    (item) => item.id === selectedEntity,
-  );
-  const planeAxes = sketchPlaneAxes(draft.sketch.plane);
-  useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.matches("input, textarea, select") ||
-        target?.isContentEditable
-      )
-        return;
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedEntities.length) {
-        event.preventDefault();
-        deleteSelectedEntities();
-      } else if (
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === "c" &&
-        selectedEntities.length
-      ) {
-        event.preventDefault();
-        copySelectedEntities();
-      } else if (
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === "v" &&
-        sketchClipboard?.entities.length
-      ) {
-        event.preventDefault();
-        pasteClipboardEntities();
-      } else if (
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        event.key.toLowerCase() === "z" &&
-        !event.shiftKey
-      ) {
-        event.preventDefault();
-        undo();
-      } else if (
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        (event.key.toLowerCase() === "y" ||
-          (event.key.toLowerCase() === "z" && event.shiftKey))
-      ) {
-        event.preventDefault();
-        redo();
-      } else if (tool === "polyline" && event.key === "Enter") {
-        event.preventDefault();
-        setPolylineCommand({ id: Date.now(), type: "finish" });
-      } else if (event.key === "Escape") {
-        if (sketchEditConflict) {
-          event.preventDefault();
-          setSketchEditConflict(null);
-          return;
-        }
-        if (tool === "polyline") {
-          event.preventDefault();
-          setPolylineCommand({ id: Date.now(), type: "cancel" });
-          return;
-        }
-        setSelectedEntities([]);
-        setTool("select");
-      }
-    };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [
-    draft.sketch,
-    selectedEntities,
-    moveOffset,
-    history,
-    future,
-    sketchEditConflict,
-    sketchClipboard,
-    tool,
-  ]);
-  return (
-    <>
-      <div className="panel semantic-authoring">
-        <PanelTitle
-          icon={Braces}
-          title="统一语义参数轮廓"
-          subtitle="所有草图构造件使用同一种权威模型；创建入口只记录来源，不改变后续参数化、验证与编译方式。"
-          actions={<span className="schema-pill">semanticProfile</span>}
-        />
-        <div className="acquisition-grid">
-          {(
-            [
-              ["manual", "交互绘制", "从空白语义图元与约束开始"],
-              ["imported", "导入轮廓", "DXF等文件转换为语义草图"],
-              ["reused", "复用受控截面", "复制受控截面并保持来源"],
-            ] as const
-          ).map(([id, label, note]) => (
-            <button
-              className={draft.sketch.acquisitionMethod === id ? "active" : ""}
-              key={id}
-              onClick={() => selectAcquisition(id)}
-            >
-              <strong>{label}</strong>
-              <span>{note}</span>
-            </button>
-          ))}
-        </div>
-        {draft.sketch.acquisitionMethod === "imported" && (
-          <div className="source-conversion">
-            <label className="upload-zone compact">
-              <Upload size={18} />
-              <strong>选择DXF或轮廓文件</strong>
-              <span>文件仅作为转换证据，不直接参与CAD编译</span>
-              <input
-                type="file"
-                accept=".dxf,.dwg,.svg,.step,.stp"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file || !draft.id) return;
-                  try {
-                    const saved = await api.uploadAttachment(
-                      draft.id,
-                      file,
-                      "drawing",
-                    );
-                    const attachment = saved.attachments.at(-1);
-                    change({
-                      ...draft,
-                      attachments: saved.attachments,
-                      sketch: {
-                        ...draft.sketch,
-                        acquisitionMethod: "imported",
-                        sourceAttachmentId: attachment?.id || null,
-                        sourceHash: attachment?.sha256 || null,
-                        importUnit: "mm",
-                        importScale: 1,
-                        conversionReviewed: false,
-                        constraintsReviewed: false,
-                      },
-                    });
-                  } catch (error) {
-                    showError(error);
-                  }
-                }}
-              />
-            </label>
-            <div className="form-grid two">
-              <Field label="导入单位">
-                <select
-                  value={draft.sketch.importUnit || "mm"}
-                  onChange={(e) =>
-                    setSketch({
-                      importUnit: e.target.value as NonNullable<
-                        Draft["sketch"]["importUnit"]
-                      >,
-                      conversionReviewed: false,
-                    })
-                  }
-                >
-                  <option value="mm">毫米</option>
-                  <option value="cm">厘米</option>
-                  <option value="m">米</option>
-                  <option value="inch">英寸</option>
-                </select>
-              </Field>
-              <Field label="导入比例">
-                <NumberInput
-                  value={draft.sketch.importScale || 1}
-                  unit="倍"
-                  step={0.01}
-                  min={0.001}
-                  onChange={(importScale) =>
-                    setSketch({ importScale, conversionReviewed: false })
-                  }
-                />
-              </Field>
-            </div>
-          </div>
-        )}
-        {draft.sketch.acquisitionMethod === "reused" && (
-          <Field label="受控截面ID" hint="复用后仍复制为当前模板的统一语义草图">
-            <input
-              value={draft.sketch.sourceProfileId || ""}
-              onChange={(e) =>
-                setSketch({
-                  sourceProfileId: e.target.value || null,
-                  conversionReviewed: false,
-                })
-              }
-              placeholder="profile.catalog.omega-100"
-            />
-          </Field>
-        )}
-        <div className="semantic-status">
-          <span>
-            <strong>当前来源</strong>
-            <small>{acquisitionLabels[draft.sketch.acquisitionMethod]}</small>
-          </span>
-          <span>
-            <strong>语义图元</strong>
-            <small>{draft.sketch.entities.length} 项</small>
-          </span>
-          <span>
-            <strong>约束</strong>
-            <small>{draft.sketch.constraints.length} 项</small>
-          </span>
-          <span>
-            <strong>闭合区域</strong>
-            <small>
-              {draft.sketch.regions.filter((item) => item.closed).length} 项
-            </small>
-          </span>
-        </div>
-        {["imported", "reused"].includes(draft.sketch.acquisitionMethod) && (
-          <label className="confirm-box">
-            <input
-              type="checkbox"
-              checked={draft.sketch.conversionReviewed}
-              onChange={(e) =>
-                change({
-                  ...draft,
-                  sketch: {
-                    ...draft.sketch,
-                    conversionReviewed: e.target.checked,
-                    constraintsReviewed: false,
-                  },
-                })
-              }
-            />
-            <span>
-              <strong>来源已转换为语义草图并复核</strong>
-              <small>
-                确认原始图元已清理，尺寸已参数化，语义名称和约束不再依赖外部文件图元编号。
-              </small>
-            </span>
-          </label>
-        )}
-      </div>
-      <div className="geometry-studio">
-        <div className="solver-workbench">
-          <div className="panel solver-canvas-panel">
-            <PanelTitle
-              icon={Box}
-              title="1. 通用二维参数化草图"
-              subtitle="绘制零部件的二维截面；三维方向由基准平面和后续几何配方决定。"
-              actions={
-                <div className="case-switch">
-                  {(["minimum", "nominal", "maximum"] as const).map((item) => {
-                    const state = solution?.cases.find(
-                      (entry) => entry.case === item,
-                    );
-                    return (
-                      <button
-                        key={item}
-                        className={`${solveCase === item ? "active" : ""} ${state ? (state.valid ? "passed" : "failed") : "pending"}`}
-                        onClick={() => {
-                          setSolveCase(item);
-                          if (item !== "nominal") setTool("select");
-                        }}
-                      >
-                        {item === "minimum"
-                          ? "最小"
-                          : item === "nominal"
-                            ? "标称"
-                            : "最大"}
-                        <i aria-hidden="true" />
-                      </button>
-                    );
-                  })}
-                </div>
-              }
-            />
-            <div className="sketch-toolbar">
-              {(
-                [
-                  ["select", MousePointer2, "选择"],
-                  ["point", CircleDot, "点"],
-                  ["line", Link2, "直线"],
-                  ["polyline", Spline, "连续折线"],
-                  ["rectangle", Box, "矩形"],
-                  ["circle", CircleDot, "圆"],
-                  ["arc", RefreshCw, "圆弧"],
-                ] as const
-              ).map(([id, Icon, label]) => (
-                <button
-                  key={id}
-                  className={tool === id ? "active" : ""}
-                  onClick={() => setTool(id)}
-                  title={label}
-                >
-                  <Icon size={14} />
-                  {label}
-                </button>
-              ))}
-              {tool === "arc" ? (
-                <>
-                  <span className="toolbar-divider" />
-                  <button
-                    className={
-                      arcDrawMode === "centerEndpoints" ? "active" : ""
-                    }
-                    onClick={() => setArcDrawMode("centerEndpoints")}
-                    title="先选圆心，再选两个端点"
-                  >
-                    圆心+端点
-                  </button>
-                  <button
-                    className={arcDrawMode === "threePoint" ? "active" : ""}
-                    onClick={() => setArcDrawMode("threePoint")}
-                    title="通过三个点确定圆弧"
-                  >
-                    三点
-                  </button>
-                </>
-              ) : null}
-              <span className="toolbar-spacer" />
-              <button
-                disabled={!history.length}
-                onClick={undo}
-                title="撤销 (Ctrl+Z)"
-              >
-                <Undo2 size={14} />
-                撤销
-              </button>
-              <button
-                disabled={!future.length}
-                onClick={redo}
-                title="重做 (Ctrl+Y)"
-              >
-                <Redo2 size={14} />
-                重做
-              </button>
-              <span className="toolbar-divider" />
-              <button
-                disabled={!selectedEntities.length || solveCase !== "nominal"}
-                onClick={moveSelectedEntities}
-                title="按下方偏移量移动选中图元"
-              >
-                <Move size={14} />
-                移动
-              </button>
-              <button
-                disabled={!selectedEntities.length || solveCase !== "nominal"}
-                onClick={copySelectedEntities}
-                title="复制到剪贴板 (Ctrl+C)"
-              >
-                <Copy size={14} />
-                复制
-              </button>
-              <button
-                disabled={
-                  !sketchClipboard?.entities.length || solveCase !== "nominal"
-                }
-                onClick={pasteClipboardEntities}
-                title="粘贴剪贴板图元 (Ctrl+V)"
-              >
-                <ClipboardPaste size={14} />
-                粘贴
-              </button>
-              <button
-                disabled={!selectedEntities.length || solveCase !== "nominal"}
-                onClick={deleteSelectedEntities}
-                title="删除选中图元"
-              >
-                <Trash2 size={14} />
-                删除
-              </button>
-              <button
-                className={objectSnapEnabled ? "active" : ""}
-                aria-pressed={objectSnapEnabled}
-                onClick={() => setObjectSnapEnabled((value) => !value)}
-                title={
-                  objectSnapEnabled
-                    ? "关闭二维草图端点吸附"
-                    : "开启二维草图端点吸附"
-                }
-              >
-                <Magnet size={14} />
-                端点吸附
-              </button>
-              <button
-                className={orthogonalLock ? "active" : ""}
-                onClick={() => setOrthogonalLock((value) => !value)}
-                title="锁定正交拖动（与按住 Shift 取并集）"
-              >
-                <MoveHorizontal size={14} />
-                正交
-              </button>
-              <span className="toolbar-divider" />
-              <button onClick={() => issueViewCommand("zoomOut")} title="缩小视图">
-                <ZoomOut size={14} />
-              </button>
-              <button onClick={() => issueViewCommand("zoomIn")} title="放大视图">
-                <ZoomIn size={14} />
-              </button>
-              <button onClick={() => issueViewCommand("fit")} title="适合窗口">
-                <Focus size={14} />
-                适合
-              </button>
-            </div>
-            <div className="sketch-transform-strip">
-              <span>移动／复制偏移</span>
-              <label>
-                Δ{planeAxes.horizontal}
-                <NumberInput
-                  value={moveOffset.horizontal}
-                  step={0.01}
-                  onChange={(horizontal) =>
-                    setMoveOffset((value) => ({ ...value, horizontal }))
-                  }
-                />
-              </label>
-              <label>
-                Δ{planeAxes.vertical}
-                <NumberInput
-                  value={moveOffset.vertical}
-                  step={0.01}
-                  onChange={(vertical) =>
-                    setMoveOffset((value) => ({ ...value, vertical }))
-                  }
-                />
-              </label>
-              <small>粘贴时使用该偏移；滚轮也可缩放视图。Shift 或工具栏「正交」可锁水平／竖直拖动。</small>
-            </div>
-            <div className="canvas-selection-note">
-              <MousePointer2 size={13} />
-              <span>
-                选中后可拖动整体移动（多选一起移）；端点手柄改端点。Alt+拖动复制，Shift
-                或「正交」锁定水平／竖直。开启「捕捉」后可吸附端点（自动重合）或靠近线段（仅定位）。Ctrl+C 复制，Ctrl+V 粘贴，Ctrl+Z／Y
-                撤销重做。
-              </span>
-              <b>
-                {selectedEntities.length
-                  ? `已选中 ${selectedEntities.length} 个`
-                  : "未选择"}
-              </b>
-            </div>
-            {sketchEditConflict ? (
-              <div className="sketch-edit-conflict" role="alertdialog" aria-modal="true">
-                <div>
-                  <strong>
-                    {sketchEditConflict.softConstraints.length
-                      ? "确认后将取消以下约束"
-                      : "确认本次草图调整"}
-                  </strong>
-                  {sketchEditConflict.softConstraints.length > 0 ? (
-                    <ul className="sketch-edit-conflict-release">
-                      {sketchEditConflict.softConstraints.map((item) => (
-                        <li key={item.id}>
-                          <b>
-                            {WEAK_CONSTRAINT_LABELS[item.constraintType] ||
-                              item.constraintType}
-                          </b>
-                          <span>{item.label || item.id}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {sketchEditConflict.strongConstraints.length > 0 ? (
-                    <p className="sketch-edit-conflict-keep">
-                      重合／首尾相连将保留
-                      {sketchEditConflict.strongConstraints.length > 1
-                        ? `（${sketchEditConflict.strongConstraints.length} 项）`
-                        : ""}
-                      。
-                    </p>
-                  ) : null}
-                  {sketchEditConflict.sharedParameterIds.length > 0 ? (
-                    <p className="sketch-edit-conflict-keep">
-                      涉及共享参数 {sketchEditConflict.sharedParameterIds.join("、")}
-                      ；可选更新参数或仅固定本图元尺寸。
-                    </p>
-                  ) : null}
-                </div>
-                <div className="sketch-edit-conflict-actions">
-                  <button type="button" onClick={() => resolveSketchEditConflict("cancel")}>
-                    撤销本次拖动
-                  </button>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => resolveSketchEditConflict("acceptSoftRelease")}
-                  >
-                    {sketchEditConflict.softConstraints.length
-                      ? "确认并取消上述约束"
-                      : "确认调整（本图元尺寸改为固定）"}
-                  </button>
-                  {sketchEditConflict.sharedParameterIds.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => resolveSketchEditConflict("updateParameters")}
-                    >
-                      更新共享参数并传播
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            <ParametricSketchCanvas
-              draft={draft}
-              solution={solution}
-              caseName={solveCase}
-              selected={selectedEntities}
-              tool={tool}
-              onSelect={selectEntity}
-              onSketch={applySketch}
-              onGeometryEdit={applyGeometryEdit}
-              validateGeometryEdit={validateSketchGeometryEdit}
-              onGeometryEditRejected={showError}
-              onEditConflict={setSketchEditConflict}
-              pendingConflict={sketchEditConflict}
-              beginEdit={beginSketchEdit}
-              viewCommand={viewCommand}
-              polylineCommand={polylineCommand}
-              onCursorChange={publishCursorPoint}
-              orthogonalLock={orthogonalLock}
-              objectSnapEnabled={objectSnapEnabled}
-              arcDrawMode={arcDrawMode}
-            />
-            <div className="sketch-coordinate-bar" aria-live="polite">
-              <span>草图平面 {draft.sketch.plane}</span>
-              <b>{planeAxes.horizontal} {cursorPoint ? cursorPoint.x.toFixed(2) : "—"}</b>
-              <b>{planeAxes.vertical} {cursorPoint ? cursorPoint.y.toFixed(2) : "—"}</b>
-              <span>{planeAxes.normal} = 0.0 mm</span>
-            </div>
-            <div className="solver-footer">
-              <span className={solution?.valid ? "ok" : "bad"}>
-                <strong>
-                  {solving
-                    ? "求解中…"
-                    : solution?.valid
-                      ? "几何通过"
-                      : "几何失败"}
-                </strong>
-                <small>{solution?.solver || "parametric-sketch"}</small>
-              </span>
-              <span>
-                <strong>{solution?.degreesOfFreedom ?? "—"}</strong>
-                <small>剩余自由度</small>
-              </span>
-              <span>
-                <strong>
-                  {solution?.cases
-                    .find((item) => item.case === solveCase)
-                    ?.regions.filter((item) => item.closed).length ?? 0}
-                </strong>
-                <small>有效截面区域</small>
-              </span>
-              <span>
-                <strong>{selectedEntity || "未选择"}</strong>
-                <small>主选图元</small>
-              </span>
-            </div>
-          </div>
-          <div className="panel parameter-editor">
-            <PanelTitle
-              icon={Settings2}
-              title="2. 当前对象与草图设置"
-              subtitle="定义截面如何形成实体，以及草图在三维坐标系中的位置。"
-            />
-            <div className="form-grid two">
-              <Field
-                label="截面建模模式"
-                hint="实心使用闭合区域；管材使用外环减内环；冷弯薄壁可使用开放中心线加厚度"
-              >
-                <select
-                  value={draft.sketch.profileMode}
-                  onChange={(e) =>
-                    requestProfileMode(
-                      e.target.value as Draft["sketch"]["profileMode"],
-                    )
-                  }
-                >
-                  <option value="closedRegion">单闭合区域</option>
-                  <option value="multiRegion">管材／多环多腔区域</option>
-                  <option value="centerlineThinWall">中心线＋厚度薄壁</option>
-                </select>
-              </Field>
-              <Field
-                label="截面所在平面"
-                hint="XY → 法向 Z；XZ → 法向 Y；YZ → 法向 X。切换平面不改变二维尺寸和拓扑。"
-              >
-                <select
-                  value={draft.sketch.plane}
-                  onChange={(e) =>
-                    setSketch({
-                      plane: e.target.value as Draft["sketch"]["plane"],
-                    })
-                  }
-                >
-                  <option value="XY">XY</option>
-                  <option value="XZ">XZ</option>
-                  <option value="YZ">YZ</option>
-                </select>
-              </Field>
-            </div>
-            {draft.sketch.profileMode === "centerlineThinWall" ? (
-              <details className="thinwall-offset-panel" open>
-                <summary className="thinwall-offset-summary">
-                  <div>
-                    <strong>中心线偏移</strong>
-                    <span>
-                      向两侧偏移生成薄壁轮廓；相连处延伸／裁切，自由端封口
-                    </span>
-                  </div>
-                  <ChevronDown size={15} />
-                </summary>
-                <div className="thinwall-offset-body">
-                  <p className="thinwall-offset-hint">
-                    将中心线向两侧偏移生成薄壁轮廓；相连处延伸／裁切并对齐封口后自动添加首尾重合约束，偏移边与原中心线自动平行。
-                  </p>
-                  <div className="form-grid two">
-                    <Field
-                      label="偏移距离 1"
-                      hint="中心线法向一侧（相对路径前进方向左侧）"
-                    >
-                      <NumberInput
-                        value={thinwallOffset.side1}
-                        step={0.01}
-                        min={0}
-                        onChange={(side1) =>
-                          setThinwallOffset((value) => ({ ...value, side1 }))
-                        }
-                      />
-                    </Field>
-                    <Field
-                      label="偏移距离 2"
-                      hint="中心线法向另一侧（相对路径前进方向右侧）"
-                    >
-                      <NumberInput
-                        value={thinwallOffset.side2}
-                        step={0.01}
-                        min={0}
-                        onChange={(side2) =>
-                          setThinwallOffset((value) => ({ ...value, side2 }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <div className="thinwall-offset-actions">
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={solveCase !== "nominal"}
-                      onClick={applyThinwallOffset}
-                    >
-                      <MoveHorizontal size={14} />
-                      一键偏移
-                    </button>
-                    <small>
-                      可重复执行：会先清除旧薄壁轮廓再按当前距离重新生成。默认取壁厚参数的一半。
-                    </small>
-                  </div>
-                  {thinwallOffsetNote ? (
-                    <p className="thinwall-offset-note">{thinwallOffsetNote}</p>
-                  ) : null}
-                </div>
-              </details>
-            ) : null}
-            {selected ? (
-              <div className="selected-entity-editor">
-                <Field label="稳定 ID" hint="修改后会同步更新约束和区域引用">
-                  <input
-                    key={selected.id}
-                    defaultValue={selected.id}
-                    onBlur={(event) => {
-                      if (!renameEntity(selected.id, event.target.value))
-                        event.currentTarget.value = selected.id;
-                    }}
-                  />
-                </Field>
-                <Field label="图元名称（工程语义）">
-                  <input
-                    value={selected.role}
-                    onChange={(e) =>
-                      editEntity(draft.sketch.entities.indexOf(selected), {
-                        role: e.target.value,
-                      })
-                    }
-                  />
-                </Field>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selected.construction}
-                    onChange={(e) =>
-                      editEntity(draft.sketch.entities.indexOf(selected), {
-                        construction: e.target.checked,
-                      })
-                    }
-                  />
-                  构造图元（不参与截面区域）
-                </label>
-                {selected.start && (
-                  <div className="coordinate-grid">
-                    <Field
-                      label={
-                        selected.geometryType === "arc"
-                          ? `圆弧起点 ${planeAxes.horizontal}`
-                          : `起点 ${planeAxes.horizontal}`
-                      }
-                    >
-                      <NumberInput
-                        value={selected.start[0]}
-                        step={0.01}
-                        onChange={(value) => {
-                          const start: [number, number] = [
-                            value,
-                            selected.start![1],
-                          ];
-                          const patch: Partial<Draft["sketch"]["entities"][number]> =
-                            { start };
-                          if (
-                            selected.geometryType === "arc" &&
-                            selected.center
-                          ) {
-                            patch.startAngle = pointAngleDegrees(
-                              selected.center,
-                              start,
-                            );
-                          }
-                          editEntity(
-                            draft.sketch.entities.indexOf(selected),
-                            patch,
-                          );
-                        }}
-                      />
-                    </Field>
-                    <Field
-                      label={
-                        selected.geometryType === "arc"
-                          ? `圆弧起点 ${planeAxes.vertical}`
-                          : `起点 ${planeAxes.vertical}`
-                      }
-                    >
-                      <NumberInput
-                        value={selected.start[1]}
-                        step={0.01}
-                        onChange={(value) => {
-                          const start: [number, number] = [
-                            selected.start![0],
-                            value,
-                          ];
-                          const patch: Partial<Draft["sketch"]["entities"][number]> =
-                            { start };
-                          if (
-                            selected.geometryType === "arc" &&
-                            selected.center
-                          ) {
-                            patch.startAngle = pointAngleDegrees(
-                              selected.center,
-                              start,
-                            );
-                          }
-                          editEntity(
-                            draft.sketch.entities.indexOf(selected),
-                            patch,
-                          );
-                        }}
-                      />
-                    </Field>
-                    {selected.end && (
-                      <>
-                        <Field
-                          label={
-                            selected.geometryType === "arc"
-                              ? `圆弧终点 ${planeAxes.horizontal}`
-                              : `终点 ${planeAxes.horizontal}`
-                          }
-                        >
-                          <NumberInput
-                            value={selected.end[0]}
-                            step={0.01}
-                            onChange={(value) => {
-                              const end: [number, number] = [
-                                value,
-                                selected.end![1],
-                              ];
-                              const patch: Partial<
-                                Draft["sketch"]["entities"][number]
-                              > = { end };
-                              if (
-                                selected.geometryType === "arc" &&
-                                selected.center
-                              ) {
-                                patch.endAngle = pointAngleDegrees(
-                                  selected.center,
-                                  end,
-                                );
-                              }
-                              editEntity(
-                                draft.sketch.entities.indexOf(selected),
-                                patch,
-                              );
-                            }}
-                          />
-                        </Field>
-                        <Field
-                          label={
-                            selected.geometryType === "arc"
-                              ? `圆弧终点 ${planeAxes.vertical}`
-                              : `终点 ${planeAxes.vertical}`
-                          }
-                        >
-                          <NumberInput
-                            value={selected.end[1]}
-                            step={0.01}
-                            onChange={(value) => {
-                              const end: [number, number] = [
-                                selected.end![0],
-                                value,
-                              ];
-                              const patch: Partial<
-                                Draft["sketch"]["entities"][number]
-                              > = { end };
-                              if (
-                                selected.geometryType === "arc" &&
-                                selected.center
-                              ) {
-                                patch.endAngle = pointAngleDegrees(
-                                  selected.center,
-                                  end,
-                                );
-                              }
-                              editEntity(
-                                draft.sketch.entities.indexOf(selected),
-                                patch,
-                              );
-                            }}
-                          />
-                        </Field>
-                      </>
-                    )}
-                  </div>
-                )}
-                {selected.start &&
-                  selected.end &&
-                  selected.geometryType === "line" && (
-                    <div className="coordinate-grid">
-                      <Field
-                        label="长度"
-                        hint="以起点为锚点，沿当前角度调整终点"
-                      >
-                        <NumberInput
-                          value={
-                            linePolar(selected.start, selected.end).length
-                          }
-                          step={0.01}
-                          min={0}
-                          onChange={(length) => {
-                            const polar = linePolar(
-                              selected.start!,
-                              selected.end!,
-                            );
-                            editEntity(
-                              draft.sketch.entities.indexOf(selected),
-                              {
-                                end: endFromLengthAndAngle(
-                                  selected.start!,
-                                  length,
-                                  polar.length > 1e-9
-                                    ? polar.angleDegrees
-                                    : 0,
-                                ),
-                              },
-                            );
-                          }}
-                        />
-                      </Field>
-                      <Field
-                        label={`相对 ${planeAxes.horizontal} 正方向逆时针角`}
-                        hint="角度制；负值或超过 360° 会自动折合到 0°～360°"
-                      >
-                        <NumberInput
-                          value={
-                            linePolar(selected.start, selected.end)
-                              .angleDegrees
-                          }
-                          unit="°"
-                          step={0.01}
-                          onChange={(angleDegrees) => {
-                            const polar = linePolar(
-                              selected.start!,
-                              selected.end!,
-                            );
-                            editEntity(
-                              draft.sketch.entities.indexOf(selected),
-                              {
-                                end: endFromLengthAndAngle(
-                                  selected.start!,
-                                  polar.length,
-                                  angleDegrees,
-                                ),
-                              },
-                            );
-                          }}
-                        />
-                      </Field>
-                    </div>
-                  )}
-                {selected.center && (
-                  <div className="coordinate-grid">
-                    <Field
-                      label={
-                        selected.geometryType === "arc"
-                          ? `圆心 ${planeAxes.horizontal}`
-                          : `圆心 ${planeAxes.horizontal}`
-                      }
-                    >
-                      <NumberInput
-                        value={selected.center[0]}
-                        step={0.01}
-                        onChange={(value) => {
-                          const center: [number, number] = [
-                            value,
-                            selected.center![1],
-                          ];
-                          const patch: Partial<Draft["sketch"]["entities"][number]> =
-                            { center };
-                          if (selected.geometryType === "arc") {
-                            const geometry = arcFromEntity({
-                              ...selected,
-                              center,
-                            });
-                            if (geometry) {
-                              patch.start = geometry.start;
-                              patch.end = geometry.end;
-                              patch.startAngle = geometry.startAngle;
-                              patch.endAngle = geometry.endAngle;
-                            }
-                          }
-                          editEntity(
-                            draft.sketch.entities.indexOf(selected),
-                            patch,
-                          );
-                        }}
-                      />
-                    </Field>
-                    <Field label={`圆心 ${planeAxes.vertical}`}>
-                      <NumberInput
-                        value={selected.center[1]}
-                        step={0.01}
-                        onChange={(value) => {
-                          const center: [number, number] = [
-                            selected.center![0],
-                            value,
-                          ];
-                          const patch: Partial<Draft["sketch"]["entities"][number]> =
-                            { center };
-                          if (selected.geometryType === "arc") {
-                            const geometry = arcFromEntity({
-                              ...selected,
-                              center,
-                            });
-                            if (geometry) {
-                              patch.start = geometry.start;
-                              patch.end = geometry.end;
-                              patch.startAngle = geometry.startAngle;
-                              patch.endAngle = geometry.endAngle;
-                            }
-                          }
-                          editEntity(
-                            draft.sketch.entities.indexOf(selected),
-                            patch,
-                          );
-                        }}
-                      />
-                    </Field>
-                    {selected.radius != null && (
-                      <Field label="半径">
-                        <NumberInput
-                          value={selected.radius}
-                          step={0.01}
-                          min={0.01}
-                          onChange={(radius) => {
-                            const patch: Partial<
-                              Draft["sketch"]["entities"][number]
-                            > = { radius };
-                            if (selected.geometryType === "arc") {
-                              const geometry = arcFromEntity({
-                                ...selected,
-                                radius,
-                              });
-                              if (geometry) {
-                                patch.start = geometry.start;
-                                patch.end = geometry.end;
-                                patch.startAngle = geometry.startAngle;
-                                patch.endAngle = geometry.endAngle;
-                              }
-                            }
-                            editEntity(
-                              draft.sketch.entities.indexOf(selected),
-                              patch,
-                            );
-                          }}
-                        />
-                      </Field>
-                    )}
-                    {selected.geometryType === "arc" &&
-                    selected.startAngle != null &&
-                    selected.endAngle != null ? (
-                      <>
-                        <Field
-                          label="圆弧角度（自起点）"
-                          hint="以起点为基准，沿逆时针方向量取圆弧张角"
-                        >
-                          <NumberInput
-                            value={arcSweepDegrees(
-                              selected.startAngle,
-                              selected.endAngle,
-                              selected.largeArc ?? false,
-                            )}
-                            unit="°"
-                            step={0.01}
-                            min={0.01}
-                            onChange={(sweep) => {
-                              const geometry = arcFromEntity(selected);
-                              if (!geometry) return;
-                              const next = arcWithSweep(geometry, sweep);
-                              editEntity(
-                                draft.sketch.entities.indexOf(selected),
-                                {
-                                  end: next.end,
-                                  endAngle: next.endAngle,
-                                  largeArc: next.largeArc,
-                                },
-                              );
-                            }}
-                          />
-                        </Field>
-                        <div className="arc-reverse-row">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const geometry = arcFromEntity(selected);
-                              if (!geometry) return;
-                              const next = toggleArcDirection(geometry);
-                              editEntity(
-                                draft.sketch.entities.indexOf(selected),
-                                {
-                                  end: next.end,
-                                  endAngle: next.endAngle,
-                                  largeArc: next.largeArc,
-                                },
-                              );
-                            }}
-                          >
-                            <RefreshCw size={14} />
-                            反转圆弧
-                          </button>
-                          <small>
-                            在两种可能的弧段之间切换（小于 180° 与大于 180°）
-                          </small>
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                )}
-                <button
-                  className="danger-text"
-                  onClick={deleteSelectedEntities}
-                >
-                  <Trash2 size={13} />
-                  删除{selectedEntities.length > 1 ? `${selectedEntities.length} 个图元` : "图元"}及其失效引用
-                </button>
-              </div>
-            ) : (
-              <div className="empty-note">
-                在画布中选择一个图元后编辑属性；多选用于快速建立约束和区域。
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      <SketchIntentEditor
-        draft={draft}
-        solution={solution}
-        selected={selectedEntities}
-        onSelect={selectEntity}
-        setSketch={setSketch}
-        change={change}
-      />
-      <div className="panel geometry-recipe-panel">
-        <PanelTitle
-          icon={Braces}
-          title="4. 几何配方"
-          subtitle="按顺序构造基体。拉伸只是其中一种方式，也可扩展旋转、扫掠、放样、钣金和外部派生。"
-          actions={
-            <button className="mini-btn" onClick={addOp}>
-              <Plus size={14} />
-              添加算子
-            </button>
-          }
-        />
-        <div className="form-grid three">
-          <Field label="构造方式">
-            <select
-              value={recipe.constructionMode}
-              onChange={(e) =>
-                setRecipe({
-                  constructionMode: e.target
-                    .value as GeometryRecipe["constructionMode"],
-                  reviewed: false,
-                })
-              }
-            >
-              {[
-                ["extrude", "拉伸"],
-                ["revolve", "旋转"],
-                ["sweep", "扫掠"],
-                ["loft", "放样"],
-                ["sheetMetal", "钣金"],
-                ["coldRollForming", "冷弯成形"],
-                ["machinedStock", "毛坯机加工"],
-                ["externalDerived", "外部派生"],
-                ["standardParametric", "标准参数件"],
-              ].map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="草图引用">
-            <input
-              value={recipe.sketches.join(", ")}
-              onChange={(e) => setRecipe({ sketches: csv(e.target.value) })}
-            />
-          </Field>
-          <Field label="路径引用">
-            <input
-              value={recipe.paths.join(", ")}
-              onChange={(e) => setRecipe({ paths: csv(e.target.value) })}
-            />
-          </Field>
-        </div>
-        <div className="operation-list">
-          {recipe.operations.map((op, i) => (
-            <div className="operation-card" key={`${op.id}-${i}`}>
-              <div className="order-index">{i + 1}</div>
-              <div className="operation-main">
-                <div className="form-grid two">
-                  <Field label="稳定 ID">
-                    <input
-                      value={op.id}
-                      onChange={(e) => editOp(i, { id: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="几何算子">
-                    <select
-                      value={op.operator}
-                      onChange={(e) => {
-                        const operator = e.target.value;
-                        editOp(i, { operator, ...operatorDefaults(operator) });
-                      }}
-                    >
-                      {OPERATORS.map(([v, l, status]) => (
-                        <option key={v} value={v} disabled={status !== "available"}>
-                          {l}{status === "available" ? "" : "（待实现）"}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <div className={`operator-capability ${operatorStatus(op.operator)}`}>
-                  {operatorStatus(op.operator) === "available" ? (
-                    <><CheckCircle2 size={13} /><span>CAD内核已实现，可参与编译和边界工况验证。</span></>
-                  ) : (
-                    <><CircleAlert size={13} /><span>当前仅保留元模型能力，缺少专用引用编辑器、CAD算子和验证器，不能作为可发布模板使用。</span></>
-                  )}
-                </div>
-                {op.operator === "solid.revolve" && (
-                  <div className="operator-special-form">
-                    <strong>旋转轴与角度</strong>
-                    <div className="form-grid three">
-                      {[['axisOriginU','轴原点 U'],['axisOriginV','轴原点 V'],['angleDegrees','旋转角度']].map(([key,label]) => <Field key={key} label={label}><NumberInput unit={key === 'angleDegrees' ? '°' : 'mm'} value={Number(op.arguments[key] ?? 0)} onChange={(value) => editOp(i,{arguments:{...op.arguments,[key]:value}})}/></Field>)}
-                    </div>
-                    <div className="form-grid two">
-                      {[['axisDirectionU','轴方向 U'],['axisDirectionV','轴方向 V']].map(([key,label]) => <Field key={key} label={label}><NumberInput unit="" step={0.1} value={Number(op.arguments[key] ?? 0)} onChange={(value) => editOp(i,{arguments:{...op.arguments,[key]:value}})}/></Field>)}
-                    </div>
-                    <small>U/V对应当前截面平面的水平轴和垂直轴；截面不得跨越旋转轴。</small>
-                  </div>
-                )}
-                {op.operator === "solid.sweep" && (
-                  <div className="operator-special-form">
-                    <strong>三维扫掠路径</strong>
-                    <Field label="路径点表达式" hint="x:y:z；使用分号分隔节点，可直接引用模板参数。例如 0:0:0;0:0:length">
-                      <textarea value={String(op.arguments.pathPoints ?? '')} onChange={(e) => editOp(i,{arguments:{...op.arguments,pathPoints:e.target.value}})}/>
-                    </Field>
-                    <small>路径必须连续、无零长段；当前使用折线路径并要求首段与截面平面法向一致。</small>
-                  </div>
-                )}
-                {op.operator === "solid.loft" && (
-                  <div className="operator-special-form">
-                    <strong>放样截面站</strong>
-                    <Field label="位置与缩放表达式" hint="法向位置:截面缩放；至少两站且位置递增。例如 0:1;length*0.5:0.7;length:1.2">
-                      <textarea value={String(op.arguments.stations ?? '')} onChange={(e) => editOp(i,{arguments:{...op.arguments,stations:e.target.value}})}/>
-                    </Field>
-                    <small>每个站复用同一受约束截面拓扑；多环截面的内外环会分别放样并完成减材。</small>
-                  </div>
-                )}
-                {op.operator === "sheet.bend" && (
-                  <div className="operator-special-form">
-                    <strong>单折弯定义</strong>
-                    <div className="form-grid two">
-                      <Field label="折弯角度"><NumberInput unit="°" value={Number(op.arguments.bendAngleDegrees ?? 90)} onChange={(value) => editOp(i,{arguments:{...op.arguments,bendAngleDegrees:value}})}/></Field>
-                      <Field label="折弯位置表达式"><input value={op.argumentExpressions.bendPosition ?? ''} onChange={(e) => editOp(i,{argumentExpressions:{...op.argumentExpressions,bendPosition:e.target.value}})}/></Field>
-                      <Field label="内圆角表达式"><input value={op.argumentExpressions.insideRadius ?? ''} onChange={(e) => editOp(i,{argumentExpressions:{...op.argumentExpressions,insideRadius:e.target.value}})}/></Field>
-                      <Field label="K因子"><NumberInput unit="" step={0.01} value={Number(op.arguments.kFactor ?? 0.42)} onChange={(value) => editOp(i,{arguments:{...op.arguments,kFactor:value}})}/></Field>
-                    </div>
-                    <small>按照内圆角、厚度和K因子计算中性层折弯展开量；当前实现单条贯穿宽度的直线折弯，保持单一实体。</small>
-                  </div>
-                )}
-                <Field
-                  label="参数表达式"
-                  hint="格式：参数名=表达式；多个用逗号分隔"
-                >
-                  <input
-                    value={Object.entries(op.argumentExpressions)
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(", ")}
-                    onChange={(e) =>
-                      editOp(i, {
-                        argumentExpressions: Object.fromEntries(
-                          csv(e.target.value)
-                            .map((item) => {
-                              const [k, ...rest] = item.split("=");
-                              return [k.trim(), rest.join("=").trim()];
-                            })
-                            .filter(([k, v]) => k && v),
-                        ),
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="条件">
-                  <input
-                    value={op.conditionExpression}
-                    onChange={(e) =>
-                      editOp(i, { conditionExpression: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-              <button
-                className="delete-icon"
-                title="删除算子"
-                onClick={() =>
-                  setRecipe({
-                    operations: recipe.operations.filter((_, n) => n !== i),
-                  })
-                }
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <section className="semantic-face-contract panel">
-          <PanelTitle
-            icon={Box}
-            title="几何语义面"
-            subtitle="面 ID 是制造特征的唯一定位入口；这里定义局部 U/V 的起止边界与跨度，供端距和阵列排布直接引用。"
-            actions={<button className="mini-btn" onClick={addSemanticFace}><Plus size={14} />新增语义面</button>}
-          />
-          {recipe.semanticFaces.map((face, index) => (
-            <div className="semantic-face-row" key={`${face.id}-${index}`}>
-              <Field label="稳定 ID"><input value={face.id} onChange={(e) => editSemanticFace(index, { id: e.target.value })} /></Field>
-              <Field label="显示名称"><input value={face.label} onChange={(e) => editSemanticFace(index, { label: e.target.value })} /></Field>
-              <Field label="局部坐标系"><select value={face.hostFrame} onChange={(e) => editSemanticFace(index, { hostFrame: e.target.value as GeometryRecipe["semanticFaces"][number]["hostFrame"] })}><option value="negativeY">−Y（U=X，V=Z）</option><option value="positiveY">+Y（U=X，V=Z）</option><option value="negativeX">−X（U=Y，V=Z）</option><option value="positiveX">+X（U=Y，V=Z）</option><option value="negativeZ">−Z（U=X，V=Y）</option><option value="positiveZ">+Z（U=X，V=Y）</option></select></Field>
-              <Field label="U 起始边界"><code className="code-input"><input list="feature-parameter-options" value={face.uStartExpression} onChange={(e) => editSemanticFace(index, { uStartExpression: e.target.value })} /></code></Field>
-              <Field label="U 跨度"><code className="code-input"><input list="feature-parameter-options" value={face.uSpanExpression} onChange={(e) => editSemanticFace(index, { uSpanExpression: e.target.value })} /></code></Field>
-              <Field label="V 起始边界"><code className="code-input"><input list="feature-parameter-options" value={face.vStartExpression} onChange={(e) => editSemanticFace(index, { vStartExpression: e.target.value })} /></code></Field>
-              <Field label="V 跨度"><code className="code-input"><input list="feature-parameter-options" value={face.vSpanExpression} onChange={(e) => editSemanticFace(index, { vSpanExpression: e.target.value })} /></code></Field>
-              <button className="delete-icon" title="删除语义面" onClick={() => setRecipe({ semanticFaces: recipe.semanticFaces.filter((_, n) => n !== index) })}><Trash2 size={15} /></button>
-            </div>
-          ))}
-        </section>
-        <label className="confirm-box">
-          <input
-            type="checkbox"
-            checked={recipe.reviewed}
-            onChange={(e) => setRecipe({ reviewed: e.target.checked })}
-          />
-          <span>
-            <strong>几何配方已复核</strong>
-            <small>确认算子顺序、引用、条件和语义输出。</small>
-          </span>
-        </label>
-      </div>
-      {pendingProfileMode && (
-        <div
-          className="dialog-scrim"
-          role="presentation"
-          onPointerDown={() => setPendingProfileMode(null)}
-        >
-          <section
-            className="profile-mode-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="profile-mode-title"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <div className="dialog-icon">
-              <Layers3 size={20} />
-            </div>
-            <div>
-              <h2 id="profile-mode-title">
-                切换为
-                {pendingProfileMode === "closedRegion"
-                  ? "单闭合区域"
-                  : pendingProfileMode === "multiRegion"
-                    ? "管材／多环多腔区域"
-                    : "中心线＋厚度薄壁"}
-              </h2>
-              <p>
-                建模模式定义如何解释截面区域。重建会整体替换图元、约束、尺寸和区域，旧模式的水平／垂直尺寸不会残留。
-              </p>
-            </div>
-            <div className="mode-choice-grid">
-              <button onClick={() => applyProfileMode(false)}>
-                <Copy size={17} />
-                <strong>仅切换解释</strong>
-                <span>保留全部图元、约束和尺寸，适合已有草图需手工迁移时使用。</span>
-              </button>
-              <button
-                className="recommended"
-                onClick={() => applyProfileMode(true)}
-              >
-                <RefreshCw size={17} />
-                <strong>重建并清理旧约束</strong>
-                <span>
-                  {pendingProfileMode === "multiRegion"
-                    ? "用常用矩形管外环、内环和壁厚关系替换现有草图。"
-                    : pendingProfileMode === "centerlineThinWall"
-                      ? "用可编辑的开口 C 形中心线路径替换现有草图。"
-                      : "用实心闭合外环替换现有草图。"}
-                </span>
-                <b>推荐用于初始建模</b>
-              </button>
-            </div>
-            <button
-              className="dialog-cancel"
-              onClick={() => setPendingProfileMode(null)}
-            >
-              取消
-            </button>
-          </section>
-        </div>
-      )}
-    </>
-  );
-}
-
 function RulesStage({
   draft,
   change,
@@ -10362,50 +5619,6 @@ function RulesStage({
   );
 }
 
-function previewExpressionNumber(expression: string, context: Record<string, string | number | boolean>): number | null {
-  const source = expression.trim();
-  if (!source || !/^[A-Za-z0-9_+\-*/%().\s]+$/.test(source)) return null;
-  const substituted = source.replace(/\b[A-Za-z][A-Za-z0-9_]*\b/g, (identifier) => {
-    const value = context[identifier];
-    return typeof value === "number" && Number.isFinite(value) ? `(${value})` : "unknown";
-  });
-  if (!/^[0-9+\-*/%().\s]+$/.test(substituted)) return null;
-  try {
-    const value = Function(`"use strict"; return (${substituted});`)();
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function RuleLocalPreview({ rule, parameterValues }: { rule: FeatureRule; parameterValues: Record<string, string | number | boolean> }) {
-  const contourValues = { ...parameterValues };
-  rule.profileDimensions.forEach((dimension) => { contourValues[dimension.id] = parameterValues[dimension.parameterId]; });
-  const rawVertices = rule.polygonVertices.map((vertex) => ({
-    u: previewExpressionNumber(vertex.uExpression, contourValues),
-    v: previewExpressionNumber(vertex.vExpression, contourValues),
-  }));
-  const numericVertices = rawVertices.length >= 3 && rawVertices.every((vertex) => Number.isFinite(vertex.u) && Number.isFinite(vertex.v));
-  const source = numericVertices ? rawVertices as { u: number; v: number }[] : [{ u: -1, v: -1 }, { u: 1, v: 1 }];
-  const uValues = source.map((vertex) => vertex.u);
-  const vValues = source.map((vertex) => vertex.v);
-  const minU = Math.min(...uValues), maxU = Math.max(...uValues), minV = Math.min(...vValues), maxV = Math.max(...vValues);
-  const spanU = Math.max(maxU - minU, 1), spanV = Math.max(maxV - minV, 1);
-  const points = source.map((vertex) => `${36 + ((vertex.u - minU) / spanU) * 148},${124 - ((vertex.v - minV) / spanV) * 88}`).join(" ");
-  return (
-    <div className="rule-local-preview">
-      <div><strong>局部 U/V 轮廓预览</strong><small>多边形按顶点和当前参数默认值真实绘制；实例化时会按用户输入或派生参数重新求值。</small></div>
-      <svg viewBox="0 0 220 150" role="img" aria-label="制造特征局部二维预览">
-        <rect x="20" y="15" width="180" height="115" rx="4" className="face-boundary" />
-        <path d="M 28 124 H 194 M 36 132 V 22" className="preview-axis" />
-        <text x="190" y="120">U</text><text x="40" y="28">V</text>
-        {rule.featureType === "polygonalCutout" ? numericVertices ? <polygon points={points} className="preview-profile" /> : <text x="54" y="76" className="preview-pending">等待可求值的 U/V 顶点</text> : rule.featureType === "circularHole" ? <circle cx="110" cy="72" r="22" className="preview-profile" /> : <rect x="72" y={rule.featureType === "straightSlot" ? "58" : "48"} width="76" height={rule.featureType === "straightSlot" ? "28" : "48"} rx={rule.featureType === "straightSlot" ? "14" : "0"} className="preview-profile" />}
-      </svg>
-      {!numericVertices && rule.featureType === "polygonalCutout" && <small className="preview-note">有未定义参数或不支持的表达式，无法做真实预览；请先绑定参数或到“实例试算”查看求值结果。</small>}
-    </div>
-  );
-}
-
 function ContractStage({
   draft,
   change,
@@ -10565,999 +5778,43 @@ function ContractStage({
         </button>
       </div>
       {tab === "parameters" && (
-        <div className="panel">
-          <PanelTitle
-            icon={Variable}
-            title="参数及来源"
-            subtitle="新增参数用于驱动尺寸、轮廓和布置；稳定 ID 写入规则表达式，显示名称只供人阅读。"
-            actions={
-              <button className="mini-btn" onClick={addParam}>
-                <Plus size={14} />
-                新增可填写实例参数
-              </button>
-            }
-          />
-          <div className="parameter-contract-guide">
-            <strong>使用方式</strong>
-            <span><code>稳定 ID</code> 是规则中的变量名，如 <code>holePitch</code>；显示名称可用中文且不会影响规则。</span>
-            <span>“实例输入”会在实例生成时由用户填写；“公式”由其他参数派生；材料、组件、产品等来源才需要填写上游数据路径。</span>
-            <span>规则页预声明的参数会自动出现在这里，先补来源、作用域和范围，再进入试算和发布。</span>
-          </div>
-          {pendingRuleParameters.length > 0 && (
-            <div className="parameter-contract-banner warning">
-              <strong>有 {pendingRuleParameters.length} 个规则预声明参数尚未补全。</strong>
-              <span>先完成这些参数的正式契约，再继续试算、验证和发布。</span>
-            </div>
-          )}
-          <div className="parameter-list">
-            {draft.parameterDefinitions.map((p, i) => (
-              <div className="parameter-row" key={`${p.id}-${i}`}>
-                <div className="parameter-id">
-                  <input
-                    className="parameter-id-input"
-                    key={p.id}
-                    defaultValue={p.id}
-                    onBlur={(event) => {
-                      if (!renameParam(p.id, event.target.value))
-                        event.currentTarget.value = p.id;
-                    }}
-                    aria-label={`${p.displayName || p.label} 的稳定 ID`}
-                    aria-invalid={!!parameterIdErrors[p.id]}
-                  />
-                  {parameterIdErrors[p.id] && (
-                    <small className="field-error" role="alert">
-                      {parameterIdErrors[p.id]}
-                    </small>
-                  )}
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={p.exposed && instanceParameterEditable(p)}
-                      disabled={!instanceParameterEditable(p)}
-                      onChange={(e) =>
-                        editParam(i, { exposed: e.target.checked })
-                      }
-                    />
-                    公开
-                  </label>
-                </div>
-                <div className="parameter-fields">
-                  <div className="parameter-inline-note">
-                    <strong>{p.declaredInRuleStage ? "规则页预声明" : "契约页定义"}</strong>
-                    <small>
-                      {p.declaredInRuleStage
-                        ? p.contractReady
-                          ? "已补全正式契约"
-                          : "进入契约页后需要补全"
-                        : "这里定义为正式契约"}
-                    </small>
-                  </div>
-                  <Field label="显示名称">
-                    <input
-                      value={p.displayName || p.label}
-                      onChange={(e) =>
-                        editParamDisplayName(p, e.target.value)
-                      }
-                    />
-                  </Field>
-                  <Field label="类型">
-                    <select
-                      value={parameterValueType(p)}
-                      onChange={(e) => {
-                        const valueType = e.target.value as NonNullable<ParameterDefinition["valueType"]>;
-                        const defaultValue = parameterDefaultForType(valueType);
-                        editParam(i, {
-                          valueType,
-                          default: defaultValue,
-                          minimum: valueType === "number" || valueType === "integer" ? 0 : null,
-                          maximum: valueType === "number" || valueType === "integer" ? 100 : null,
-                          allowedValues: valueType === "enum" ? ["option1"] : [],
-                          sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: defaultValue } : p.sourceDefinition,
-                        });
-                      }}
-                    >
-                      <option value="number">数值</option>
-                      <option value="integer">整数</option>
-                      <option value="boolean">布尔</option>
-                      <option value="enum">枚举</option>
-                      <option value="string">文本</option>
-                    </select>
-                  </Field>
-                  {parameterValueType(p) === "boolean" ? (
-                    <Field label="默认值" hint="布尔参数只有“是 / 否”两种值。">
-                      <select value={String(Boolean(p.default))} onChange={(e) => editParam(i, { default: e.target.value === "true", sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: e.target.value === "true" } : p.sourceDefinition })}>
-                        <option value="true">是（true）</option><option value="false">否（false）</option>
-                      </select>
-                    </Field>
-                  ) : (
-                    <Field label={parameterValueType(p) === "enum" ? "默认选项" : "默认／标称值"} hint={parameterValueType(p) === "enum" ? "默认值必须是下面枚举选项之一。" : "实例初始值；上游值缺失时作为最终回退。"}>
-                      {parameterValueType(p) === "enum" ? (
-                        <select value={String(p.default)} onChange={(e) => editParam(i, { default: e.target.value, sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: e.target.value } : p.sourceDefinition })}>
-                          {(p.allowedValues || []).map((value) => <option key={String(value)} value={String(value)}>{String(value)}</option>)}
-                        </select>
-                      ) : <input type={parameterValueType(p) === "number" || parameterValueType(p) === "integer" ? "number" : "text"} step={parameterValueType(p) === "integer" ? 1 : "any"} value={String(p.default)} onChange={(e) => {
-                        const value = parameterValueType(p) === "integer" ? Math.trunc(Number(e.target.value || 0)) : parameterValueType(p) === "number" ? Number(e.target.value || 0) : e.target.value;
-                        editParam(i, { default: value, sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: value } : p.sourceDefinition });
-                      }} />}
-                    </Field>
-                  )}
-                  {(parameterValueType(p) === "number" || parameterValueType(p) === "integer") && <Field label="数值范围">
-                    <div className="range-input">
-                      <input type="number" value={p.minimum ?? ""} onChange={(e) => editParam(i, { minimum: e.target.value === "" ? null : Number(e.target.value) })} />
-                      <span>—</span>
-                      <input type="number" value={p.maximum ?? ""} onChange={(e) => editParam(i, { maximum: e.target.value === "" ? null : Number(e.target.value) })} />
-                    </div>
-                  </Field>}
-                  {parameterValueType(p) === "enum" && <Field label="枚举选项" hint="逐项维护，不需要输入逗号；至少保留一个选项。">
-                    <div className="enum-option-list">
-                      {(p.allowedValues || []).map((option, optionIndex) => (
-                        <div className="enum-option-row" key={`${String(option)}-${optionIndex}`}>
-                          <input aria-label={`枚举选项 ${optionIndex + 1}`} value={String(option)} onChange={(e) => {
-                            const allowedValues = [...(p.allowedValues || [])].map(String);
-                            allowedValues[optionIndex] = e.target.value;
-                            const defaultValue = String(p.default) === String(option) ? e.target.value : String(p.default);
-                            editParam(i, { allowedValues, default: defaultValue, sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: defaultValue } : p.sourceDefinition });
-                          }} />
-                          <button type="button" aria-label={`删除枚举选项 ${optionIndex + 1}`} disabled={(p.allowedValues || []).length <= 1} onClick={() => {
-                            const allowedValues = [...(p.allowedValues || [])].map(String).filter((_, n) => n !== optionIndex);
-                            const defaultValue = allowedValues.includes(String(p.default)) ? String(p.default) : allowedValues[0];
-                            editParam(i, { allowedValues, default: defaultValue, sourceDefinition: p.sourceDefinition ? { ...p.sourceDefinition, fallback: defaultValue } : p.sourceDefinition });
-                          }}><X size={12} /></button>
-                        </div>
-                      ))}
-                      <button type="button" className="text-btn compact" onClick={() => {
-                        const allowedValues = [...(p.allowedValues || [])].map(String);
-                        let optionNumber = allowedValues.length + 1;
-                        let option = `选项${optionNumber}`;
-                        while (allowedValues.includes(option)) option = `选项${++optionNumber}`;
-                        editParam(i, { allowedValues: [...allowedValues, option] });
-                      }}><Plus size={12} />添加选项</button>
-                    </div>
-                  </Field>}
-                  <Field label="来源">
-                    <select
-                      value={p.sourceDefinition?.type || "userInput"}
-                      onChange={(e) => {
-                        const type = e.target.value as ParameterSource["type"];
-                        const scope =
-                          requiredScopeForSource(type) ||
-                          p.scope ||
-                          "partInstance";
-                        editParam(i, {
-                          source: legacyParameterSource(type),
-                          scope,
-                          exposed:
-                            type === "userInput" && scope === "partInstance"
-                              ? p.exposed
-                              : false,
-                          sourceDefinition: {
-                            ...(p.sourceDefinition || {
-                              dependencies: [],
-                              lookupTable: {},
-                            }),
-                            type,
-                            reference:
-                              defaultReferenceForSource(type, p.id) ??
-                              p.sourceDefinition?.reference ??
-                              null,
-                            fallback: p.default,
-                          },
-                        });
-                      }}
-                    >
-                      {Object.entries(SOURCE_LABELS).map(([v, l]) => (
-                        <option key={v} value={v}>
-                          {l}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  {(p.sourceDefinition?.type || "userInput") === "userInput" ? (
-                    <div className="parameter-inline-note">
-                      <strong>实例输入</strong>
-                      <small>该参数会出现在实例生成表单中；“公开”开启后可由用户在允许范围内填写，无需设置引用路径。</small>
-                    </div>
-                  ) : (p.sourceDefinition?.type || "userInput") === "constant" ? (
-                    <div className="parameter-inline-note">
-                      <strong>模板常量</strong>
-                      <small>固定使用默认／标称值，不会出现在实例生成表单中，也没有引用路径。</small>
-                    </div>
-                  ) : <Field
-                    label={p.sourceDefinition?.type === "formula" ? "派生公式" : p.sourceDefinition?.type === "materialProperty" ? "材料属性路径" : "上游数据路径"}
-                    hint={p.sourceDefinition?.type === "formula" ? "引用其他稳定 ID，例如 holePitch = length / holeCount。" : "用点号访问上游数据，例如 material.thickness 或 component.span。"}
-                  >
-                    <input
-                      value={
-                        p.sourceDefinition?.type === "formula"
-                          ? p.sourceDefinition.expression || ""
-                          : p.sourceDefinition?.reference || ""
-                      }
-                      onChange={(e) =>
-                        editParam(i, {
-                          sourceDefinition: {
-                            ...(p.sourceDefinition || {
-                              type: "userInput",
-                              dependencies: [],
-                              lookupTable: {},
-                            }),
-                            [p.sourceDefinition?.type === "formula"
-                              ? "expression"
-                              : "reference"]: e.target.value,
-                          },
-                        })
-                      }
-                      placeholder={
-                        p.sourceDefinition?.type === "formula"
-                          ? "例如 length / 300"
-                          : "例如 material.thickness"
-                      }
-                    />
-                  </Field>}
-                </div>
-                <button
-                  className="delete-icon"
-                  disabled={[
-                    "length",
-                    "width",
-                    "depth",
-                    "lip",
-                    "thickness",
-                  ].includes(p.id)}
-                  onClick={() =>
-                    change({
-                      ...draft,
-                      parameterDefinitions: draft.parameterDefinitions.filter(
-                        (_, n) => n !== i,
-                      ),
-                    })
-                  }
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ContractParametersPanel
+          draft={draft}
+          parameterIdErrors={parameterIdErrors}
+          pendingRuleParametersCount={pendingRuleParameters.length}
+          onAddParameter={addParam}
+          onRenameParameter={renameParam}
+          onEditParameter={editParam}
+          onEditDisplayName={editParamDisplayName}
+          onDeleteParameter={(index) =>
+            change({
+              ...draft,
+              parameterDefinitions: draft.parameterDefinitions.filter(
+                (_, itemIndex) => itemIndex !== index,
+              ),
+            })
+          }
+        />
       )}
       {tab === "interfaces" && (
         <InterfaceEditor draft={draft} change={change} />
       )}
       {tab === "simulation" && (
-        <>
-          <VariantEditor
-            draft={draft}
-            change={change}
-            currentOverrides={overrides}
-            run={async (variant) => {
-              setOverrides(variant.overrides);
-              await evaluate(variant.overrides);
-            }}
-          />
-          <div className="trial-layout">
-          <div className="panel">
-            <PanelTitle
-              icon={Play}
-              title="实例参数"
-              subtitle="仅实例输入参数可在此修改；组件、产品和区域参数应在对应上层配置中修改。试算值不改模板默认值。"
-            />
-            {draft.parameterDefinitions
-              .filter((p) => p.exposed && instanceParameterEditable(p))
-              .map((p) => (
-                <Field
-                  key={p.id}
-                  label={`${p.displayName || p.label} · ${p.id}`}
-                >
-                  <div className="number-wrap">
-                    <input
-                      value={String(overrides[p.id] ?? p.default)}
-                      onChange={(e) =>
-                        setOverrides({
-                          ...overrides,
-                          [p.id]: scalar(e.target.value),
-                        })
-                      }
-                    />
-                    <span>{p.unit || "—"}</span>
-                  </div>
-                </Field>
-              ))}
-            <button
-              className="primary-btn full-btn"
-              disabled={evaluating}
-              onClick={() => evaluate()}
-            >
-              {evaluating ? (
-                <LoaderCircle className="spin" size={15} />
-              ) : (
-                <Play size={15} />
-              )}
-              保存并运行规则求值
-            </button>
-          </div>
-          <div className="panel result-panel">
-            <PanelTitle
-              icon={Braces}
-              title="求值结果"
-              subtitle="参数依赖解析后，制造规则展开为确定的静态特征。"
-            />
-            {!evaluation ? (
-              <div className="empty-note tall">输入实例参数并运行试算</div>
-            ) : (
-              <>
-                <div className="evaluation-summary">
-                  <div>
-                    <span>参数</span>
-                    <strong>{Object.keys(evaluation.values).length}</strong>
-                  </div>
-                  <div>
-                    <span>生成特征</span>
-                    <strong>{evaluation.features.length}</strong>
-                  </div>
-                  <div>
-                    <span>接口实例</span>
-                    <strong>{evaluation.resolvedInterfaces.length}</strong>
-                  </div>
-                  <div>
-                    <span>诊断</span>
-                    <strong
-                      className={
-                        evaluation.diagnostics.some(
-                          (x) => x.severity === "error",
-                        )
-                          ? "bad"
-                          : "ok"
-                      }
-                    >
-                      {evaluation.diagnostics.length}
-                    </strong>
-                  </div>
-                </div>
-                <div className="evaluation-order">
-                  <strong>求值顺序</strong>
-                  <p>{evaluation.evaluationOrder.join(" → ")}</p>
-                </div>
-                <div className="resolved-list">
-                  {evaluation.features.slice(0, 20).map((f) => (
-                    <div key={f.id}>
-                      <code>{f.id}</code>
-                      <span>
-                        {Object.entries(f.arguments)
-                          .map(([k, v]) => `${k}=${v}`)
-                          .join(" · ")}
-                      </span>
-                    </div>
-                  ))}
-                  {evaluation.features.length > 20 && (
-                    <small>
-                      其余 {evaluation.features.length - 20} 项已折叠
-                    </small>
-                  )}
-                </div>
-                {evaluation.resolvedInterfaces.length > 0 && (
-                  <div className="resolved-interface-list">
-                    <strong>已解析接口实例 · {evaluation.resolvedInterfaces.length}</strong>
-                    {evaluation.resolvedInterfaces.slice(0, 20).map((item) => (
-                      <div key={item.id}>
-                        <code>{item.id}</code>
-                        <span>{item.declarationMode === "featureDerived" ? `来源：${item.sourceFeatureId}` : "静态几何声明"}</span>
-                      </div>
-                    ))}
-                    {evaluation.resolvedInterfaces.length > 20 && <small>其余 {evaluation.resolvedInterfaces.length - 20} 项已折叠</small>}
-                  </div>
-                )}
-                {evaluation.diagnostics.map((d, i) => (
-                  <div className={`diagnostic ${d.severity}`} key={i}>
-                    <CircleAlert size={14} />
-                    {d.message}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-          </div>
-        </>
-      )}
-    </>
-  );
-}
-
-function InterfaceEditor({
-  draft,
-  change,
-}: {
-  draft: Draft;
-  change: (d: Draft) => void;
-}) {
-  const setItems = (interfaces: PartInterface[]) =>
-    change({ ...draft, interfaces });
-  const geometryRefs = draft.geometryRecipe.semanticFaces;
-  const interfaceTypeLabels: Record<PartInterface["interfaceType"], string> = {
-    locating: "定位", connecting: "连接", supporting: "支承", adjustable: "可调", processDatum: "工艺基准", other: "其他",
-  };
-  const edit = (i: number, patch: Partial<PartInterface>) =>
-    setItems(
-      draft.interfaces.map((item, n) =>
-        n === i ? { ...item, ...patch } : item,
-      ),
-    );
-  const add = () =>
-    setItems([
-      ...draft.interfaces,
-      {
-        id: uid("interface"),
-        name: "新定位接口",
-        declarationMode: "staticGeometry",
-        sourceFeatureRuleId: null,
-        interfaceType: "locating",
-        locatingType: "planeContact",
-        role: "primary",
-        geometryRefs: geometryRefs[0] ? [geometryRefs[0].id] : [],
-        referenceFrame: { originRef: geometryRefs[0]?.id || null, axis: "z" },
-        parameterRefs: [],
-        compatibilityTags: [],
-        description: "",
-        required: true,
-        reviewed: false,
-      },
-    ]);
-  return (
-    <div className="panel">
-      <PanelTitle
-        icon={Link2}
-        title="零部件接口"
-        subtitle="在单零部件模板中声明可用于未来装配的稳定几何基准；此处不定义配对关系、另一零件或装配偏移。"
-        actions={
-          <button className="mini-btn" onClick={add}>
-            <Plus size={14} />
-            新增接口
-          </button>
-        }
-      />
-      {draft.interfaces.length === 0 ? (
-        <div className="empty-note tall">当前模板尚未声明装配接口</div>
-      ) : (
-        <div className="interface-list">
-          {draft.interfaces.map((item, i) => (
-            <details className="interface-card" open key={`${item.id}-${i}`}>
-              <summary>
-                <div>
-                  <strong>{item.name}</strong>
-                  <code>{item.id}</code>
-                </div>
-                <span>{item.declarationMode === "featureDerived" ? "特征派生 · " : "静态几何 · "}{interfaceTypeLabels[item.interfaceType]}</span>
-                <ChevronDown size={15} />
-              </summary>
-              <div className="interface-body">
-                <div className="interface-declaration-note">
-                  <strong>接口声明</strong>
-                  <span>描述本零件提供什么装配基准及其参数；真正的“谁与谁配对”留给未来的组件装配层。</span>
-                </div>
-                <div className="form-grid three">
-                  <Field label="接口名称">
-                    <input
-                      value={item.name}
-                      onChange={(e) => edit(i, { name: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="接口类型">
-                    <select
-                      value={item.interfaceType}
-                      onChange={(e) => edit(i, { interfaceType: e.target.value as PartInterface["interfaceType"], locatingType: e.target.value === "locating" ? item.locatingType || "planeContact" : null, role: e.target.value === "locating" ? item.role || "primary" : null })}
-                    >
-                      {Object.entries(interfaceTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="声明方式" hint="特征派生会跟随制造特征规则自动增减实例。">
-                    <select
-                      value={item.declarationMode}
-                      onChange={(e) => {
-                        const declarationMode = e.target.value as PartInterface["declarationMode"];
-                        edit(i, {
-                          declarationMode,
-                          sourceFeatureRuleId: declarationMode === "featureDerived" ? draft.featureRules[0]?.id || null : null,
-                        });
-                      }}
-                    >
-                      <option value="staticGeometry">静态几何</option>
-                      <option value="featureDerived">制造特征派生</option>
-                    </select>
-                  </Field>
-                  {item.declarationMode === "featureDerived" ? (
-                    <Field label="来源制造特征规则" hint="每个解析出的孔或切口都会生成一个接口实例。">
-                      <select
-                        value={item.sourceFeatureRuleId || ""}
-                        onChange={(e) => edit(i, { sourceFeatureRuleId: e.target.value || null })}
-                      >
-                        <option value="">请选择制造特征规则</option>
-                        {draft.featureRules.map((rule) => <option key={rule.id} value={rule.id}>{rule.name} · {rule.id}</option>)}
-                      </select>
-                    </Field>
-                  ) : (
-                    <Field label="参考轴">
-                    <select
-                      value={item.referenceFrame.axis}
-                      onChange={(e) => edit(i, { referenceFrame: { ...item.referenceFrame, axis: e.target.value as PartInterface["referenceFrame"]["axis"] } })}
-                    >
-                      <option value="x">X</option>
-                      <option value="y">Y</option>
-                      <option value="z">Z</option>
-                      <option value="-x">-X</option>
-                      <option value="-y">-Y</option>
-                      <option value="-z">-Z</option>
-                    </select>
-                    </Field>
-                  )}
-                  {item.interfaceType === "locating" && <>
-                    <Field label="定位方式">
-                      <select value={item.locatingType || "planeContact"} onChange={(e) => edit(i, { locatingType: e.target.value as NonNullable<PartInterface["locatingType"]> })}>
-                        <option value="planeContact">面贴合</option><option value="axisCoincident">轴线同轴</option><option value="pinHole">销孔定位</option><option value="edgeStop">边／止挡</option><option value="slotAdjustable">槽孔可调</option><option value="keyedAntiError">键位防错</option>
-                      </select>
-                    </Field>
-                    <Field label="定位角色" hint="主、次、第三用于表达本零件内部的定位层次。">
-                      <select value={item.role || "primary"} onChange={(e) => edit(i, { role: e.target.value as NonNullable<PartInterface["role"]> })}>
-                        <option value="primary">主定位</option><option value="secondary">次定位</option><option value="tertiary">第三定位</option>
-                      </select>
-                    </Field>
-                  </>}
-                  {item.declarationMode === "staticGeometry" && <Field label="参考原点" hint="选取本零件的语义几何作为接口局部坐标的原点。">
-                    <select value={item.referenceFrame.originRef || ""} onChange={(e) => edit(i, { referenceFrame: { ...item.referenceFrame, originRef: e.target.value || null } })}>
-                      <option value="">未指定</option>
-                      {geometryRefs.map((face) => <option key={face.id} value={face.id}>{face.label} · {face.id}</option>)}
-                    </select>
-                  </Field>}
-                  <Field label="兼容标签" hint="仅用于将来筛选候选接口，不是配对接口 ID。">
-                    <input
-                      value={item.compatibilityTags.join(", ")}
-                      onChange={(e) =>
-                        edit(i, { compatibilityTags: csv(e.target.value) })
-                      }
-                    />
-                  </Field>
-                  <Field label="相关参数" hint="选择控制接口尺寸、孔距、间隙等的本零件参数。">
-                    <select multiple value={item.parameterRefs} onChange={(e) => edit(i, { parameterRefs: Array.from(e.target.selectedOptions, (option) => option.value) })}>
-                      {draft.parameterDefinitions.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.label} · {parameter.id}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                {item.declarationMode === "featureDerived" ? (
-                  <div className="feature-derived-interface-note">
-                    <strong>继承制造特征</strong>
-                    <span>接口实例的数量、所在语义面、孔／切口位置和尺寸均由所选制造特征规则决定；修改长度、间距或端距参数后，接口实例会同步重新解析。</span>
-                  </div>
-                ) : <div className="interface-geometry-refs">
-                  <strong>关联几何</strong>
-                  <small>选择本零件已定义的语义面；接口 ID 将稳定引用这些几何基准。</small>
-                  <div className="face-binding-list">
-                    {geometryRefs.map((face) => <label key={face.id} className="face-binding-option"><input type="checkbox" checked={item.geometryRefs.includes(face.id)} onChange={() => edit(i, { geometryRefs: item.geometryRefs.includes(face.id) ? item.geometryRefs.filter((id) => id !== face.id) : [...item.geometryRefs, face.id] })} /><span><strong>{face.label}</strong><code>{face.id}</code></span></label>)}
-                  </div>
-                </div>}
-                <Field label="接口说明">
-                  <textarea rows={2} value={item.description} onChange={(e) => edit(i, { description: e.target.value })} />
-                </Field>
-                <div className="inline-checks">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={item.required}
-                      onChange={(e) => edit(i, { required: e.target.checked })}
-                    />
-                    关键接口
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={item.reviewed}
-                      onChange={(e) => edit(i, { reviewed: e.target.checked })}
-                    />
-                    工程师已复核
-                  </label>
-                  <button
-                    className="danger-text"
-                    onClick={() =>
-                      setItems(draft.interfaces.filter((_, n) => n !== i))
-                    }
-                  >
-                    <Trash2 size={13} />
-                    删除接口
-                  </button>
-                </div>
-              </div>
-            </details>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function VariantEditor({
-  draft,
-  change,
-  currentOverrides,
-  run,
-}: {
-  draft: Draft;
-  change: (d: Draft) => void;
-  currentOverrides: Record<string, string | number | boolean>;
-  run: (v: VariantDefinition) => void;
-}) {
-  const setItems = (variants: VariantDefinition[]) =>
-    change({ ...draft, variants });
-  const variantKindLabels: Record<string, string> = {
-    nominal: "标称",
-    minimum: "最小边界",
-    maximum: "最大边界",
-    standard: "标准",
-    thresholdBefore: "阈值前",
-    thresholdAfter: "阈值后",
-    regression: "回归",
-    expectedFailure: "预期失败",
-  };
-  const add = (kind: "minimum" | "maximum" | "regression") => {
-    const mode = kind === "maximum" ? "max" : "min";
-    const overrides =
-      kind === "regression"
-        ? {}
-        : Object.fromEntries(
-            draft.parameterDefinitions
-              .filter((p) => p.exposed)
-              .map((p) => [
-                p.id,
-                mode === "min"
-                  ? (p.minimum ?? p.default)
-                  : (p.maximum ?? p.default),
-              ]),
-          );
-    setItems([
-      ...draft.variants,
-      {
-        id: uid("variant"),
-        name:
-          kind === "minimum"
-            ? "最小边界"
-            : kind === "maximum"
-              ? "最大边界"
-              : "回归实例",
-        kind,
-        overrides,
-        expected: "valid",
-        requiredForAdmission: true,
-        purpose: "",
-      },
-    ]);
-  };
-  const saveCurrent = () =>
-    setItems([
-      ...draft.variants,
-      {
-        id: uid("variant"),
-        name: "当前试算用例",
-        kind: "standard",
-        overrides: currentOverrides,
-        expected: "valid",
-        requiredForAdmission: false,
-        purpose: "从当前试算参数保存",
-      },
-    ]);
-  return (
-    <div className="panel">
-      <PanelTitle
-        icon={GitBranch}
-        title="试算与验证"
-        subtitle="先填写当前实例参数并试算；需要重复验证时，再将一组参数保存为验证用例。"
-        actions={
-          <div className="panel-button-group">
-            <button className="primary-action" onClick={saveCurrent}>保存当前</button>
-            <button onClick={() => add("minimum")}>+ 最小边界</button>
-            <button onClick={() => add("maximum")}>+ 最大边界</button>
-            <button onClick={() => add("regression")}>+ 回归用例</button>
-          </div>
-        }
-      />
-      <div className="variant-guide">
-        <strong>已保存的验证用例（可选）</strong>
-        <span>普通单零件只保留“标称实例”即可。选择一个用例会立即带入下方参数并运行试算；出现孔数跨阈值、参数联动或需复现问题时，再增加针对性用例。</span>
-      </div>
-      <div className="variant-list">
-        {draft.variants.map((v, i) => (
-          <div className="variant-card" key={`${v.id}-${i}`}>
-            <div className="variant-name">
-              <span className={`variant-kind ${v.kind || "nominal"}`}>
-                {variantKindLabels[v.kind || "nominal"] || v.kind || "标称"}
-              </span>
-              <div>
-                <input
-                  value={v.name}
-                  onChange={(e) =>
-                    setItems(
-                      draft.variants.map((x, n) =>
-                        n === i ? { ...x, name: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                <code>{v.id}</code>
-              </div>
-            </div>
-            <div className="override-chips">
-              {Object.entries(v.overrides)
-                .slice(0, 5)
-                .map(([k, val]) => (
-                  <span key={k}>
-                    {k}={String(val)}
-                  </span>
-                ))}
-              {Object.keys(v.overrides).length > 5 && (
-                <span>+{Object.keys(v.overrides).length - 5}</span>
-              )}
-              {!Object.keys(v.overrides).length && <span>使用默认参数</span>}
-            </div>
-            <div className="variant-actions">
-              <button onClick={() => run(v)}>
-                <Play size={14} />
-                试算
-              </button>
-              {v.id !== "nominal" && (
-                <button
-                  className="delete-icon"
-                  onClick={() =>
-                    setItems(draft.variants.filter((_, n) => n !== i))
-                  }
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ReviewStage({
-  result,
-  run,
-  busy,
-  complete,
-}: {
-  result: CompileResult | null;
-  run: () => void;
-  busy: string;
-  complete: () => void;
-}) {
-  return (
-    <>
-      <div className="review-toolbar">
-        <div>
-          <strong>确定性几何编译</strong>
-          <span>
-            规则先展开为静态几何计划，再由 OpenCascade 生成 STEP 主模型和 STL
-            预览。
-          </span>
-        </div>
-        <button className="primary-btn" disabled={!!busy} onClick={run}>
-          {busy === "compile" ? (
-            <LoaderCircle className="spin" />
-          ) : (
-            <RefreshCw />
-          )}
-          运行 B-Rep 编译
-        </button>
-      </div>
-      <CadViewer result={result} />
-      {result && (
-        <div className="metrics-grid">
-          <div>
-            <span>编译状态</span>
-            <strong className={result.success ? "ok" : "bad"}>
-              {result.success ? "通过" : "失败"}
-            </strong>
-          </div>
-          <div>
-            <span>B-Rep</span>
-            <strong>{result.metrics?.valid ? "有效" : "—"}</strong>
-          </div>
-          <div>
-            <span>实体数量</span>
-            <strong>{result.metrics?.solidCount ?? "—"}</strong>
-          </div>
-          <div>
-            <span>体积</span>
-            <strong>
-              {result.metrics
-                ? `${result.metrics.volume.toLocaleString()} mm³`
-                : "—"}
-            </strong>
-          </div>
-          <div>
-            <span>几何算子</span>
-            <strong>{result.metrics?.operationCount ?? "—"}</strong>
-          </div>
-        </div>
-      )}
-      {result?.diagnostics.map((d, i) => (
-        <div className={`diagnostic ${d.severity}`} key={i}>
-          <CircleAlert size={14} />
-          <span>
-            <strong>{d.code}</strong>
-            {d.message}
-          </span>
-        </div>
-      ))}
-      {result?.artifacts.length ? (
-        <div className="panel">
-          <PanelTitle
-            icon={Download}
-            title="验证产物"
-            subtitle="STEP 为权威模型；计划、诊断和语义映射用于复现与审计。"
-          />
-          <div className="artifact-list">
-            {result.artifacts.map((a) => (
-              <a href={a.url} key={a.kind} download>
-                <span>{a.kind.toUpperCase()}</span>
-                <div>
-                  <strong>{a.url.split("/").pop()}</strong>
-                  <small>SHA-256 {a.sha256.slice(0, 16)}…</small>
-                </div>
-                <Download size={15} />
-              </a>
-            ))}
-          </div>
-          <button
-            className="primary-btn full-btn"
-            disabled={!result.success || !!busy}
-            onClick={complete}
-          >
-            确认几何审查
-            <ArrowRight size={15} />
-          </button>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function AdmissionStage({
-  draft,
-  change,
-  validation,
-  versions,
-  publish,
-  busy,
-}: {
-  draft: Draft;
-  change: (d: Draft) => void;
-  validation: StageValidation | null;
-  versions: PublishedVersion[];
-  publish: () => void;
-  busy: string;
-}) {
-  return (
-    <>
-      <div className="panel">
-        <PanelTitle
-          icon={PackageCheck}
-          title="发布准入"
-          subtitle="冻结统一模板元模型、规则、接口、变体、验证记录和权威 CAD。"
+        <ContractSimulationWorkspace
+          draft={draft}
+          change={change}
+          overrides={overrides}
+          setOverrides={setOverrides}
+          evaluation={evaluation}
+          evaluating={evaluating}
+          onEvaluate={evaluate}
         />
-        <div className="form-grid two">
-          <Field label="复核人">
-            <input
-              value={draft.admission.reviewer}
-              onChange={(e) =>
-                change({
-                  ...draft,
-                  admission: { ...draft.admission, reviewer: e.target.value },
-                })
-              }
-            />
-          </Field>
-          <Field label="发布通道">
-            <select
-              value={draft.admission.releaseChannel}
-              onChange={(e) =>
-                change({
-                  ...draft,
-                  admission: {
-                    ...draft.admission,
-                    releaseChannel: e.target
-                      .value as Draft["admission"]["releaseChannel"],
-                  },
-                })
-              }
-            >
-              <option value="development">开发</option>
-              <option value="pilot">试用</option>
-              <option value="production">生产</option>
-            </select>
-          </Field>
-        </div>
-        <Field label="版本说明">
-          <textarea
-            rows={4}
-            value={draft.admission.changeNote}
-            onChange={(e) =>
-              change({
-                ...draft,
-                admission: { ...draft.admission, changeNote: e.target.value },
-              })
-            }
-            placeholder="说明变更、适用范围和已知限制"
-          />
-        </Field>
-        <div className="release-summary">
-          <div>
-            <CheckCircle2 />
-            <span>
-              <strong>不可变版本</strong>
-              <small>后续修改形成新版本</small>
-            </span>
-          </div>
-          <div>
-            <PackageCheck />
-            <span>
-              <strong>.rwpart + STEP</strong>
-              <small>定义与几何共同交付</small>
-            </span>
-          </div>
-          <div>
-            <Braces />
-            <span>
-              <strong>规则与接口</strong>
-              <small>支持实例和组件引用</small>
-            </span>
-          </div>
-        </div>
-        <button
-          className="publish-btn"
-          disabled={
-            draft.lifecycleStatus === "published" ||
-            !validation?.complete ||
-            !!busy
-          }
-          onClick={publish}
-        >
-          {busy === "publish" ? (
-            <LoaderCircle className="spin" />
-          ) : (
-            <PackageCheck />
-          )}
-          {draft.lifecycleStatus === "published"
-            ? "当前修订已发布"
-            : "发布模板版本"}
-        </button>
-      </div>
-      <div className="panel">
-        <PanelTitle
-          icon={Archive}
-          title="版本历史"
-          subtitle="实例生成器按不可变版本引用，避免模板更新影响已完成设计。"
-          actions={<span className="count-badge">{versions.length}</span>}
-        />
-        {versions.length === 0 ? (
-          <div className="empty-note tall">尚无发布版本</div>
-        ) : (
-          versions.map((v) => (
-            <div className="version-row" key={v.id}>
-              <span className="version-tag">V{v.version}</span>
-              <div>
-                <strong>
-                  {v.code} · {v.name}
-                </strong>
-                <small>
-                  源修订 R{v.sourceRevision} ·{" "}
-                  {new Date(v.createdAt).toLocaleString()}
-                </small>
-              </div>
-              <a href={v.sourcePackageUrl}>
-                <Download size={15} />
-                下载
-              </a>
-            </div>
-          ))
-        )}
-      </div>
+      )}
     </>
   );
 }
+
+
+
+
+

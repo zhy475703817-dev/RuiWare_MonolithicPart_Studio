@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { ArrowRight, Box, CheckCircle2, CircleAlert, ClipboardCheck, FileImage, Hammer, MessageSquareText, Trash2, Upload, Database, Layers3, Search } from "lucide-react";
-import { api } from "../../api";
-import { Field, NumberInput, PanelTitle } from "../../components/ui/FormParts";
-import type { Draft, GeometryRecipe, MaterialValidationSample, TemplateAuthoringRegistry } from "../../types";
+import { api } from "../../../../api";
+import { Field, NumberInput, PanelTitle } from "../../../../components/ui/FormParts";
+import type { Draft, GeometryRecipe, MaterialValidationSample, TemplateAuthoringRegistry } from "../../../../types";
 
 type TemplateInfoProps = {
   draft: Draft;
@@ -387,4 +387,8 @@ export function TemplateInfo({
     </>
   );
 }
+
+
+
+
 
