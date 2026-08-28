@@ -1,13 +1,13 @@
-# 当前项目代码结构说明
+# 当前代码结构说明
 
-> 说明：这份文档按当前仓库的实际源码整理，重点放在“GUI 主线 + Agent 辅助线”的运行结构。  
-> 其中 `docs/` 下的文件属于说明文档，不参与业务运行。
+> 这份文档按当前仓库真实目录整理，重点是“GUI-first 为主，Agent 辅助为辅”的运行结构。
+> `docs/` 下的内容都是说明文档，不参与业务运行。
 
 ## 1. 总体分层
 
-- `apps/studio-web`：前端工作台，负责 GUI 交互、阶段页面和草图编辑。
+- `apps/studio-web`：前端工作台，负责 GUI 交互、阶段页面、草图编辑和结果查看。
 - `services/template-api`：后端主 API，负责草稿、材料、阶段、编译、发布和统一错误。
-- `services/cad-worker`：隔离的 CAD 执行进程，负责把计划真正落到几何结果。
+- `services/cad-worker`：独立 CAD 执行进程，负责把计划真正落成几何结果。
 - `libs/python/template_core`：纯领域层，放模型、规则、阶段校验、草图求解和 Lowering。
 - `services/ruiware-mcp`：面向外部 Agent / MCP 的接入桥接。
 - `docs`：架构、开发、发布和流程说明。
@@ -17,17 +17,17 @@
 ### 2.1 顶层文件
 
 - `src/main.tsx`：前端入口，挂载 React 应用。
-- `src/App.tsx`：主界面总装配，组织工作台、阶段切换和页面级交互。
+- `src/App.tsx`：主界面总装配，组织工作台、阶段切换、草稿状态和页面级交互。
 - `src/styles.css`：全局样式。
 - `src/types.ts`：前端共享类型定义。
-- `src/api.ts`：前端 API 对外统一出口。
+- `src/api.ts`：前端 API 的兼容出口，向上层屏蔽具体请求实现。
 
 ### 2.2 API 层
 
 - `src/api/client.ts`：HTTP 客户端封装，负责和后端通信。
-- `src/api/errors.ts`：前端统一错误结构和错误提示转换。
+- `src/api/errors.ts`：前端统一错误结构、错误码转换和提示文案。
 
-### 2.3 布局与通用 UI
+### 2.3 通用组件
 
 - `src/components/layout/WorkspaceShell.tsx`：工作台外壳布局。
 - `src/components/review/CadViewer.tsx`：编译结果 / 几何结果查看器。
@@ -37,13 +37,13 @@
 ### 2.4 工作流与草稿状态
 
 - `src/features/workflow/stageConfig.ts`：七个阶段的固定顺序和展示配置。
-- `src/features/draft/useDraftWorkspace.ts`：跨阶段状态管理、草稿加载、保存、发布、统一错误展示。
+- `src/features/draft/useDraftWorkspace.ts`：跨阶段状态管理、草稿加载、保存、发布和统一提示。
 
 ### 2.5 语义建模与参数规则
 
-- `src/features/authoring/authoringUtils.ts`：参数命名、作用域、约束标签和作者侧规则。
+- `src/features/authoring/authoringUtils.ts`：参数命名、作用域、约束标签、引用改写和作者侧规则。
 
-### 2.6 草图域
+### 2.6 草图核心
 
 - `src/features/sketch/sketchAuthoringCore.ts`：草图克隆、拓扑整理、端点传播等核心工具。
 - `src/features/sketch/sketchArc.ts`：圆弧计算和圆弧相关几何。
@@ -63,39 +63,63 @@
 
 - `src/features/sketch/*.test.ts`：对应草图模块的单元测试，用于校验交互和几何行为。
 
-### 2.8 阶段页面
+### 2.8 阶段页面总览
 
-- `src/features/stages/AdmissionStage.tsx`：发布准入阶段。
-- `src/features/stages/ContractOverridesPanel.tsx`：契约覆盖项编辑。
-- `src/features/stages/ContractParametersPanel.tsx`：契约参数编辑。
-- `src/features/stages/ContractSimulationWorkspace.tsx`：契约模拟工作区。
-- `src/features/stages/DimensionCreationBar.tsx`：尺寸创建入口。
-- `src/features/stages/InterfaceEditor.tsx`：接口编辑。
-- `src/features/stages/MaterialScopePanel.tsx`：材料适用范围。
-- `src/features/stages/MaterialSupplyBlankPanel.tsx`：毛坯与供料信息。
-- `src/features/stages/MaterialValidationMatrix.tsx`：材料验证矩阵。
-- `src/features/stages/ParameterContractCard.tsx`：单个参数契约卡片。
-- `src/features/stages/ParameterContractList.tsx`：参数契约列表。
-- `src/features/stages/ParameterCreateCard.tsx`：参数创建卡片。
-- `src/features/stages/ReviewStage.tsx`：编译与验证阶段。
-- `src/features/stages/RuleLocalPreview.tsx`：规则局部预览。
-- `src/features/stages/RulesSimulationPanel.tsx`：规则模拟面板。
-- `src/features/stages/SketchConstraintList.tsx`：草图约束列表。
-- `src/features/stages/SketchDiagnosticsPanel.tsx`：草图诊断面板。
-- `src/features/stages/SketchDimensionPanel.tsx`：草图尺寸面板。
-- `src/features/stages/SketchEditConflictDialog.tsx`：草图编辑冲突对话框。
-- `src/features/stages/SketchEntityList.tsx`：草图图元列表。
-- `src/features/stages/SketchIntentConfirmation.tsx`：草图意图确认。
-- `src/features/stages/SketchIntentEditor.tsx`：草图意图编辑主面板。
-- `src/features/stages/SketchIntentTabs.tsx`：草图意图标签页。
-- `src/features/stages/SketchModePanel.tsx`：草图模式切换。
-- `src/features/stages/SketchRegionPanel.tsx`：草图区域面板。
-- `src/features/stages/SketchSelectedEntityEditor.tsx`：选中图元编辑器。
-- `src/features/stages/SketchWorkspaceStatusBar.tsx`：草图状态栏。
-- `src/features/stages/SketchWorkspaceToolbar.tsx`：草图工具栏。
-- `src/features/stages/TemplateInfo.tsx`：模板定义阶段。
-- `src/features/stages/useGeometryEditFlow.ts`：几何编辑流程 hook，承载拖动、撤销、冲突和提交动作。
-- `src/features/stages/VariantEditor.tsx`：变体编辑。
+当前阶段页面已经按职责拆分，不再把所有内容堆在 `App.tsx` 里：
+
+- `src/features/stages/geometry/*`：草图、尺寸、约束、诊断和几何编辑主线。
+- `src/features/stages/material/*`：材料范围、毛坯和验证矩阵。
+- `src/features/stages/contract/*`：参数契约、覆盖项和模拟工作区。
+- `src/features/stages/workflow/*`：模板信息、接口、变体和参数契约的子模块。
+- `src/features/stages/review/*`：编译验证与准入发布。
+
+### 2.9 `geometry` 目录
+
+- `GeometryAuthoringPanel.tsx`：几何阶段主面板，总装配草图编辑相关模块。
+- `GeometryRecipePanel.tsx`：几何配方编辑入口。
+- `DimensionCreationBar.tsx`：尺寸创建入口。
+- `SketchConstraintList.tsx`：草图约束列表和编辑。
+- `SketchDiagnosticsPanel.tsx`：草图诊断信息展示。
+- `SketchDimensionPanel.tsx`：尺寸、参数创建和参数契约入口。
+- `SketchEditConflictDialog.tsx`：草图编辑冲突处理对话框。
+- `SketchEntityList.tsx`：草图图元列表。
+- `SketchIntentConfirmation.tsx`：草图意图确认。
+- `SketchIntentEditor.tsx`：草图意图编辑主面板。
+- `SketchIntentTabs.tsx`：草图意图标签页切换。
+- `SketchModePanel.tsx`：草图模式切换。
+- `SketchRegionPanel.tsx`：草图区域面板。
+- `SketchSelectedEntityEditor.tsx`：选中图元编辑器。
+- `SketchWorkspaceStatusBar.tsx`：草图状态栏。
+- `SketchWorkspaceToolbar.tsx`：草图工具栏。
+- `useGeometryEditFlow.ts`：草图编辑流程 hook，承载拖动、撤销、冲突和提交动作。
+
+### 2.10 `material` 目录
+
+- `MaterialScopePanel.tsx`：材料适用范围设置。
+- `MaterialSupplyBlankPanel.tsx`：毛坯和供料信息编辑。
+- `MaterialValidationMatrix.tsx`：材料验证矩阵。
+
+### 2.11 `contract` 目录
+
+- `ContractParametersPanel.tsx`：参数契约总面板。
+- `ContractOverridesPanel.tsx`：契约覆盖项编辑。
+- `ContractSimulationWorkspace.tsx`：契约模拟工作区。
+
+### 2.12 `workflow` 目录
+
+- `template/TemplateInfo.tsx`：模板信息阶段。
+- `interface/InterfaceEditor.tsx`：接口编辑。
+- `variant/VariantEditor.tsx`：变体编辑。
+- `contracts/ParameterContractCard.tsx`：单个参数契约卡片。
+- `contracts/ParameterContractList.tsx`：参数契约列表。
+- `contracts/ParameterCreateCard.tsx`：参数创建卡片。
+
+### 2.13 `review` 目录
+
+- `compile/ReviewStage.tsx`：编译与验证阶段主入口。
+- `compile/RuleLocalPreview.tsx`：规则局部预览。
+- `compile/RulesSimulationPanel.tsx`：规则模拟面板。
+- `admission/AdmissionStage.tsx`：发布准入阶段。
 
 ## 3. 后端 `services/template-api`
 
@@ -161,7 +185,6 @@
 
 ## 8. 读法建议
 
-- 先看 `apps/studio-web/src/App.tsx` 和 `useDraftWorkspace.ts`，能最快理解 GUI 主线。
-- 再看 `services/template-api/app/main.py`、`repository.py` 和 `services/operations.py`，能理解后端业务流。
+- 先看 `apps/studio-web/src/App.tsx` 和 `src/features/draft/useDraftWorkspace.ts`，能最快理解 GUI 主线。
+- 再看 `services/template-api/app/main.py`、`app/repository.py` 和 `app/services/operations.py`，能理解后端业务流。
 - 最后看 `libs/python/template_core`，能理解参数、阶段、草图和 Lowering 的真正规则。
-

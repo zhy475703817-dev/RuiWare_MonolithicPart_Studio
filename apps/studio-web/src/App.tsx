@@ -50,26 +50,28 @@ import type { ErrorNotice } from "./api/errors";
 import { WorkspaceShell } from "./components/layout/WorkspaceShell";
 import { useDraftWorkspace } from "./features/draft/useDraftWorkspace";
 import { CheckList, Field, NumberInput, PanelTitle } from "./components/ui/FormParts";
-import { TemplateInfo } from "./features/stages/TemplateInfo";
-import { InterfaceEditor } from "./features/stages/InterfaceEditor";
-import { VariantEditor } from "./features/stages/VariantEditor";
-import { ReviewStage } from "./features/stages/ReviewStage";
-import { AdmissionStage } from "./features/stages/AdmissionStage";
-import { RuleLocalPreview } from "./features/stages/RuleLocalPreview";
-import { MaterialScopePanel } from "./features/stages/MaterialScopePanel";
-import { MaterialSupplyBlankPanel } from "./features/stages/MaterialSupplyBlankPanel";
-import { MaterialValidationMatrix } from "./features/stages/MaterialValidationMatrix";
-import { SketchWorkspaceToolbar } from "./features/stages/SketchWorkspaceToolbar";
-import { RulesSimulationPanel } from "./features/stages/RulesSimulationPanel";
-import { ContractParametersPanel } from "./features/stages/ContractParametersPanel";
-import { ContractOverridesPanel } from "./features/stages/ContractOverridesPanel";
-import { ContractSimulationWorkspace } from "./features/stages/ContractSimulationWorkspace";
-import { SketchEditConflictDialog } from "./features/stages/SketchEditConflictDialog";
-import { SketchWorkspaceStatusBar } from "./features/stages/SketchWorkspaceStatusBar";
-import { SketchModePanel } from "./features/stages/SketchModePanel";
-import { SketchIntentEditor } from "./features/stages/SketchIntentEditor";
-import { SketchSelectedEntityEditor } from "./features/stages/SketchSelectedEntityEditor";
-import { useGeometryEditFlow } from "./features/stages/useGeometryEditFlow";
+import { TemplateInfo } from "./features/stages/workflow/template/TemplateInfo";
+import { InterfaceEditor } from "./features/stages/workflow/interface/InterfaceEditor";
+import { VariantEditor } from "./features/stages/workflow/variant/VariantEditor";
+import { ReviewStage } from "./features/stages/review/compile/ReviewStage";
+import { AdmissionStage } from "./features/stages/review/admission/AdmissionStage";
+import { RuleLocalPreview } from "./features/stages/review/compile/RuleLocalPreview";
+import { MaterialScopePanel } from "./features/stages/material/MaterialScopePanel";
+import { MaterialSupplyBlankPanel } from "./features/stages/material/MaterialSupplyBlankPanel";
+import { MaterialValidationMatrix } from "./features/stages/material/MaterialValidationMatrix";
+import { SketchWorkspaceToolbar } from "./features/stages/geometry/SketchWorkspaceToolbar";
+import { RulesSimulationPanel } from "./features/stages/review/compile/RulesSimulationPanel";
+import { ContractParametersPanel } from "./features/stages/contract/ContractParametersPanel";
+import { ContractOverridesPanel } from "./features/stages/contract/ContractOverridesPanel";
+import { ContractSimulationWorkspace } from "./features/stages/contract/ContractSimulationWorkspace";
+import { SketchEditConflictDialog } from "./features/stages/geometry/SketchEditConflictDialog";
+import { SketchWorkspaceStatusBar } from "./features/stages/geometry/SketchWorkspaceStatusBar";
+import { SketchModePanel } from "./features/stages/geometry/SketchModePanel";
+import { GeometryAuthoringPanel } from "./features/stages/geometry/GeometryAuthoringPanel";
+import { GeometryRecipePanel } from "./features/stages/geometry/GeometryRecipePanel";
+import { SketchIntentEditor } from "./features/stages/geometry/SketchIntentEditor";
+import { SketchSelectedEntityEditor } from "./features/stages/geometry/SketchSelectedEntityEditor";
+import { useGeometryEditFlow } from "./features/stages/geometry/useGeometryEditFlow";
 import {
   buildEndToEndJoints,
   cloneSketchEntities,
@@ -3716,162 +3718,19 @@ function GeometryStage({
   ]);
   return (
     <>
-      <div className="panel semantic-authoring">
-        <PanelTitle
-          icon={Braces}
-          title="统一语义参数轮廓"
-          subtitle="所有草图构造件使用同一种权威模型；创建入口只记录来源，不改变后续参数化、验证与编译方式。"
-          actions={<span className="schema-pill">semanticProfile</span>}
-        />
-        <div className="acquisition-grid">
-          {(
-            [
-              ["manual", "交互绘制", "从空白语义图元与约束开始"],
-              ["imported", "导入轮廓", "DXF等文件转换为语义草图"],
-              ["reused", "复用受控截面", "复制受控截面并保持来源"],
-            ] as const
-          ).map(([id, label, note]) => (
-            <button
-              className={draft.sketch.acquisitionMethod === id ? "active" : ""}
-              key={id}
-              onClick={() => selectAcquisition(id)}
-            >
-              <strong>{label}</strong>
-              <span>{note}</span>
-            </button>
-          ))}
-        </div>
-        {draft.sketch.acquisitionMethod === "imported" && (
-          <div className="source-conversion">
-            <label className="upload-zone compact">
-              <Upload size={18} />
-              <strong>选择DXF或轮廓文件</strong>
-              <span>文件仅作为转换证据，不直接参与CAD编译</span>
-              <input
-                type="file"
-                accept=".dxf,.dwg,.svg,.step,.stp"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file || !draft.id) return;
-                  try {
-                    const saved = await api.uploadAttachment(
-                      draft.id,
-                      file,
-                      "drawing",
-                    );
-                    const attachment = saved.attachments.at(-1);
-                    change({
-                      ...draft,
-                      attachments: saved.attachments,
-                      sketch: {
-                        ...draft.sketch,
-                        acquisitionMethod: "imported",
-                        sourceAttachmentId: attachment?.id || null,
-                        sourceHash: attachment?.sha256 || null,
-                        importUnit: "mm",
-                        importScale: 1,
-                        conversionReviewed: false,
-                        constraintsReviewed: false,
-                      },
-                    });
-                  } catch (error) {
-                    showError(error);
-                  }
-                }}
-              />
-            </label>
-            <div className="form-grid two">
-              <Field label="导入单位">
-                <select
-                  value={draft.sketch.importUnit || "mm"}
-                  onChange={(e) =>
-                    setSketch({
-                      importUnit: e.target.value as NonNullable<
-                        Draft["sketch"]["importUnit"]
-                      >,
-                      conversionReviewed: false,
-                    })
-                  }
-                >
-                  <option value="mm">毫米</option>
-                  <option value="cm">厘米</option>
-                  <option value="m">米</option>
-                  <option value="inch">英寸</option>
-                </select>
-              </Field>
-              <Field label="导入比例">
-                <NumberInput
-                  value={draft.sketch.importScale || 1}
-                  unit="倍"
-                  step={0.01}
-                  min={0.001}
-                  onChange={(importScale) =>
-                    setSketch({ importScale, conversionReviewed: false })
-                  }
-                />
-              </Field>
-            </div>
-          </div>
-        )}
-        {draft.sketch.acquisitionMethod === "reused" && (
-          <Field label="受控截面ID" hint="复用后仍复制为当前模板的统一语义草图">
-            <input
-              value={draft.sketch.sourceProfileId || ""}
-              onChange={(e) =>
-                setSketch({
-                  sourceProfileId: e.target.value || null,
-                  conversionReviewed: false,
-                })
-              }
-              placeholder="profile.catalog.omega-100"
-            />
-          </Field>
-        )}
-        <div className="semantic-status">
-          <span>
-            <strong>当前来源</strong>
-            <small>{acquisitionLabels[draft.sketch.acquisitionMethod]}</small>
-          </span>
-          <span>
-            <strong>语义图元</strong>
-            <small>{draft.sketch.entities.length} 项</small>
-          </span>
-          <span>
-            <strong>约束</strong>
-            <small>{draft.sketch.constraints.length} 项</small>
-          </span>
-          <span>
-            <strong>闭合区域</strong>
-            <small>
-              {draft.sketch.regions.filter((item) => item.closed).length} 项
-            </small>
-          </span>
-        </div>
-        {["imported", "reused"].includes(draft.sketch.acquisitionMethod) && (
-          <label className="confirm-box">
-            <input
-              type="checkbox"
-              checked={draft.sketch.conversionReviewed}
-              onChange={(e) =>
-                change({
-                  ...draft,
-                  sketch: {
-                    ...draft.sketch,
-                    conversionReviewed: e.target.checked,
-                    constraintsReviewed: false,
-                  },
-                })
-              }
-            />
-            <span>
-              <strong>来源已转换为语义草图并复核</strong>
-              <small>
-                确认原始图元已清理，尺寸已参数化，语义名称和约束不再依赖外部文件图元编号。
-              </small>
-            </span>
-          </label>
-        )}
-      </div>
+      <GeometryAuthoringPanel
+        draft={draft}
+        change={change}
+        showError={showError}
+        setSketch={setSketch}
+        pendingProfileMode={pendingProfileMode}
+        setPendingProfileMode={setPendingProfileMode}
+        applyProfileMode={applyProfileMode}
+        thinwallOffset={thinwallOffset}
+        setThinwallOffset={setThinwallOffset}
+        applyThinwallOffset={applyThinwallOffset}
+        thinwallOffsetNote={thinwallOffsetNote}
+      />
       <div className="geometry-studio">
         <div className="solver-workbench">
           <div className="panel solver-canvas-panel">
@@ -3973,274 +3832,21 @@ function GeometryStage({
         setSketch={setSketch}
         change={change}
       />
-      <div className="panel geometry-recipe-panel">
-        <PanelTitle
-          icon={Braces}
-          title="4. 几何配方"
-          subtitle="按顺序构造基体。拉伸只是其中一种方式，也可扩展旋转、扫掠、放样、钣金和外部派生。"
-          actions={
-            <button className="mini-btn" onClick={addOp}>
-              <Plus size={14} />
-              添加算子
-            </button>
-          }
-        />
-        <div className="form-grid three">
-          <Field label="构造方式">
-            <select
-              value={recipe.constructionMode}
-              onChange={(e) =>
-                setRecipe({
-                  constructionMode: e.target
-                    .value as GeometryRecipe["constructionMode"],
-                  reviewed: false,
-                })
-              }
-            >
-              {[
-                ["extrude", "拉伸"],
-                ["revolve", "旋转"],
-                ["sweep", "扫掠"],
-                ["loft", "放样"],
-                ["sheetMetal", "钣金"],
-                ["coldRollForming", "冷弯成形"],
-                ["machinedStock", "毛坯机加工"],
-                ["externalDerived", "外部派生"],
-                ["standardParametric", "标准参数件"],
-              ].map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="草图引用">
-            <input
-              value={recipe.sketches.join(", ")}
-              onChange={(e) => setRecipe({ sketches: csv(e.target.value) })}
-            />
-          </Field>
-          <Field label="路径引用">
-            <input
-              value={recipe.paths.join(", ")}
-              onChange={(e) => setRecipe({ paths: csv(e.target.value) })}
-            />
-          </Field>
-        </div>
-        <div className="operation-list">
-          {recipe.operations.map((op, i) => (
-            <div className="operation-card" key={`${op.id}-${i}`}>
-              <div className="order-index">{i + 1}</div>
-              <div className="operation-main">
-                <div className="form-grid two">
-                  <Field label="稳定 ID">
-                    <input
-                      value={op.id}
-                      onChange={(e) => editOp(i, { id: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="几何算子">
-                    <select
-                      value={op.operator}
-                      onChange={(e) => {
-                        const operator = e.target.value;
-                        editOp(i, { operator, ...operatorDefaults(operator) });
-                      }}
-                    >
-                      {OPERATORS.map(([v, l, status]) => (
-                        <option key={v} value={v} disabled={status !== "available"}>
-                          {l}{status === "available" ? "" : "（待实现）"}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <div className={`operator-capability ${operatorStatus(op.operator)}`}>
-                  {operatorStatus(op.operator) === "available" ? (
-                    <><CheckCircle2 size={13} /><span>CAD内核已实现，可参与编译和边界工况验证。</span></>
-                  ) : (
-                    <><CircleAlert size={13} /><span>当前仅保留元模型能力，缺少专用引用编辑器、CAD算子和验证器，不能作为可发布模板使用。</span></>
-                  )}
-                </div>
-                {op.operator === "solid.revolve" && (
-                  <div className="operator-special-form">
-                    <strong>旋转轴与角度</strong>
-                    <div className="form-grid three">
-                      {[['axisOriginU','轴原点 U'],['axisOriginV','轴原点 V'],['angleDegrees','旋转角度']].map(([key,label]) => <Field key={key} label={label}><NumberInput unit={key === 'angleDegrees' ? '°' : 'mm'} value={Number(op.arguments[key] ?? 0)} onChange={(value) => editOp(i,{arguments:{...op.arguments,[key]:value}})}/></Field>)}
-                    </div>
-                    <div className="form-grid two">
-                      {[['axisDirectionU','轴方向 U'],['axisDirectionV','轴方向 V']].map(([key,label]) => <Field key={key} label={label}><NumberInput unit="" step={0.1} value={Number(op.arguments[key] ?? 0)} onChange={(value) => editOp(i,{arguments:{...op.arguments,[key]:value}})}/></Field>)}
-                    </div>
-                    <small>U/V对应当前截面平面的水平轴和垂直轴；截面不得跨越旋转轴。</small>
-                  </div>
-                )}
-                {op.operator === "solid.sweep" && (
-                  <div className="operator-special-form">
-                    <strong>三维扫掠路径</strong>
-                    <Field label="路径点表达式" hint="x:y:z；使用分号分隔节点，可直接引用模板参数。例如 0:0:0;0:0:length">
-                      <textarea value={String(op.arguments.pathPoints ?? '')} onChange={(e) => editOp(i,{arguments:{...op.arguments,pathPoints:e.target.value}})}/>
-                    </Field>
-                    <small>路径必须连续、无零长段；当前使用折线路径并要求首段与截面平面法向一致。</small>
-                  </div>
-                )}
-                {op.operator === "solid.loft" && (
-                  <div className="operator-special-form">
-                    <strong>放样截面站</strong>
-                    <Field label="位置与缩放表达式" hint="法向位置:截面缩放；至少两站且位置递增。例如 0:1;length*0.5:0.7;length:1.2">
-                      <textarea value={String(op.arguments.stations ?? '')} onChange={(e) => editOp(i,{arguments:{...op.arguments,stations:e.target.value}})}/>
-                    </Field>
-                    <small>每个站复用同一受约束截面拓扑；多环截面的内外环会分别放样并完成减材。</small>
-                  </div>
-                )}
-                {op.operator === "sheet.bend" && (
-                  <div className="operator-special-form">
-                    <strong>单折弯定义</strong>
-                    <div className="form-grid two">
-                      <Field label="折弯角度"><NumberInput unit="°" value={Number(op.arguments.bendAngleDegrees ?? 90)} onChange={(value) => editOp(i,{arguments:{...op.arguments,bendAngleDegrees:value}})}/></Field>
-                      <Field label="折弯位置表达式"><input value={op.argumentExpressions.bendPosition ?? ''} onChange={(e) => editOp(i,{argumentExpressions:{...op.argumentExpressions,bendPosition:e.target.value}})}/></Field>
-                      <Field label="内圆角表达式"><input value={op.argumentExpressions.insideRadius ?? ''} onChange={(e) => editOp(i,{argumentExpressions:{...op.argumentExpressions,insideRadius:e.target.value}})}/></Field>
-                      <Field label="K因子"><NumberInput unit="" step={0.01} value={Number(op.arguments.kFactor ?? 0.42)} onChange={(value) => editOp(i,{arguments:{...op.arguments,kFactor:value}})}/></Field>
-                    </div>
-                    <small>按照内圆角、厚度和K因子计算中性层折弯展开量；当前实现单条贯穿宽度的直线折弯，保持单一实体。</small>
-                  </div>
-                )}
-                <Field
-                  label="参数表达式"
-                  hint="格式：参数名=表达式；多个用逗号分隔"
-                >
-                  <input
-                    value={Object.entries(op.argumentExpressions)
-                      .map(([k, v]) => `${k}=${v}`)
-                      .join(", ")}
-                    onChange={(e) =>
-                      editOp(i, {
-                        argumentExpressions: Object.fromEntries(
-                          csv(e.target.value)
-                            .map((item) => {
-                              const [k, ...rest] = item.split("=");
-                              return [k.trim(), rest.join("=").trim()];
-                            })
-                            .filter(([k, v]) => k && v),
-                        ),
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="条件">
-                  <input
-                    value={op.conditionExpression}
-                    onChange={(e) =>
-                      editOp(i, { conditionExpression: e.target.value })
-                    }
-                  />
-                </Field>
-              </div>
-              <button
-                className="delete-icon"
-                title="删除算子"
-                onClick={() =>
-                  setRecipe({
-                    operations: recipe.operations.filter((_, n) => n !== i),
-                  })
-                }
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <section className="semantic-face-contract panel">
-          <PanelTitle
-            icon={Box}
-            title="几何语义面"
-            subtitle="面 ID 是制造特征的唯一定位入口；这里定义局部 U/V 的起止边界与跨度，供端距和阵列排布直接引用。"
-            actions={<button className="mini-btn" onClick={addSemanticFace}><Plus size={14} />新增语义面</button>}
-          />
-          {recipe.semanticFaces.map((face, index) => (
-            <div className="semantic-face-row" key={`${face.id}-${index}`}>
-              <Field label="稳定 ID"><input value={face.id} onChange={(e) => editSemanticFace(index, { id: e.target.value })} /></Field>
-              <Field label="显示名称"><input value={face.label} onChange={(e) => editSemanticFace(index, { label: e.target.value })} /></Field>
-              <Field label="局部坐标系"><select value={face.hostFrame} onChange={(e) => editSemanticFace(index, { hostFrame: e.target.value as GeometryRecipe["semanticFaces"][number]["hostFrame"] })}><option value="negativeY">−Y（U=X，V=Z）</option><option value="positiveY">+Y（U=X，V=Z）</option><option value="negativeX">−X（U=Y，V=Z）</option><option value="positiveX">+X（U=Y，V=Z）</option><option value="negativeZ">−Z（U=X，V=Y）</option><option value="positiveZ">+Z（U=X，V=Y）</option></select></Field>
-              <Field label="U 起始边界"><code className="code-input"><input list="feature-parameter-options" value={face.uStartExpression} onChange={(e) => editSemanticFace(index, { uStartExpression: e.target.value })} /></code></Field>
-              <Field label="U 跨度"><code className="code-input"><input list="feature-parameter-options" value={face.uSpanExpression} onChange={(e) => editSemanticFace(index, { uSpanExpression: e.target.value })} /></code></Field>
-              <Field label="V 起始边界"><code className="code-input"><input list="feature-parameter-options" value={face.vStartExpression} onChange={(e) => editSemanticFace(index, { vStartExpression: e.target.value })} /></code></Field>
-              <Field label="V 跨度"><code className="code-input"><input list="feature-parameter-options" value={face.vSpanExpression} onChange={(e) => editSemanticFace(index, { vSpanExpression: e.target.value })} /></code></Field>
-              <button className="delete-icon" title="删除语义面" onClick={() => setRecipe({ semanticFaces: recipe.semanticFaces.filter((_, n) => n !== index) })}><Trash2 size={15} /></button>
-            </div>
-          ))}
-        </section>
-        <label className="confirm-box">
-          <input
-            type="checkbox"
-            checked={recipe.reviewed}
-            onChange={(e) => setRecipe({ reviewed: e.target.checked })}
-          />
-          <span>
-            <strong>几何配方已复核</strong>
-            <small>确认算子顺序、引用、条件和语义输出。</small>
-          </span>
-        </label>
-      </div>
-      {pendingProfileMode && (
-        <div
-          className="dialog-scrim"
-          role="presentation"
-          onPointerDown={() => setPendingProfileMode(null)}
-        >
-          <section
-            className="profile-mode-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="profile-mode-title"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <div className="dialog-icon">
-              <Layers3 size={20} />
-            </div>
-            <div>
-              <h2 id="profile-mode-title">
-                切换为
-                {pendingProfileMode === "closedRegion"
-                  ? "单闭合区域"
-                  : pendingProfileMode === "multiRegion"
-                    ? "管材／多环多腔区域"
-                    : "中心线＋厚度薄壁"}
-              </h2>
-              <p>
-                建模模式定义如何解释截面区域。重建会整体替换图元、约束、尺寸和区域，旧模式的水平／垂直尺寸不会残留。
-              </p>
-            </div>
-            <div className="mode-choice-grid">
-              <button onClick={() => applyProfileMode(false)}>
-                <Copy size={17} />
-                <strong>仅切换解释</strong>
-                <span>保留全部图元、约束和尺寸，适合已有草图需手工迁移时使用。</span>
-              </button>
-              <button
-                className="recommended"
-                onClick={() => applyProfileMode(true)}
-              >
-                <RefreshCw size={17} />
-                <strong>重建并清理旧约束</strong>
-                <span>
-                  {pendingProfileMode === "multiRegion"
-                    ? "用常用矩形管外环、内环和壁厚关系替换现有草图。"
-                    : pendingProfileMode === "centerlineThinWall"
-                      ? "用可编辑的开口 C 形中心线路径替换现有草图。"
-                      : "用实心闭合外环替换现有草图。"}
-                </span>
-                <b>推荐用于初始建模</b>
-              </button>
-            </div>
-            <button
-              className="dialog-cancel"
-              onClick={() => setPendingProfileMode(null)}
-            >
-              取消
-            </button>
-          </section>
-        </div>
-      )}
+      <GeometryRecipePanel
+        draft={draft}
+        recipe={recipe}
+        setRecipe={setRecipe}
+        editOp={editOp}
+        addOp={addOp}
+        editSemanticFace={editSemanticFace}
+        addSemanticFace={addSemanticFace}
+        pendingProfileMode={pendingProfileMode}
+        setPendingProfileMode={setPendingProfileMode}
+        applyProfileMode={applyProfileMode}
+        operators={OPERATORS}
+        operatorStatus={operatorStatus}
+        operatorDefaults={operatorDefaults}
+      />
     </>
   );
 }
