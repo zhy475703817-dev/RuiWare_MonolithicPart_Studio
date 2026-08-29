@@ -56,7 +56,7 @@ const previousEndpointTarget = (
         point: [session.lastPoint.x, session.lastPoint.y],
         createsConstraint: true,
       }
-    : session.firstPoint.snapTarget;
+    : null;
 
 const closesAtFirstPoint = (
   session: SketchPolylineSession,
@@ -73,7 +73,7 @@ export function advanceSketchPolyline(
   point: SketchDrawPoint,
   sketch: Sketch,
   createLineId: () => string,
-  createConstraintId: () => string,
+  _createConstraintId: () => string,
 ): SketchPolylineAdvance {
   if (!session) {
     const anchor = copyPoint(point);
@@ -120,16 +120,19 @@ export function advanceSketchPolyline(
     points: [],
   };
   const entities = [...sketch.entities, entity];
+  const segmentIds = [...session.segmentIds, lineId];
+  const closed = closesAtFirstPoint(session, point);
+  // Keep the polyline's own segment joints parametric. The newly drawn end
+  // uses free-snap only; snapping to another object's endpoint never creates
+  // an automatic constraint.
   const constraints = buildLineSnapCoincidentConstraints(
     lineId,
     previousEndpointTarget(session),
-    point.snapTarget,
+    closed ? point.snapTarget : null,
     entities,
     sketch.constraints,
-    createConstraintId,
+    _createConstraintId,
   );
-  const segmentIds = [...session.segmentIds, lineId];
-  const closed = closesAtFirstPoint(session, point);
   const nextSession: SketchPolylineSession = {
     firstPoint: session.firstPoint,
     lastPoint: copyPoint(point),
@@ -147,6 +150,8 @@ export function advanceSketchPolyline(
     sketch: {
       ...sketch,
       entities,
+      // Drawing endpoint free-snap is positional assistance only. Explicit
+      // constraints remain available through the constraint tools.
       constraints: [...sketch.constraints, ...constraints],
       constraintsReviewed: false,
     },

@@ -3809,6 +3809,42 @@ code {
   fill: #e85d04;
   stroke: #fff;
 }
+.endpoint-connection-preview {
+  pointer-events: none;
+}
+.endpoint-connection-preview line {
+  stroke: #d04a00;
+  stroke-width: 1.6;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+.endpoint-connection-preview circle {
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.endpoint-connection-source {
+  fill: rgba(232, 93, 4, 0.18);
+  stroke: #d04a00;
+  stroke-width: 2;
+}
+.endpoint-connection-target {
+  fill: #fff;
+  stroke: #117a65;
+  stroke-width: 2;
+}
+.endpoint-connection-preview text {
+  fill: #9b3f08;
+  stroke: #fff;
+  stroke-width: 2.4px;
+  paint-order: stroke fill;
+  font: 700 8px "Cascadia Code", monospace;
+}
+.semantic-sketch-canvas.move-mode {
+  cursor: grab;
+}
+.semantic-sketch-canvas.move-mode.dragging-entity {
+  cursor: grabbing;
+}
 .region-guidance > div {
   display: flex;
   flex-direction: column;

@@ -45,6 +45,8 @@ type Props = {
   onUndo: () => void;
   onRedo: () => void;
   onMove: () => void;
+  moveMode?: boolean;
+  onToggleMoveMode?: () => void;
   onCopy: () => void;
   onPaste: () => void;
   onDelete: () => void;
@@ -79,6 +81,8 @@ export function SketchWorkspaceToolbar({
   onUndo,
   onRedo,
   onMove,
+  moveMode = false,
+  onToggleMoveMode,
   onCopy,
   onPaste,
   onDelete,
@@ -179,12 +183,22 @@ export function SketchWorkspaceToolbar({
         </button>
         <span className="toolbar-divider" />
         <button
+          disabled={solveCase !== "nominal"}
+          className={moveMode ? "active" : ""}
+          aria-pressed={moveMode}
+          onClick={() => (onToggleMoveMode ? onToggleMoveMode() : onMove())}
+          title="拖动图元主体并在端点接近时自动吸附连接"
+        >
+          <Move size={14} />
+          移动
+        </button>
+        <button
           disabled={!selectedCount || solveCase !== "nominal"}
           onClick={onMove}
           title="按下方偏移量移动选中图元"
         >
-          <Move size={14} />
-          移动
+          <MoveHorizontal size={14} />
+          偏移移动
         </button>
         <button
           disabled={!selectedCount || solveCase !== "nominal"}
