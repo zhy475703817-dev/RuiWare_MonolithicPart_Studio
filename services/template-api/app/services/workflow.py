@@ -5,10 +5,10 @@ from typing import Any
 
 from template_core.lowering import lower_to_plan
 from template_core.metamodel import Scalar, TemplateEvaluation
-from template_core.models import CompileResult, PublishedVersion, StageValidation, TemplateDraft
+from template_core.models import CompileResult, Diagnostic, PublishedVersion, StageValidation, TemplateDraft
 from template_core.rules import evaluate_template
 from template_core.sketch_solver import solve_semantic_sketch
-from template_core.stages import STAGE_ORDER
+from template_core.stages import STAGE_ORDER, sweep_preview_admission
 
 from ..ai_actions import AIModelProposal, ProposalError, apply_proposal, proposal_diff
 from ..config import ARTIFACT_ROOT, ATTACHMENT_ROOT
@@ -37,13 +37,26 @@ def compile_template_draft(repository: Repository, draft_id: str, artifact_root:
     nominal = nominal_material_context(repository, draft)
     if nominal is None:
         raise api_error("COMPILE_MISSING_MATERIAL", status_code=422)
-    result = run_cad_worker_service(lower_to_plan(draft, {"record": nominal["material"], "provenance": nominal["provenance"]}), artifact_root)
+    snapshot = {"record": nominal["material"], "provenance": nominal["provenance"]}
+    plan = lower_to_plan(draft, snapshot)
+    admission = sweep_preview_admission(draft, snapshot)
+    previous = repository.latest_compile(draft.id)
+    if admission:
+        result = CompileResult(success=False, inputHash=plan.inputHash, diagnostics=[*plan.diagnostics, *(Diagnostic(severity="error", code=item["code"], path=item["path"], message=item["message"]) for item in admission)])
+    else:
+        result = run_cad_worker_service(plan, artifact_root)
+    if not result.success and previous is not None:
+        result = result.model_copy(update={"artifacts": previous.artifacts, "metrics": previous.metrics})
     repository.record_compile(draft.id, result.model_dump())
     return result
 
 
 def compile_preview(request_draft: TemplateDraft, material_snapshot: dict[str, Any], artifact_root: Path = ARTIFACT_ROOT) -> CompileResult:
-    return run_cad_worker_service(lower_to_plan(request_draft, material_snapshot), artifact_root)
+    plan = lower_to_plan(request_draft, material_snapshot)
+    admission = sweep_preview_admission(request_draft, material_snapshot)
+    if admission:
+        return CompileResult(success=False, inputHash=plan.inputHash, diagnostics=[*plan.diagnostics, *(Diagnostic(severity="error", code=item["code"], path=item["path"], message=item["message"]) for item in admission)])
+    return run_cad_worker_service(plan, artifact_root)
 
 
 def evaluate_template_draft(

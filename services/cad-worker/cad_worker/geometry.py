@@ -28,6 +28,7 @@ from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Vec
 
 from template_core.models import Artifact, CanonicalPlan, CompileResult, Diagnostic, GeometryMetrics
+from template_core.sweep_frames import path_frames
 
 
 def _box(x: float, y: float, z: float, dx: float, dy: float, dz: float):
@@ -98,15 +99,43 @@ def _vector_3d(u: float, v: float, plane: str = "XY") -> gp_Dir:
     }[plane]
 
 
+def _profile_frame(origin: tuple[float, float, float], tangent: tuple[float, float, float]):
+    """Build a stable, minimum-twist initial frame perpendicular to the spine."""
+    ox, oy, oz = origin
+    tx, ty, tz = tangent
+    length = math.sqrt(tx * tx + ty * ty + tz * tz)
+    if length <= 1e-9:
+        raise RuntimeError("Sweep path tangent must be non-zero")
+    tx, ty, tz = tx / length, ty / length, tz / length
+    # Keep X as the reference direction where possible; fall back to Y when
+    # the tangent is parallel to X. This is parallel transport with no twist
+    # parameter: the frame is chosen once at the path start and OCCT carries it.
+    rx, ry, rz = (1.0, 0.0, 0.0) if abs(tx) < 0.9 else (0.0, 1.0, 0.0)
+    dot = rx * tx + ry * ty + rz * tz
+    ex, ey, ez = rx - dot * tx, ry - dot * ty, rz - dot * tz
+    norm = math.sqrt(ex * ex + ey * ey + ez * ez)
+    ex, ey, ez = ex / norm, ey / norm, ez / norm
+    # e2 = tangent × e1
+    fx, fy, fz = ty * ez - tz * ey, tz * ex - tx * ez, tx * ey - ty * ex
+    return (ox, oy, oz), (ex, ey, ez), (fx, fy, fz), (tx, ty, tz)
+
+
+def _map_profile_point(u: float, v: float, plane: str, frame, offset: float = 0.0):
+    if frame is None:
+        return _point_3d(u, v, plane, offset)
+    origin, e1, e2, _tangent = frame
+    return gp_Pnt(origin[0] + u * e1[0] + v * e2[0], origin[1] + u * e1[1] + v * e2[1], origin[2] + u * e1[2] + v * e2[2])
+
+
 def _normal_vector(plane: str, length: float) -> gp_Vec:
     return {"XY": gp_Vec(0, 0, length), "XZ": gp_Vec(0, length, 0), "YZ": gp_Vec(length, 0, 0)}[plane]
 
 
-def _primitive_edge(primitive, plane: str = "XY", scale: float = 1.0, offset: float = 0.0):
+def _primitive_edge(primitive, plane: str = "XY", scale: float = 1.0, offset: float = 0.0, frame=None):
     kind = primitive["type"]
     if kind == "line":
         a, b = primitive["start"], primitive["end"]
-        return BRepBuilderAPI_MakeEdge(_point_3d(a["x"] * scale, a["y"] * scale, plane, offset), _point_3d(b["x"] * scale, b["y"] * scale, plane, offset)).Edge()
+        return BRepBuilderAPI_MakeEdge(_map_profile_point(a["x"] * scale, a["y"] * scale, plane, frame, offset), _map_profile_point(b["x"] * scale, b["y"] * scale, plane, frame, offset)).Edge()
     if kind == "arc":
         center, radius = primitive["center"], primitive["radius"]
         start_angle = math.radians(primitive.get("startAngle") or 0)
@@ -124,22 +153,24 @@ def _primitive_edge(primitive, plane: str = "XY", scale: float = 1.0, offset: fl
         else:
             middle_angle = start_angle - (2 * math.pi - ccw) / 2
         points = [
-            _point_3d((center["x"] + radius * math.cos(angle)) * scale, (center["y"] + radius * math.sin(angle)) * scale, plane, offset)
+            _map_profile_point((center["x"] + radius * math.cos(angle)) * scale, (center["y"] + radius * math.sin(angle)) * scale, plane, frame, offset)
             for angle in (start_angle, middle_angle, end_angle)
         ]
         return BRepBuilderAPI_MakeEdge(GC_MakeArcOfCircle(*points).Value()).Edge()
     if kind == "circle":
         center = primitive["center"]
         axis = {"XY": gp_Dir(0, 0, 1), "XZ": gp_Dir(0, -1, 0), "YZ": gp_Dir(1, 0, 0)}[plane]
-        return BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(_point_3d(center["x"] * scale, center["y"] * scale, plane, offset), axis), primitive["radius"] * scale)).Edge()
+        circle_origin = _map_profile_point(center["x"] * scale, center["y"] * scale, plane, frame, offset)
+        circle_axis = gp_Dir(*(frame[3] if frame is not None else (axis.X(), axis.Y(), axis.Z())))
+        return BRepBuilderAPI_MakeEdge(gp_Circ(gp_Ax2(circle_origin, circle_axis), primitive["radius"] * scale)).Edge()
     raise ValueError(f"Unsupported sketch primitive: {kind}")
 
 
-def _region_wire(sketch, region, scale: float = 1.0, offset: float = 0.0):
+def _region_wire(sketch, region, scale: float = 1.0, offset: float = 0.0, frame=None):
     primitives = {item["id"]: item for item in sketch["primitives"] if not item.get("construction")}
     wire_builder = BRepBuilderAPI_MakeWire()
     for reference in region["boundaryRefs"]:
-        wire_builder.Add(_primitive_edge(primitives[reference], sketch.get("plane", "XY"), scale, offset))
+        wire_builder.Add(_primitive_edge(primitives[reference], sketch.get("plane", "XY"), scale, offset, frame))
     if not wire_builder.IsDone():
         raise RuntimeError(f"Sketch region wire failed: {region['id']}")
     return wire_builder.Wire()
@@ -202,12 +233,44 @@ def _parse_points(value: str) -> list[tuple[float, float, float]]:
     return points
 
 
-def _sweep_region(sketch, region, spine):
-    operation = BRepOffsetAPI_MakePipeShell(spine)
-    operation.SetTransitionMode(BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner)
-    operation.Add(_region_wire(sketch, region), False, True)
+def _sweep_region(sketch, region, points, frames):
+    """Sweep one material region through station-specific section frames.
+
+    PipeShell carries a single profile orientation internally.  Supplying a
+    wire at every path station through ThruSections makes the requested
+    orientation mode explicit while retaining RightCorner transitions.
+    """
+    # Prefer PipeShell so OCCT can apply the requested RightCorner transition;
+    # adding a section wire at every station also makes the frame explicit.
+    wire_builder = BRepBuilderAPI_MakeWire()
+    for start, end in zip(points, points[1:]):
+        wire_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start), gp_Pnt(*end)).Edge())
+    spine = wire_builder.Wire()
+    try:
+        pipe = BRepOffsetAPI_MakePipeShell(spine)
+        pipe.SetTransitionMode(BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner)
+        for frame in frames:
+            pipe.Add(_region_wire(sketch, region, frame=frame), False, True)
+        pipe.Build()
+        if pipe.IsDone() and pipe.MakeSolid():
+            candidate = pipe.Shape()
+            # OCCT can report a successful PipeShell build while leaving an
+            # invalid/non-manifold shape at a sharp corner when station
+            # profiles use different orientation frames.  Never pass that
+            # shape downstream: use the deterministic sectioned fallback.
+            if BRepCheck_Analyzer(candidate).IsValid():
+                return candidate
+    except Exception:
+        # Some OCCT versions reject multiple profile wires on a polyline.  The
+        # deterministic ThruSections fallback retains the same station frames.
+        pass
+    operation = BRepOffsetAPI_ThruSections(True, False, 1e-6)
+    operation.SetMaxDegree(8)
+    operation.CheckCompatibility(True)
+    for frame in frames:
+        operation.AddWire(_region_wire(sketch, region, frame=frame))
     operation.Build()
-    if not operation.IsDone() or not operation.MakeSolid():
+    if not operation.IsDone():
         raise RuntimeError(f"Sweep construction failed for region {region['id']}")
     return operation.Shape()
 
@@ -215,19 +278,29 @@ def _sweep_region(sketch, region, spine):
 def _sketch_sweep(arguments):
     sketch = arguments["sketch"]
     points = _parse_points(str(arguments.get("pathPoints", "")))
+    supported = {"profileAnchor": "sketch.origin", "orientationMode": "minimumTwist", "scaleMode": "constant", "twistMode": "none", "cornerMode": "right"}
+    for key, expected in supported.items():
+        if arguments.get(key, expected) != expected:
+            if key == "orientationMode" and arguments.get(key) in {"followPath", "fixedWorld"}:
+                continue
+            raise RuntimeError(f"Unsupported sweep {key}: {arguments.get(key)}")
     wire_builder = BRepBuilderAPI_MakeWire()
     for start, end in zip(points, points[1:]):
         wire_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start), gp_Pnt(*end)).Edge())
     if not wire_builder.IsDone():
         raise RuntimeError("Sweep path wire construction failed")
     spine = wire_builder.Wire()
-    additive = [_sweep_region(sketch, region, spine) for region in sketch["regions"] if region["operation"] == "add"]
+    try:
+        frames = path_frames(points, str(arguments.get("orientationMode", "minimumTwist")))
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
+    additive = [_sweep_region(sketch, region, points, frames) for region in sketch["regions"] if region["operation"] == "add"]
     if not additive:
         raise RuntimeError("Sweep requires at least one additive region")
     result = _fuse(*additive)
     for region in sketch["regions"]:
         if region["operation"] == "subtract":
-            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, spine))
+            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, points, frames))
             cut.Build()
             if not cut.IsDone():
                 raise RuntimeError(f"Sweep inner-region subtraction failed for {region['id']}")

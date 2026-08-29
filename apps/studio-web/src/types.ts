@@ -14,6 +14,7 @@ export type ManufacturingClassification = {
   secondaryProcessIds: string[];
   reviewed: boolean;
 };
+export type GeometryOperationDefaults = Pick<GeometryRecipe["operations"][number], "arguments" | "argumentExpressions" | "sourceRefs" | "profileAnchor" | "orientationMode" | "scaleMode" | "twistMode" | "cornerMode">;
 export type RegistryOption = {
   id: string;
   label: string;
@@ -291,6 +292,7 @@ export type SweepPathSketch = {
   geometry: SweepPathGeometry[];
   constraints: SweepPathConstraint[];
   startPointId: string | null;
+  startEndpointRef?: { geometryId: string; endpoint: "start" | "end" } | null;
   status: SweepPathStatus;
   generationStatus?: "idle" | "generating" | "failed" | "succeeded";
   diagnostics: Diagnostic[];
@@ -318,6 +320,12 @@ export type GeometryRecipe = {
     conditionExpression: string;
     semanticOutputs: string[];
     pathSketchId?: string | null;
+    profileSketchId?: string | null;
+    profileAnchor?: string;
+    orientationMode?: "followPath" | "fixedWorld" | "minimumTwist";
+    scaleMode?: "constant";
+    twistMode?: "none";
+    cornerMode?: "right";
   }[];
   semanticFaces: {
     id: string;
@@ -585,6 +593,7 @@ export type Diagnostic = {
   path: string;
   message: string;
   suggestion?: string;
+  geometryIds?: string[];
 };
 export type Artifact = {
   kind: "step" | "stl" | "plan" | "diagnostics" | "semanticMap";

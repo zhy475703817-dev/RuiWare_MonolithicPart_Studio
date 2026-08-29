@@ -4227,6 +4227,12 @@ code {
 .sweep-path-diagnostics div { display: flex; gap: 8px; }
 .sweep-path-diagnostics strong { min-width: 28px; color: #be5a50; }
 .sweep-path-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.preview-admission-warning { display: block; margin-top: 6px; color: #a45c0a; }
+.sweep-review-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 0; padding: 10px 12px; border: 1px solid #d8e1e5; border-radius: 8px; background: #f8fafb; color: #425963; font-size: 12px; }
+.sweep-review-summary .compile-status { color: #28734f; }
+.sweep-review-summary .compile-status.generating { color: #a45c0a; }
+.sweep-review-summary .compile-status.failed, .sweep-review-summary .compile-stale { color: #be5a50; }
+.viewer-stale-banner { position: absolute; z-index: 2; top: 10px; left: 10px; right: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(255,245,225,.95); color: #8a5a12; font-size: 12px; }
 .sweep-path-footnote { margin-top: 8px; text-align: right; }
 .mode-choice-grid {
   grid-column: 1 / 3;

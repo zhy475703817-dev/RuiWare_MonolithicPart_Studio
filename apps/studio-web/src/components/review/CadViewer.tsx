@@ -23,7 +23,7 @@ function Model({ url }: { url: string }) {
  * 组件只消费编译结果，不参与 CAD 计算；没有 STL 产物时显示引导状态，
  * 有产物时提供旋转、缩放和平移能力。
  */
-export function CadViewer({ result }: { result: CompileResult | null }) {
+export function CadViewer({ result, stale = false }: { result: CompileResult | null; stale?: boolean }) {
   const stl = result?.artifacts.find((item) => item.kind === "stl");
   if (!stl) {
     return (
@@ -36,6 +36,7 @@ export function CadViewer({ result }: { result: CompileResult | null }) {
   }
   return (
     <div className="cad-viewer">
+      {stale && <div className="viewer-stale-banner">当前显示的是上一次成功生成的预览；它对应的扫掠输入已发生变化。</div>}
       <Canvas camera={{ position: [160, 140, 220], fov: 42 }} shadows>
         <color attach="background" args={["#f5f6f7"]} />
         <ambientLight intensity={1.7} />

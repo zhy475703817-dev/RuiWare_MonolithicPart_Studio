@@ -186,6 +186,7 @@ import {
   resolveSketchLineInference,
   type SketchLineInference,
 } from "./features/sketch/sketchLineInference";
+import { validateSweepPathTopology } from "./features/sketch/sweepPathTopology";
 import type {
   CompileResult,
   Draft,
@@ -294,7 +295,7 @@ const operatorStatus = (operator: string) =>
   OPERATORS.find(([id]) => id === operator)?.[2] || "unknown";
 const operatorDefaults = (operator: string): Pick<GeometryRecipe["operations"][number], "arguments" | "argumentExpressions" | "sourceRefs"> => {
   if (operator === "solid.revolve") return { sourceRefs:["sketch.section.main"], arguments:{axisOriginU:-75,axisOriginV:0,axisDirectionU:0,axisDirectionV:1,angleDegrees:360}, argumentExpressions:{} };
-  if (operator === "solid.sweep") return { sourceRefs:["sketch.section.main","path.main"], arguments:{pathPoints:"0:0:0;0:0:length"}, argumentExpressions:{} };
+  if (operator === "solid.sweep") return { sourceRefs:["sketch.section.main","path.main"], arguments:{pathPoints:"0:0:0;0:0:length"}, argumentExpressions:{}, profileAnchor:"sketch.origin", orientationMode:"minimumTwist", scaleMode:"constant", twistMode:"none", cornerMode:"right" } as any;
   if (operator === "solid.loft") return { sourceRefs:["sketch.section.main"], arguments:{stations:"0:1;length:0.75"}, argumentExpressions:{} };
   if (operator === "sheet.bend") return { sourceRefs:[], arguments:{bendAngleDegrees:90,kFactor:0.42}, argumentExpressions:{length:"length",width:"sectionWidth",thickness:"thickness",bendPosition:"length * 0.6",insideRadius:"thickness"} };
   return {sourceRefs:["sketch.section.main"],arguments:{},argumentExpressions:{length:"length"}};
@@ -319,6 +320,7 @@ const createEmptySweepPath = (): SweepPathSketch => ({
   geometry: [],
   constraints: [],
   startPointId: null,
+  startEndpointRef: null,
   status: "empty",
   generationStatus: "idle",
   diagnostics: [],
@@ -378,9 +380,8 @@ const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): Sweep
     points: item.points || [],
   })),
   constraints: sketch.constraints.map((item) => ({ ...item })),
-  startPointId: previous.startPointId && sketch.entities.some((item) => item.id === previous.startPointId)
-    ? previous.startPointId
-    : sketch.entities[0]?.id || null,
+  startPointId: previous.startPointId && sketch.entities.some((item) => item.id === previous.startPointId) ? previous.startPointId : null,
+  startEndpointRef: previous.startEndpointRef && sketch.entities.some((item) => item.id === previous.startEndpointRef?.geometryId) ? previous.startEndpointRef : null,
   status: "editing",
   generationStatus: "idle",
   diagnostics: [],
@@ -393,27 +394,22 @@ const sweepGeometryPoints = (geometry: SweepPathGeometry): [number, number][] =>
 };
 
 const sweepPathDiagnostics = (path: SweepPathSketch) => {
-  const diagnostics: SweepPathSketch["diagnostics"] = [];
-  if (!path.geometry.length) {
-    diagnostics.push({ severity: "error", code: "SWEEP_PATH_EMPTY", path: "sweepPath.geometry", message: "请至少绘制一条扫掠路径图元。" });
-    return diagnostics;
-  }
+  const result = validateSweepPathTopology(path);
   const unsupported = path.geometry.filter((item) => !["line", "arc"].includes(item.geometryType));
-  if (unsupported.length) diagnostics.push({ severity: "warning", code: "SWEEP_PATH_UNSUPPORTED_GEOMETRY", path: "sweepPath.geometry", message: `当前 CAD 扫掠算子暂不支持：${unsupported.map((item) => item.geometryType).join("、")}；图元仍会保留，可在扫掠验证阶段处理。` });
-  const pathEntities = path.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc");
-  for (const item of pathEntities) {
-    const points = sweepGeometryPoints(item);
-    if (points.length < 2) diagnostics.push({ severity: "error", code: "SWEEP_PATH_GEOMETRY_INVALID", path: `sweepPath.geometry.${item.id}`, message: "路径线段或圆弧必须包含有效端点。" });
-  }
-  return diagnostics;
+  if (unsupported.length) result.diagnostics.push({ severity: "warning", code: "SWEEP_PATH_UNSUPPORTED_GEOMETRY", path: "sweepPath.geometry", message: `当前 CAD 扫掠算子暂不支持：${unsupported.map((item) => item.geometryType).join("、")}；图元仍会保留，可在扫掠验证阶段处理。` });
+  return result.diagnostics;
 };
 
 const serializeSweepPathPoints = (path: SweepPathSketch) => {
+  const topology = validateSweepPathTopology(path);
+  const byId = new Map(path.geometry.map((item) => [item.id, item]));
   const points: [number, number][] = [];
-  for (const geometry of path.geometry) {
-    for (const point of sweepGeometryPoints(geometry)) {
-      if (!points.length || points[points.length - 1][0] !== point[0] || points[points.length - 1][1] !== point[1]) points.push(point);
-    }
+  for (const item of topology.ordered) {
+    const geometry = byId.get(item.geometryId);
+    if (!geometry) continue;
+    const segment = sweepGeometryPoints(geometry);
+    const ordered = item.forward ? segment : [...segment].reverse();
+    for (const point of ordered) if (!points.length || Math.hypot(points[points.length - 1][0] - point[0], points[points.length - 1][1] - point[1]) > 0.05) points.push(point);
   }
   return points.map(([x, y]) => `${x}:0:${y}`).join(";");
 };
@@ -4222,8 +4218,9 @@ function GeometryStage({
               operation.operator === "solid.sweep"
                 ? {
                     ...operation,
+                    profileSketchId: "sketch.section.main",
                     pathSketchId: pathId,
-                    sourceRefs: Array.from(new Set([...operation.sourceRefs, pathId])),
+                    sourceRefs: ["sketch.section.main", pathId],
                     arguments: { ...operation.arguments, ...(pathPoints ? { pathPoints } : {}) },
                   }
                 : operation,
@@ -4233,6 +4230,7 @@ function GeometryStage({
               sweepPath: nextPath,
               geometryRecipe: {
                 ...recipe,
+                sketches: Array.from(new Set(["sketch.section.main", ...recipe.sketches])),
                 paths: Array.from(new Set([...recipe.paths, pathId])),
                 operations: nextOperations,
                 reviewed: false,
@@ -4268,6 +4266,7 @@ function SweepPathDialog({
     setWorkingPath(sketchToPath(next.sketch, workingPath));
   };
   const flow = useGeometryEditFlow({ draft: editorDraft, change: changeEditorDraft, showError });
+  const topology = useMemo(() => validateSweepPathTopology(workingPath), [workingPath]);
   const diagnostics = useMemo(() => sweepPathDiagnostics(workingPath), [workingPath]);
   const hasErrors = diagnostics.some((item) => item.severity === "error");
   const dirty = JSON.stringify(initialPathRef.current.geometry) !== JSON.stringify(workingPath.geometry)
@@ -4293,7 +4292,7 @@ function SweepPathDialog({
   }, [cancel, flow.tool]);
   const confirm = () => {
     if (hasErrors || !workingPath.geometry.length) return;
-    onConfirm({ ...workingPath, status: "confirmed", diagnostics, generationStatus: "idle" });
+    onConfirm({ ...workingPath, startEndpointRef: topology.startEndpointRef, status: "confirmed", diagnostics, generationStatus: "idle" });
   };
   const pathStatus = hasErrors ? "路径有错误" : workingPath.geometry.length ? "路径有效" : "未定义";
   return (
@@ -4371,8 +4370,9 @@ function SweepPathDialog({
           selectedEntity={flow.selectedEntity || "未选择"}
         />
         <div className="sweep-path-status-row"><span className={hasErrors ? "status-bad" : "status-good"}>{hasErrors ? <CircleAlert size={14} /> : <Check size={14} />} {pathStatus}</span><span>{workingPath.geometry.length} 个路径图元 · {workingPath.constraints.length} 条约束{dirty ? " · 有未确认修改" : ""}</span></div>
-        {diagnostics.length > 0 && <div className="sweep-path-diagnostics">{diagnostics.map((item) => <div key={`${item.code}-${item.path}`}><strong>{item.severity === "error" ? "错误" : "提示"}</strong><span>{item.message}</span></div>)}</div>}
-        <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{workingPath.startPointId || "首个路径图元"} · 路径方向按图元顺序连接</div>
+        {diagnostics.length > 0 && <div className="sweep-path-diagnostics">{diagnostics.map((item) => <div key={`${item.code}-${item.path}`}><strong>{item.severity === "error" ? "错误" : "提示"}</strong><code>{item.code}</code><span>{item.message}</span></div>)}</div>}
+        <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{topology.startEndpointRef ? `${topology.startEndpointRef.geometryId}（${topology.startEndpointRef.endpoint === "start" ? "起点" : "终点"}）` : "未定义"} · 第一段方向 →（按连接图推导）</div>
+        <div className="sweep-path-start-picks">{workingPath.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc").map((item) => <span key={item.id}><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "start" }, startPointId: item.id }))}>{item.id} 起点</button><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "end" }, startPointId: item.id }))}>{item.id} 终点</button></span>)}</div>
         <footer className="sweep-path-dialog-actions"><button className="secondary-btn" onClick={cancel}>取消</button><button className="secondary-btn" onClick={cancel}>关闭</button><button className="primary-btn" disabled={hasErrors || !workingPath.geometry.length} onClick={confirm}><Check size={15} />确认路径</button></footer>
         <small className="sweep-path-footnote">路径编辑器保留点、直线、连续折线、矩形、圆和圆弧等完整编辑能力；当前 CAD Sweep 算子对不支持的路径图元会在验证阶段提示。</small>
       </section>
@@ -4387,6 +4387,8 @@ export default function App() {
     stage,
     validation,
     compile,
+    compileStatus,
+    compileStale,
     versions,
     materials,
     registry,
@@ -4552,6 +4554,9 @@ export default function App() {
                 run={runCompile}
                 busy={busy}
                 complete={completeStage}
+                draft={draft}
+                compileStatus={compileStatus}
+                compileStale={compileStale}
               />
             )}
             {stage === "admission" && (

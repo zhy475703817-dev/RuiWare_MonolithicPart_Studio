@@ -173,12 +173,18 @@ class SweepPathConstraint(BaseModel):
     driving: bool = True
 
 
+class SweepPathEndpointRef(BaseModel):
+    geometryId: str
+    endpoint: Literal["start", "end"]
+
+
 class SweepPathSketch(BaseModel):
     id: str = "path.main"
     plane: Literal["XY", "XZ", "YZ"] = "XY"
     geometry: list[SweepPathGeometry] = Field(default_factory=list)
     constraints: list[SweepPathConstraint] = Field(default_factory=list)
     startPointId: str | None = None
+    startEndpointRef: SweepPathEndpointRef | None = None
     status: Literal["empty", "editing", "valid", "invalid", "confirmed"] = "empty"
     generationStatus: Literal["idle", "generating", "failed", "succeeded"] = "idle"
     diagnostics: list[dict[str, Any]] = Field(default_factory=list)

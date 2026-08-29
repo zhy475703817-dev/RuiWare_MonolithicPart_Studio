@@ -176,6 +176,12 @@ class GeometryOperationDefinition(BaseModel):
     conditionExpression: str = "True"
     semanticOutputs: list[str] = Field(default_factory=list)
     pathSketchId: str | None = None
+    profileSketchId: str | None = None
+    profileAnchor: str = "sketch.origin"
+    orientationMode: Literal["followPath", "fixedWorld", "minimumTwist"] = "minimumTwist"
+    scaleMode: Literal["constant"] = "constant"
+    twistMode: Literal["none"] = "none"
+    cornerMode: Literal["right"] = "right"
 
 
 class SemanticFaceDefinition(BaseModel):

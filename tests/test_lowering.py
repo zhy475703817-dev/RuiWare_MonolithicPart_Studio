@@ -86,3 +86,28 @@ def test_confirmed_sweep_path_uses_line_endpoints_for_worker_points() -> None:
 
     sweep = next(item for item in plan.operations if item.operator == "solid.sweep")
     assert sweep.arguments["pathPoints"] == "0.0:0.0:0.0;0.0:0.0:125.0"
+
+
+def test_sweep_lowering_carries_follow_configuration_and_start_direction() -> None:
+    value = TemplateDraft(name="path follow config")
+    operation = value.geometryRecipe.operations[0]
+    operation.operator = "solid.sweep"
+    operation.profileSketchId = "sketch.section.main"
+    operation.pathSketchId = "path.main"
+    operation.sourceRefs = ["sketch.section.main", "path.main"]
+    operation.arguments = {"pathPoints": "0:0:0;0:0:1"}
+    operation.argumentExpressions = {}
+    value.geometryRecipe.paths = ["path.main"]
+    value.sweepPath = SweepPathSketch.model_validate({
+        "id": "path.main", "status": "confirmed",
+        "startEndpointRef": {"geometryId": "path.edge", "endpoint": "end"},
+        "geometry": [{"id": "path.edge", "geometryType": "line", "start": [0, 0], "end": [125, 0]}],
+    })
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+    sweep = next(item for item in plan.operations if item.operator == "solid.sweep")
+    assert sweep.arguments["profileAnchor"] == "sketch.origin"
+    assert sweep.arguments["orientationMode"] == "minimumTwist"
+    assert sweep.arguments["scaleMode"] == "constant"
+    assert sweep.arguments["twistMode"] == "none"
+    assert sweep.arguments["cornerMode"] == "right"
+    assert sweep.arguments["pathPoints"].startswith("125.0:0.0:0.0")

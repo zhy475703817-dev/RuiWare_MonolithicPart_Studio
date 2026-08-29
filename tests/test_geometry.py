@@ -6,7 +6,7 @@ from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
 
 from test_lowering import draft
-from template_core.models import TemplateDraft
+from template_core.models import SweepPathGeometry, SweepPathSketch, TemplateDraft
 from template_core.sketch_solver import solve_semantic_sketch
 
 
@@ -163,6 +163,106 @@ def test_sweep_supports_right_corner_polyline_and_hollow_regions(tmp_path) -> No
     assert result.success, result.diagnostics
     assert result.metrics is not None and result.metrics.solidCount == 1
     assert result.metrics.volume > 0
+
+
+def _configured_sketch_sweep(name: str, sketch_payload: dict, path_points: str = "0:0:0;0:0:100") -> TemplateDraft:
+    value = TemplateDraft(name=name)
+    value.sketch = value.sketch.model_validate(sketch_payload)
+    value.geometryRecipe.operations[0].operator = "solid.sweep"
+    value.geometryRecipe.operations[0].argumentExpressions = {}
+    value.geometryRecipe.operations[0].arguments = {"pathPoints": path_points}
+    value.geometryRecipe.operations[0].profileSketchId = "sketch.section.main"
+    value.geometryRecipe.operations[0].pathSketchId = "path.main"
+    value.geometryRecipe.operations[0].sourceRefs = ["sketch.section.main", "path.main"]
+    value.geometryRecipe.paths = ["path.main"]
+    value.sweepPath = SweepPathSketch.model_validate({
+        "id": "path.main", "status": "confirmed",
+        "geometry": [{"id": "path.1", "geometryType": "line", "start": [0, 0], "end": [0, 100]}],
+        "startEndpointRef": {"geometryId": "path.1", "endpoint": "start"},
+    })
+    return value
+
+
+def test_sweep_follows_rectangle_circle_and_hollow_profiles(tmp_path) -> None:
+    rectangle = _configured_sketch_sweep("rectangle follow", {"profileMode": "closedRegion"})
+    circle = _configured_sketch_sweep("circle follow", {
+        "profileMode": "multiRegion",
+        "entities": [{"id": "outer", "role": "section.outer", "geometryType": "circle", "center": [0, 0], "radius": 20}],
+        "constraints": [{"id": "fixed", "constraintType": "fixed", "entityRefs": ["outer"]}],
+        "regions": [{"id": "region.outer", "boundaryRefs": ["outer"], "operation": "add"}],
+    })
+    hollow = _configured_sketch_sweep("hollow follow", {
+        "profileMode": "multiRegion",
+        "entities": [
+            {"id": "outer", "role": "section.outer", "geometryType": "circle", "center": [0, 0], "radius": 20},
+            {"id": "inner", "role": "section.inner", "geometryType": "circle", "center": [0, 0], "radius": 10},
+        ],
+        "constraints": [
+            {"id": "fixed.outer", "constraintType": "fixed", "entityRefs": ["outer"]},
+            {"id": "fixed.inner", "constraintType": "fixed", "entityRefs": ["inner"]},
+            {"id": "concentric", "constraintType": "concentric", "entityRefs": ["outer", "inner"]},
+        ],
+        "regions": [
+            {"id": "region.outer", "boundaryRefs": ["outer"], "operation": "add"},
+            {"id": "region.inner", "boundaryRefs": ["inner"], "operation": "subtract"},
+        ],
+    })
+    for value in (rectangle, circle, hollow):
+        result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+        assert result.success, result.diagnostics
+        assert result.metrics and result.metrics.solidCount == 1 and result.metrics.volume > 0
+
+
+def test_sweep_follows_two_segment_path_without_mutating_profile(tmp_path) -> None:
+    value = _configured_sketch_sweep("corner follow", {"profileMode": "closedRegion"}, "0:0:0;0:0:100;100:0:100")
+    before = value.sketch.model_dump_json()
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+    assert result.success, result.diagnostics
+    assert value.sketch.model_dump_json() == before
+
+
+@pytest.mark.parametrize("orientation", ["followPath", "fixedWorld", "minimumTwist"])
+def test_sweep_orientation_modes_generate_valid_brep(tmp_path, orientation) -> None:
+    value = _configured_sketch_sweep(
+        f"{orientation} orientation",
+        {"profileMode": "closedRegion"},
+        "0:0:0;0:0:100;100:0:100;100:0:200",
+    )
+    value.geometryRecipe.operations[0].orientationMode = orientation
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path / orientation)
+    assert result.success, result.diagnostics
+    assert result.metrics and result.metrics.valid and result.metrics.solidCount == 1
+
+
+@pytest.mark.parametrize("orientation", ["followPath", "fixedWorld"])
+def test_sweep_orientation_falls_back_from_invalid_pipeshell(tmp_path, orientation) -> None:
+    """A sharp two-segment corner must not return PipeShell's invalid shape."""
+    value = _configured_sketch_sweep(
+        f"{orientation} corner fallback",
+        {"profileMode": "closedRegion"},
+        "0:0:0;0:0:600;300:0:600",
+    )
+    value.geometryRecipe.operations[0].orientationMode = orientation
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path / orientation)
+    assert result.success, result.diagnostics
+    assert result.metrics and result.metrics.valid and result.metrics.solidCount == 1
+
+
+def test_sweep_rejects_zero_length_and_reverse_path(tmp_path) -> None:
+    zero = _configured_sketch_sweep("zero segment", {"profileMode": "closedRegion"}, "0:0:0;0:0:0")
+    zero.sweepPath.geometry[0].end = (0, 0)
+    zero_result = execute_plan(lower_to_plan(zero, {"record": {"code": "Q345"}}), tmp_path / "zero")
+    assert not zero_result.success
+    assert any(item.code == "SWEEP_PATH_ZERO_LENGTH" for item in zero_result.diagnostics)
+
+    reverse = _configured_sketch_sweep("reverse segment", {"profileMode": "closedRegion"}, "0:0:0;0:0:100;0:0:0")
+    reverse.sweepPath.geometry = [
+        SweepPathGeometry(id="path.1", geometryType="line", start=(0, 0), end=(0, 100)),
+        SweepPathGeometry(id="path.2", geometryType="line", start=(0, 100), end=(0, 0)),
+    ]
+    reverse_result = execute_plan(lower_to_plan(reverse, {"record": {"code": "Q345"}}), tmp_path / "reverse")
+    assert not reverse_result.success
+    assert any(item.code in {"SWEEP_PATH_SELF_INTERSECTION", "SWEEP_PATH_DUPLICATE_SEGMENT", "SWEEP_PATH_DISCONNECTED"} for item in reverse_result.diagnostics)
 
 
 @pytest.mark.parametrize("plane", ["XY", "XZ", "YZ"])
