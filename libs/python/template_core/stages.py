@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .models import CompileResult, StageCheck, StageName, StageValidation, TemplateDraft
@@ -88,6 +89,32 @@ def _geometry_parameter_references(draft: TemplateDraft) -> tuple[set[str], bool
             face.vSpanExpression,
         ])
     return _collect_expression_names(expressions)
+
+
+def _sweep_path_is_valid(draft: TemplateDraft) -> bool:
+    path = draft.sweepPath
+    if path is None or path.status not in {"valid", "confirmed"} or not path.geometry:
+        return False
+    previous: tuple[float, float] | None = None
+    for geometry in path.geometry:
+        # The path editor can round-trip the complete sketch vocabulary, but
+        # the current CAD Sweep worker accepts only line/arc centerlines.
+        if geometry.geometryType not in {"line", "arc"}:
+            return False
+        points = geometry.points or (
+            [geometry.start, geometry.end]
+            if geometry.start is not None and geometry.end is not None
+            else []
+        )
+        if len(points) < 2:
+            return False
+        first = points[0]
+        if previous is not None and math.dist(previous, first) > 0.05:
+            return False
+        if any(math.dist(a, b) <= 1e-9 for a, b in zip(points, points[1:])):
+            return False
+        previous = points[-1]
+    return True
 
 
 def _validation(stage: StageName, checks: list[StageCheck]) -> StageValidation:
@@ -237,9 +264,25 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
             "sheet.bend": {"length", "width", "thickness", "bendPosition", "bendAngleDegrees", "insideRadius", "kFactor"},
         }.get(operation.operator, set())
         missing_keys = required_keys - keys
+        if operation.operator == "solid.sweep" and draft.sweepPath is not None:
+            path_id = operation.pathSketchId or "path.main"
+            if path_id == draft.sweepPath.id or draft.sweepPath.id in operation.sourceRefs:
+                missing_keys.discard("pathPoints")
+                if not _sweep_path_is_valid(draft):
+                    operator_input_messages.append(f"{operation.id} 的扫掠路径尚未确认或无效")
         if missing_keys:
             operator_inputs_ok = False
             operator_input_messages.append(f"{operation.id} 缺少 {', '.join(sorted(missing_keys))}")
+    sweep_path_ok = True
+    sweep_path_message = "未配置扫掠路径"
+    sweep_operations = [item for item in draft.geometryRecipe.operations if item.operator == "solid.sweep"]
+    if sweep_operations:
+        if draft.sweepPath is not None:
+            sweep_path_ok = _sweep_path_is_valid(draft)
+            sweep_path_message = "扫掠路径已确认" if sweep_path_ok else "路径扫掠需要一条已确认且至少包含一个线段的路径"
+        else:
+            sweep_path_ok = all("pathPoints" in (set(item.arguments) | set(item.argumentExpressions)) for item in sweep_operations)
+            sweep_path_message = "使用算子内置路径点" if sweep_path_ok else "路径扫掠需要一条已确认的扫掠路径"
     checks = [
         StageCheck(id="driving-parameters", label="几何驱动参数完整", passed=expressions_valid, severity="error", path="geometryRecipe.operations", message=f"几何配方表达式无效，或引用了未声明参数：{', '.join(sorted(missing)) or '请检查表达式语法'}。草图驱动参数只需包含轮廓自身使用的参数。"),
         StageCheck(id="semantic-entities", label="语义图元契约完整", passed=semantic_entities_ok, severity="error", path="sketch.entities", message="请为草图图元定义稳定语义名称，并只引用已声明参数。"),
@@ -253,6 +296,7 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="geometry-recipe", label="基础几何配方已建立", passed=bool(draft.geometryRecipe.operations), severity="error", path="geometryRecipe.operations", message="基础几何必须至少包含一个拉伸、旋转、扫掠、放样、钣金或派生操作。"),
         StageCheck(id="geometry-operators-supported", label="几何算子均已实现", passed=operators_supported, severity="error", path="geometryRecipe.operations", message="当前配方包含CAD内核尚未实现的算子。"),
         StageCheck(id="geometry-operator-inputs", label="几何算子输入完整", passed=operator_inputs_ok, severity="error", path="geometryRecipe.operations", message="；".join(operator_input_messages) or "算子输入完整。"),
+        StageCheck(id="sweep-path", label="扫掠路径已定义", passed=sweep_path_ok, severity="error", path="sweepPath", message=sweep_path_message),
         StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
         StageCheck(id="geometry-expressions-id-only", label="几何表达式仅使用参数ID", passed=not base_sketch_alias_violations, severity="error", path="geometryRecipe", message=_alias_violation_message(base_sketch_alias_violations) or "几何表达式仅可使用参数稳定 ID。"),
     ]

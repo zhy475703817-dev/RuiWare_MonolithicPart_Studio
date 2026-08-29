@@ -175,6 +175,7 @@ class GeometryOperationDefinition(BaseModel):
     argumentExpressions: dict[str, str] = Field(default_factory=dict)
     conditionExpression: str = "True"
     semanticOutputs: list[str] = Field(default_factory=list)
+    pathSketchId: str | None = None
 
 
 class SemanticFaceDefinition(BaseModel):

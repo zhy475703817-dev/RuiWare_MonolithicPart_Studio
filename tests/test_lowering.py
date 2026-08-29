@@ -1,5 +1,5 @@
 from template_core.lowering import lower_to_plan
-from template_core.models import TemplateDraft
+from template_core.models import SweepPathSketch, TemplateDraft
 
 
 def draft(hole_count: int = 4) -> TemplateDraft:
@@ -62,3 +62,27 @@ def test_invalid_rule_hole_is_rejected_before_cad() -> None:
     value.featureRules[0].argumentExpressions["x"] = "49"
     plan = lower_to_plan(value, {"record": {"code": "Q345"}})
     assert any(item.code == "RESOLVED_FEATURE_OUTSIDE_BODY" for item in plan.diagnostics)
+
+
+def test_confirmed_sweep_path_uses_line_endpoints_for_worker_points() -> None:
+    value = TemplateDraft(name="path endpoint lowering")
+    operation = value.geometryRecipe.operations[0]
+    operation.operator = "solid.sweep"
+    operation.pathSketchId = "path.main"
+    operation.arguments = {"pathPoints": "0:0:0;0:0:1"}
+    operation.argumentExpressions = {}
+    value.sweepPath = SweepPathSketch.model_validate({
+        "id": "path.main",
+        "status": "confirmed",
+        "geometry": [{
+            "id": "path.edge",
+            "geometryType": "line",
+            "start": [0, 0],
+            "end": [0, 125],
+        }],
+    })
+
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+
+    sweep = next(item for item in plan.operations if item.operator == "solid.sweep")
+    assert sweep.arguments["pathPoints"] == "0.0:0.0:0.0;0.0:0.0:125.0"

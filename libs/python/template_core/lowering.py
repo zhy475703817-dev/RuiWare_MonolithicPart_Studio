@@ -52,6 +52,36 @@ def _resolve_structured_geometry_argument(
     return ";".join(rows)
 
 
+def _path_points_from_sketch(path_sketch) -> str:
+    """Convert the authored 2D sweep path into the worker's 3D point string."""
+    points: list[tuple[float, float]] = []
+    for geometry in path_sketch.geometry:
+        # Sweep currently consumes line/arc centerline geometry.  Keep other
+        # sketch entities available for editing/round-tripping, but never
+        # manufacture a worker path from circles or isolated points.
+        if geometry.geometryType not in {"line", "arc"}:
+            continue
+        segment = list(geometry.points)
+        if not segment and geometry.start is not None and geometry.end is not None:
+            segment = [geometry.start, geometry.end]
+        if len(segment) < 2:
+            continue
+        points.extend(segment if not points else (segment[1:] if points[-1] == segment[0] else segment))
+    if len(points) < 2:
+        return ""
+    mapped: list[tuple[float, float, float]] = []
+    for first, second in points:
+        if path_sketch.plane == "XZ":
+            mapped.append((float(first), 0.0, float(second)))
+        elif path_sketch.plane == "YZ":
+            mapped.append((0.0, float(first), float(second)))
+        else:
+            # XY path editor coordinates are shown as X/Z so a vertical
+            # authored path follows the normal of the default XY profile.
+            mapped.append((float(first), 0.0, float(second)))
+    return ";".join(f"{x:g}:{y:g}:{z:g}" for x, y, z in mapped)
+
+
 def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     sketch_solution = solve_semantic_sketch(
@@ -120,6 +150,12 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
             if not bool(evaluate_expression(definition.conditionExpression, geometry_context)):
                 continue
             arguments = dict(definition.arguments)
+            if definition.operator == "solid.sweep" and draft.sweepPath is not None:
+                path_id = definition.pathSketchId or "path.main"
+                if path_id == draft.sweepPath.id or draft.sweepPath.id in definition.sourceRefs:
+                    generated_path = _path_points_from_sketch(draft.sweepPath)
+                    if generated_path:
+                        arguments["pathPoints"] = generated_path
             arguments = {
                 name: _resolve_structured_geometry_argument(
                     name, value, geometry_context
@@ -204,6 +240,7 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
             "resolvedParameters": evaluation.values,
             "materialRequirements": [item.model_dump(exclude={"specificBindingId", "reviewed"}) for item in draft.materialRequirements],
             "geometryRecipe": draft.geometryRecipe.model_dump(),
+            "sweepPath": draft.sweepPath.model_dump() if draft.sweepPath else None,
             "semanticFaces": [item.model_dump() for item in draft.geometryRecipe.semanticFaces],
             "featureRules": [item.model_dump() for item in draft.featureRules],
             "resolvedFeatures": [item.model_dump() for item in evaluation.features],

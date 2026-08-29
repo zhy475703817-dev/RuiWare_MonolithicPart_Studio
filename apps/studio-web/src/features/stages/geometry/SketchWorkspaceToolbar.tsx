@@ -50,6 +50,12 @@ type Props = {
   onDelete: () => void;
   issueViewCommand: (type: "zoomIn" | "zoomOut" | "fit") => void;
   planeAxes: { horizontal: string; vertical: string; normal: string };
+  onOpenSweepPath: () => void;
+  sweepPathLabel: string;
+  sweepPathStatus: string;
+  showSweepPathButton?: boolean;
+  title?: string;
+  subtitle?: string;
 };
 
 export function SketchWorkspaceToolbar({
@@ -78,13 +84,19 @@ export function SketchWorkspaceToolbar({
   onDelete,
   issueViewCommand,
   planeAxes,
+  onOpenSweepPath,
+  sweepPathLabel,
+  sweepPathStatus,
+  showSweepPathButton = true,
+  title = "1. 通用二维参数化草图",
+  subtitle = "绘制零部件的二维截面；三维方向由基准平面和后续几何配方决定。",
 }: Props) {
   return (
     <>
       <PanelTitle
         icon={Box}
-        title="1. 通用二维参数化草图"
-        subtitle="绘制零部件的二维截面；三维方向由基准平面和后续几何配方决定。"
+        title={title}
+        subtitle={subtitle}
         actions={
           <div className="case-switch">
             {(["minimum", "nominal", "maximum"] as const).map((item) => {
@@ -107,6 +119,15 @@ export function SketchWorkspaceToolbar({
         }
       />
       <div className="sketch-toolbar">
+        {showSweepPathButton ? (
+          <>
+            <button className="sweep-path-open-btn" onClick={onOpenSweepPath} title={sweepPathStatus}>
+              <Spline size={14} />
+              {sweepPathLabel}
+            </button>
+            <span className="toolbar-divider" />
+          </>
+        ) : null}
         {(
           [
             ["select", MousePointer2, "选择"],

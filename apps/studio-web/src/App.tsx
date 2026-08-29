@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowRight,
@@ -201,6 +201,9 @@ import type {
   SketchSolveResult,
   StageName,
   StageValidation,
+  SweepPathGeometry,
+  SweepPathSketch,
+  SweepPathWindowState,
   TemplateAuthoringRegistry,
   TemplateEvaluation,
   VariantDefinition,
@@ -309,6 +312,111 @@ const scalar = (value: string): string | number | boolean => {
   return value.trim() !== "" && Number.isFinite(number) ? number : value;
 };
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+const createEmptySweepPath = (): SweepPathSketch => ({
+  id: "path.main",
+  plane: "XY",
+  geometry: [],
+  constraints: [],
+  startPointId: null,
+  status: "empty",
+  generationStatus: "idle",
+  diagnostics: [],
+});
+
+type PathEditorDraft = Draft["sketch"];
+
+const pathToSketch = (path: SweepPathSketch): PathEditorDraft => ({
+  model: "semanticProfile",
+  acquisitionMethod: "manual",
+  plane: path.plane,
+  profileMode: "centerlineThinWall",
+  drivingParameters: [],
+  entities: path.geometry.map((item) => ({
+    id: item.id,
+    role: item.role || "sweep.path.geometry",
+    geometryType: item.geometryType,
+    parameterRefs: item.parameterRefs || [],
+    construction: item.construction,
+    start: item.start ?? null,
+    end: item.end ?? null,
+    center: item.center ?? null,
+    radius: item.radius ?? null,
+    startAngle: item.startAngle ?? null,
+    endAngle: item.endAngle ?? null,
+    largeArc: item.largeArc ?? null,
+    points: item.points || [],
+  })),
+  constraints: path.constraints.map((item) => ({ ...item })),
+  regions: [],
+  constraintsReviewed: true,
+  sourceAttachmentId: null,
+  sourceProfileId: null,
+  sourceHash: null,
+  importUnit: null,
+  importScale: null,
+  conversionReviewed: true,
+});
+
+const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): SweepPathSketch => ({
+  ...previous,
+  id: previous.id || "path.main",
+  plane: sketch.plane,
+  geometry: sketch.entities.map((item) => ({
+    id: item.id,
+    role: item.role,
+    geometryType: item.geometryType,
+    parameterRefs: item.parameterRefs || [],
+    construction: item.construction,
+    start: item.start ?? null,
+    end: item.end ?? null,
+    center: item.center ?? null,
+    radius: item.radius ?? null,
+    startAngle: item.startAngle ?? null,
+    endAngle: item.endAngle ?? null,
+    largeArc: item.largeArc ?? null,
+    points: item.points || [],
+  })),
+  constraints: sketch.constraints.map((item) => ({ ...item })),
+  startPointId: previous.startPointId && sketch.entities.some((item) => item.id === previous.startPointId)
+    ? previous.startPointId
+    : sketch.entities[0]?.id || null,
+  status: "editing",
+  generationStatus: "idle",
+  diagnostics: [],
+});
+
+const sweepGeometryPoints = (geometry: SweepPathGeometry): [number, number][] => {
+  if (geometry.points.length) return geometry.points;
+  if (geometry.start && geometry.end) return [geometry.start, geometry.end];
+  return [];
+};
+
+const sweepPathDiagnostics = (path: SweepPathSketch) => {
+  const diagnostics: SweepPathSketch["diagnostics"] = [];
+  if (!path.geometry.length) {
+    diagnostics.push({ severity: "error", code: "SWEEP_PATH_EMPTY", path: "sweepPath.geometry", message: "请至少绘制一条扫掠路径图元。" });
+    return diagnostics;
+  }
+  const unsupported = path.geometry.filter((item) => !["line", "arc"].includes(item.geometryType));
+  if (unsupported.length) diagnostics.push({ severity: "warning", code: "SWEEP_PATH_UNSUPPORTED_GEOMETRY", path: "sweepPath.geometry", message: `当前 CAD 扫掠算子暂不支持：${unsupported.map((item) => item.geometryType).join("、")}；图元仍会保留，可在扫掠验证阶段处理。` });
+  const pathEntities = path.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc");
+  for (const item of pathEntities) {
+    const points = sweepGeometryPoints(item);
+    if (points.length < 2) diagnostics.push({ severity: "error", code: "SWEEP_PATH_GEOMETRY_INVALID", path: `sweepPath.geometry.${item.id}`, message: "路径线段或圆弧必须包含有效端点。" });
+  }
+  return diagnostics;
+};
+
+const serializeSweepPathPoints = (path: SweepPathSketch) => {
+  const points: [number, number][] = [];
+  for (const geometry of path.geometry) {
+    for (const point of sweepGeometryPoints(geometry)) {
+      if (!points.length || points[points.length - 1][0] !== point[0] || points[points.length - 1][1] !== point[1]) points.push(point);
+    }
+  }
+  return points.map(([x, y]) => `${x}:0:${y}`).join(";");
+};
 
 function profileModeSketch(
   mode: Draft["sketch"]["profileMode"],
@@ -3481,6 +3589,13 @@ function GeometryStage({
   const [pendingProfileMode, setPendingProfileMode] = useState<
     Draft["sketch"]["profileMode"] | null
   >(null);
+  const [pathWindowState, setPathWindowState] = useState<SweepPathWindowState>("pathWindowClosed");
+  const committedSweepPath = draft.sweepPath || createEmptySweepPath();
+  const sweepPathLabel = committedSweepPath.status === "confirmed"
+    ? "路径已定义"
+    : committedSweepPath.geometry.length
+      ? "编辑扫掠路径"
+      : "绘制扫掠路径";
   const setRecipe = (patch: Partial<GeometryRecipe>) =>
     change({ ...draft, geometryRecipe: { ...recipe, ...patch } });
   const editOp = (
@@ -3760,6 +3875,9 @@ function GeometryStage({
               onDelete={deleteSelectedEntities}
               issueViewCommand={issueViewCommand}
               planeAxes={planeAxes}
+              onOpenSweepPath={() => setPathWindowState(committedSweepPath.geometry.length ? "pathEditing" : "pathWindowOpen")}
+              sweepPathLabel={sweepPathLabel}
+              sweepPathStatus={committedSweepPath.status === "confirmed" ? "已确认的扫掠路径，可点击编辑" : "按需打开扫掠路径编辑窗口"}
             />
             {sketchEditConflict ? (
               <SketchEditConflictDialog
@@ -3847,7 +3965,169 @@ function GeometryStage({
         operatorStatus={operatorStatus}
         operatorDefaults={operatorDefaults}
       />
+      {pathWindowState !== "pathWindowClosed" && (
+        <SweepPathDialog
+          draft={draft}
+          path={committedSweepPath}
+          showError={showError}
+          onConfirm={(nextPath) => {
+            const pathId = nextPath.id || "path.main";
+            const pathPoints = serializeSweepPathPoints(nextPath);
+            const nextOperations = recipe.operations.map((operation) =>
+              operation.operator === "solid.sweep"
+                ? {
+                    ...operation,
+                    pathSketchId: pathId,
+                    sourceRefs: Array.from(new Set([...operation.sourceRefs, pathId])),
+                    arguments: { ...operation.arguments, ...(pathPoints ? { pathPoints } : {}) },
+                  }
+                : operation,
+            );
+            change({
+              ...draft,
+              sweepPath: nextPath,
+              geometryRecipe: {
+                ...recipe,
+                paths: Array.from(new Set([...recipe.paths, pathId])),
+                operations: nextOperations,
+                reviewed: false,
+              },
+            });
+            setPathWindowState("pathWindowClosed");
+          }}
+          onCancel={() => setPathWindowState("pathWindowClosed")}
+        />
+      )}
     </>
+  );
+}
+
+function SweepPathDialog({
+  draft,
+  path,
+  onConfirm,
+  onCancel,
+  showError,
+}: {
+  draft: Draft;
+  path: SweepPathSketch;
+  onConfirm: (path: SweepPathSketch) => void;
+  onCancel: () => void;
+  showError: (error: unknown) => void;
+}) {
+  const [workingPath, setWorkingPath] = useState<SweepPathSketch>(() => structuredClone(path));
+  const initialPathRef = useRef(structuredClone(path));
+  const editorDraft = useMemo(() => ({ ...draft, sketch: pathToSketch(workingPath) }), [draft, workingPath]);
+  const changeEditorDraft = (next: Draft) => {
+    setWorkingPath(sketchToPath(next.sketch, workingPath));
+  };
+  const flow = useGeometryEditFlow({ draft: editorDraft, change: changeEditorDraft, showError });
+  const diagnostics = useMemo(() => sweepPathDiagnostics(workingPath), [workingPath]);
+  const hasErrors = diagnostics.some((item) => item.severity === "error");
+  const dirty = JSON.stringify(initialPathRef.current.geometry) !== JSON.stringify(workingPath.geometry)
+    || JSON.stringify(initialPathRef.current.constraints) !== JSON.stringify(workingPath.constraints);
+  const cancel = useCallback(() => {
+    if (dirty && !window.confirm("扫掠路径存在未确认修改，取消后将恢复打开窗口前的路径。确定取消吗？")) return;
+    onCancel();
+  }, [dirty, onCancel]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select") || target?.isContentEditable) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+      } else if (flow.tool === "polyline" && event.key === "Enter") {
+        event.preventDefault();
+        flow.setPolylineCommand({ id: Date.now(), type: "finish" });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cancel, flow.tool]);
+  const confirm = () => {
+    if (hasErrors || !workingPath.geometry.length) return;
+    onConfirm({ ...workingPath, status: "confirmed", diagnostics, generationStatus: "idle" });
+  };
+  const pathStatus = hasErrors ? "路径有错误" : workingPath.geometry.length ? "路径有效" : "未定义";
+  return (
+    <div className="dialog-scrim" role="presentation" onPointerDown={cancel}>
+      <section className="sweep-path-dialog" role="dialog" aria-modal="true" aria-labelledby="sweep-path-title" onPointerDown={(event) => event.stopPropagation()}>
+        <header className="sweep-path-dialog-head">
+          <div><span className="eyebrow">SWEEP / PIPE</span><h2 id="sweep-path-title">扫掠路径编辑器</h2><p>完整二维参数化草图编辑器；仅数据用途限定为扫掠路径，原有截面草图保持不变。</p></div>
+          <button className="icon-btn" title="关闭" onClick={cancel}><X size={17} /></button>
+        </header>
+        <SketchWorkspaceToolbar
+          solution={flow.solution}
+          solveCase={flow.solveCase}
+          setSolveCase={flow.setSolveCase}
+          tool={flow.tool}
+          setTool={flow.setTool}
+          arcDrawMode={flow.arcDrawMode}
+          setArcDrawMode={flow.setArcDrawMode}
+          historyLength={flow.history.length}
+          futureLength={flow.future.length}
+          selectedCount={flow.selectedEntities.length}
+          moveOffset={flow.moveOffset}
+          setMoveOffset={flow.setMoveOffset}
+          objectSnapEnabled={flow.objectSnapEnabled}
+          setObjectSnapEnabled={flow.setObjectSnapEnabled}
+          orthogonalLock={flow.orthogonalLock}
+          setOrthogonalLock={flow.setOrthogonalLock}
+          sketchClipboardSize={flow.sketchClipboard?.entities.length || 0}
+          onUndo={flow.undo}
+          onRedo={flow.redo}
+          onMove={flow.moveSelectedEntities}
+          onCopy={flow.copySelectedEntities}
+          onPaste={flow.pasteClipboardEntities}
+          onDelete={flow.deleteSelectedEntities}
+          issueViewCommand={flow.issueViewCommand}
+          planeAxes={sketchPlaneAxes(editorDraft.sketch.plane)}
+          onOpenSweepPath={() => undefined}
+          sweepPathLabel="扫掠路径"
+          sweepPathStatus="当前已在扫掠路径编辑器"
+          showSweepPathButton={false}
+          title="扫掠路径草图"
+          subtitle="与主画布共用同一套绘图、选择、约束、吸附、提示、平移、缩放和撤销逻辑。"
+        />
+        {flow.sketchEditConflict ? <SketchEditConflictDialog conflict={flow.sketchEditConflict} onResolve={flow.resolveSketchEditConflict} /> : null}
+        <ParametricSketchCanvas
+          draft={editorDraft}
+          solution={flow.solution}
+          caseName={flow.solveCase}
+          selected={flow.selectedEntities}
+          tool={flow.tool}
+          onSelect={flow.selectEntity}
+          onSketch={flow.applySketch}
+          onGeometryEdit={flow.applyGeometryEdit}
+          validateGeometryEdit={flow.validateSketchGeometryEdit}
+          onGeometryEditRejected={showError}
+          onEditConflict={flow.setSketchEditConflict}
+          pendingConflict={flow.sketchEditConflict}
+          beginEdit={flow.beginSketchEdit}
+          viewCommand={flow.viewCommand}
+          polylineCommand={flow.polylineCommand}
+          onCursorChange={flow.publishCursorPoint}
+          orthogonalLock={flow.orthogonalLock}
+          objectSnapEnabled={flow.objectSnapEnabled}
+          arcDrawMode={flow.arcDrawMode}
+        />
+        <SketchWorkspaceStatusBar
+          solution={flow.solution}
+          solving={flow.solving}
+          solveCase={flow.solveCase}
+          plane={editorDraft.sketch.plane}
+          planeAxes={sketchPlaneAxes(editorDraft.sketch.plane)}
+          cursorPoint={flow.cursorPoint}
+          selectedEntity={flow.selectedEntity || "未选择"}
+        />
+        <div className="sweep-path-status-row"><span className={hasErrors ? "status-bad" : "status-good"}>{hasErrors ? <CircleAlert size={14} /> : <Check size={14} />} {pathStatus}</span><span>{workingPath.geometry.length} 个路径图元 · {workingPath.constraints.length} 条约束{dirty ? " · 有未确认修改" : ""}</span></div>
+        {diagnostics.length > 0 && <div className="sweep-path-diagnostics">{diagnostics.map((item) => <div key={`${item.code}-${item.path}`}><strong>{item.severity === "error" ? "错误" : "提示"}</strong><span>{item.message}</span></div>)}</div>}
+        <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{workingPath.startPointId || "首个路径图元"} · 路径方向按图元顺序连接</div>
+        <footer className="sweep-path-dialog-actions"><button className="secondary-btn" onClick={cancel}>取消</button><button className="secondary-btn" onClick={cancel}>关闭</button><button className="primary-btn" disabled={hasErrors || !workingPath.geometry.length} onClick={confirm}><Check size={15} />确认路径</button></footer>
+        <small className="sweep-path-footnote">路径编辑器保留点、直线、连续折线、矩形、圆和圆弧等完整编辑能力；当前 CAD Sweep 算子对不支持的路径图元会在验证阶段提示。</small>
+      </section>
+    </div>
   );
 }
 

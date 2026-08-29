@@ -143,6 +143,47 @@ class SemanticSketchRegion(BaseModel):
     operation: Literal["add", "subtract"] = "add"
 
 
+class SweepPathGeometry(BaseModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    role: str = "sweep.path.segment"
+    geometryType: Literal["point", "line", "arc", "circle"] = "line"
+    parameterRefs: list[str] = Field(default_factory=list)
+    construction: bool = False
+    start: tuple[float, float] | None = None
+    end: tuple[float, float] | None = None
+    center: tuple[float, float] | None = None
+    radius: float | None = Field(default=None, gt=0)
+    startAngle: float | None = None
+    endAngle: float | None = None
+    largeArc: bool | None = None
+    points: list[tuple[float, float]] = Field(default_factory=list)
+
+
+class SweepPathConstraint(BaseModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    label: str = ""
+    constraintType: Literal["coincident", "horizontal", "vertical", "parallel", "perpendicular", "distance", "distanceX", "distanceY", "radius", "diameter", "angle", "fixed", "tangent", "concentric", "symmetric", "equal", "pointOn", "closed"]
+    entityRefs: list[str] = Field(default_factory=list)
+    endpointRefs: list[Literal["start", "end"]] = Field(default_factory=list)
+    expression: str | None = None
+    parameterId: str | None = None
+    value: float | None = None
+    driverMode: Literal["unset", "fixed", "parameter", "expression"] | None = None
+    enabled: bool = True
+    driving: bool = True
+
+
+class SweepPathSketch(BaseModel):
+    id: str = "path.main"
+    plane: Literal["XY", "XZ", "YZ"] = "XY"
+    geometry: list[SweepPathGeometry] = Field(default_factory=list)
+    constraints: list[SweepPathConstraint] = Field(default_factory=list)
+    startPointId: str | None = None
+    status: Literal["empty", "editing", "valid", "invalid", "confirmed"] = "empty"
+    generationStatus: Literal["idle", "generating", "failed", "succeeded"] = "idle"
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SketchDefinition(BaseModel):
     model: Literal["semanticProfile"] = "semanticProfile"
     acquisitionMethod: Literal["manual", "imported", "reused"] = "manual"
@@ -248,6 +289,7 @@ class TemplateDraft(BaseModel):
     materialValidationSamples: list[MaterialValidationSample] = Field(default_factory=list)
     blank: BlankDefinition = Field(default_factory=BlankDefinition)
     sketch: SketchDefinition = Field(default_factory=SketchDefinition)
+    sweepPath: SweepPathSketch | None = None
     parameterDefinitions: list[ParameterDefinition] = Field(default_factory=default_parameter_definitions)
     variants: list[VariantDefinition] = Field(default_factory=lambda: [VariantDefinition(id="nominal", name="标称实例")])
     geometryRecipe: GeometryRecipe = Field(default_factory=default_geometry_recipe)

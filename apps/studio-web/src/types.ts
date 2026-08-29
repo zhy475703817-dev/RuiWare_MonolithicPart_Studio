@@ -218,6 +218,83 @@ export type SketchSolveResult = {
   }[];
   cases: SketchSolveCase[];
 };
+
+export type SweepPathStatus =
+  | "empty"
+  | "editing"
+  | "valid"
+  | "invalid"
+  | "confirmed";
+
+export type SweepPathWindowState =
+  | "pathWindowClosed"
+  | "pathWindowOpen"
+  | "pathEditing"
+  | "pathValid"
+  | "pathInvalid"
+  | "pathConfirmed"
+  | "pathGenerating"
+  | "pathGenerationFailed"
+  | "pathGenerationSucceeded";
+
+export type SweepPathGeometry = {
+  id: string;
+  role: string;
+  geometryType: "point" | "line" | "arc" | "circle";
+  parameterRefs: string[];
+  construction: boolean;
+  start?: [number, number] | null;
+  end?: [number, number] | null;
+  center?: [number, number] | null;
+  radius?: number | null;
+  startAngle?: number | null;
+  endAngle?: number | null;
+  largeArc?: boolean | null;
+  points: [number, number][];
+};
+
+export type SweepPathConstraint = {
+  id: string;
+  label?: string;
+  constraintType:
+    | "coincident"
+    | "horizontal"
+    | "vertical"
+    | "parallel"
+    | "perpendicular"
+    | "distance"
+    | "distanceX"
+    | "distanceY"
+    | "radius"
+    | "diameter"
+    | "angle"
+    | "fixed"
+    | "tangent"
+    | "concentric"
+    | "symmetric"
+    | "equal"
+    | "pointOn"
+    | "closed";
+  entityRefs: string[];
+  endpointRefs?: Array<"start" | "end">;
+  expression?: string | null;
+  parameterId?: string | null;
+  value?: number | null;
+  driverMode?: "unset" | "fixed" | "parameter" | "expression" | null;
+  enabled: boolean;
+  driving: boolean;
+};
+
+export type SweepPathSketch = {
+  id: string;
+  plane: "XY" | "XZ" | "YZ";
+  geometry: SweepPathGeometry[];
+  constraints: SweepPathConstraint[];
+  startPointId: string | null;
+  status: SweepPathStatus;
+  generationStatus?: "idle" | "generating" | "failed" | "succeeded";
+  diagnostics: Diagnostic[];
+};
 export type GeometryRecipe = {
   id: string;
   constructionMode:
@@ -240,6 +317,7 @@ export type GeometryRecipe = {
     argumentExpressions: Record<string, string>;
     conditionExpression: string;
     semanticOutputs: string[];
+    pathSketchId?: string | null;
   }[];
   semanticFaces: {
     id: string;
@@ -460,6 +538,8 @@ export type Draft = {
     importScale?: number | null;
     conversionReviewed: boolean;
   };
+  /** 独立于截面草图的扫掠路径草图；未使用时为空。 */
+  sweepPath?: SweepPathSketch | null;
   parameterDefinitions: ParameterDefinition[];
   variants: VariantDefinition[];
   geometryRecipe: GeometryRecipe;
