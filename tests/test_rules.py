@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
 from template_core.metamodel import FeatureRule, ParameterDefinition, ParameterSource, PartInterface
-from template_core.models import TemplateDraft
+from template_core.models import SemanticSketchConstraint, SemanticSketchEntity, TemplateDraft
 from template_core.rules import RuleEvaluationError, evaluate_expression, evaluate_template, expression_names, parameter_evaluation_order
 from template_core.stages import validate_stage
 from template_core.sketch_solver import solve_semantic_sketch
@@ -435,6 +435,37 @@ def test_generic_sketch_solver_handles_cases_constraints_and_failures() -> None:
     invalid = solve_semantic_sketch(invalid_draft)
     assert not invalid["valid"]
     assert any(item["code"] in {"SKETCH_REGION_OPEN", "SKETCH_SELF_INTERSECTION"} for item in invalid["diagnostics"])
+
+
+def test_construction_geometry_is_excluded_from_dof_but_remains_constraint_driven() -> None:
+    draft = TemplateDraft(name="构造图元自由度")
+    draft.sketch.entities.append(
+        SemanticSketchEntity(
+            id="construction.axis",
+            role="参考中心线",
+            geometryType="line",
+            construction=True,
+            start=(0, 0),
+            end=(10, 10),
+        )
+    )
+    draft.sketch.constraints.append(
+        SemanticSketchConstraint(
+            id="construction.axis.horizontal",
+            constraintType="horizontal",
+            entityRefs=["construction.axis"],
+        )
+    )
+
+    solved = solve_semantic_sketch(draft)
+
+    # The reference line is solved (its diagonal input is corrected to a
+    # horizontal line), but its free movement is not reported as profile DOF.
+    assert solved["fullyConstrained"]
+    assert solved["degreesOfFreedom"] == 0
+    nominal = next(item for item in solved["cases"] if item["case"] == "nominal")
+    axis = next(item for item in nominal["primitives"] if item["id"] == "construction.axis")
+    assert axis["end"]["y"] == pytest.approx(axis["start"]["y"])
 
 
 def test_sketch_solver_uses_parameter_dependency_evaluation() -> None:

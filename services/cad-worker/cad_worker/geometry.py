@@ -20,6 +20,7 @@ from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
 from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
+from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
 from OCP.StlAPI import StlAPI_Writer
 from OCP.TopAbs import TopAbs_SOLID
@@ -28,7 +29,7 @@ from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Vec
 
 from template_core.models import Artifact, CanonicalPlan, CompileResult, Diagnostic, GeometryMetrics
-from template_core.sweep_frames import path_frames
+from template_core.sweep_frames import segment_start_frames
 
 
 def _box(x: float, y: float, z: float, dx: float, dy: float, dz: float):
@@ -233,46 +234,182 @@ def _parse_points(value: str) -> list[tuple[float, float, float]]:
     return points
 
 
-def _sweep_region(sketch, region, points, frames):
-    """Sweep one material region through station-specific section frames.
+def _profile_support_along(sketch, regions, frame, direction) -> float:
+    """Return the profile support distance along a 3-D direction.
 
-    PipeShell carries a single profile orientation internally.  Supplying a
-    wire at every path station through ThruSections makes the requested
-    orientation mode explicit while retaining RightCorner transitions.
+    At a sharp RightCorner the incoming section is carried slightly past the
+    mathematical vertex.  The overlap is what fills the outside miter notch
+    left by independently swept segments.  It is calculated from the authored
+    section rather than from a fixed magic number, and therefore follows
+    section dimensions and frames.
     """
-    # Prefer PipeShell so OCCT can apply the requested RightCorner transition;
-    # adding a section wire at every station also makes the frame explicit.
-    wire_builder = BRepBuilderAPI_MakeWire()
-    for start, end in zip(points, points[1:]):
-        wire_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start), gp_Pnt(*end)).Edge())
-    spine = wire_builder.Wire()
+    if not frame:
+        return 0.0
+    _origin, e1, e2, _tangent = frame
+    dx, dy, dz = direction
+    c1 = e1[0] * dx + e1[1] * dy + e1[2] * dz
+    c2 = e2[0] * dx + e2[1] * dy + e2[2] * dz
+    primitives = {item["id"]: item for item in sketch.get("primitives", []) if not item.get("construction")}
+    support = 0.0
+    for region in regions:
+        for reference in region.get("boundaryRefs", []):
+            primitive = primitives.get(reference)
+            if not primitive:
+                continue
+            kind = primitive.get("type")
+            if kind == "line":
+                for point in (primitive.get("start"), primitive.get("end")):
+                    if point is None:
+                        continue
+                    value = float(point.get("x", 0.0)) * c1 + float(point.get("y", 0.0)) * c2
+                    support = max(support, abs(value))
+            elif kind == "circle":
+                center = primitive.get("center") or {}
+                center_value = float(center.get("x", 0.0)) * c1 + float(center.get("y", 0.0)) * c2
+                radius = abs(float(primitive.get("radius") or 0.0))
+                support = max(support, abs(center_value) + radius * math.hypot(c1, c2))
+            elif kind == "arc":
+                center = primitive.get("center") or {}
+                center_value = float(center.get("x", 0.0)) * c1 + float(center.get("y", 0.0)) * c2
+                radius = abs(float(primitive.get("radius") or 0.0))
+                support = max(support, abs(center_value) + radius * math.hypot(c1, c2))
+    return support
+
+
+def _corner_extension_distances(sketch, regions, points, frames) -> list[float]:
+    """Compute incoming-section overlap distances for each interior corner.
+
+    Entry ``i`` belongs to station ``i`` and is applied to the end of segment
+    ``i - 1``.  The outgoing profile's support in the incoming tangent gives
+    the exact RightCorner overlap for the supported orthogonal paths.
+    """
+    result = [0.0] * len(frames)
+    if len(points) < 3 or not frames:
+        return result
+    corners = list(range(1, len(points) - 1))
+    closed = len(points) > 2 and math.dist(points[0], points[-1]) <= 1e-9
+    if closed:
+        # The duplicated endpoint is station zero for the final-to-first
+        # transition.  Its extension belongs to entry zero (the end of the
+        # final segment) rather than to entry ``len(points) - 1``.
+        corners.append(0)
+    for corner in corners:
+        incoming_index = len(frames) - 1 if corner == 0 else corner - 1
+        outgoing_index = 0 if corner == 0 else corner
+        incoming = frames[incoming_index][3]
+        outgoing = frames[outgoing_index][3]
+        cross = (
+            incoming[1] * outgoing[2] - incoming[2] * outgoing[1],
+            incoming[2] * outgoing[0] - incoming[0] * outgoing[2],
+            incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
+        )
+        cross_length = math.sqrt(sum(value * value for value in cross))
+        if cross_length <= 1e-9:
+            # Collinear stations need no miter overlap.  A 180-degree fold
+            # back is rejected by topology before CAD construction.
+            continue
+        # The miter plane is perpendicular to the outgoing tangent while
+        # remaining in the incoming/outgoing turn plane.  Projecting the
+        # incoming tangent onto that plane gives its unit normal.  Measuring
+        # support along the incoming tangent itself would include an extra
+        # ``sin(turn)`` factor and under-extend acute/obtuse corners.
+        tangent_dot = sum(incoming[axis] * outgoing[axis] for axis in range(3))
+        normal_component = tuple(
+            incoming[axis] - tangent_dot * outgoing[axis] for axis in range(3)
+        )
+        normal_length = math.sqrt(sum(value * value for value in normal_component))
+        if normal_length <= 1e-9:
+            continue
+        miter_normal = tuple(value / normal_length for value in normal_component)
+        support = _profile_support_along(sketch, regions, frames[outgoing_index], miter_normal)
+        if support <= 1e-9:
+            continue
+        # RightCorner uses the offset intersection of the two edge planes.
+        # ``cross_length`` is sin(turn), so a shallow turn needs a longer
+        # overlap to reach the same offset plane.  Cap the extension below to
+        # avoid reversing a very short authored segment.
+        distance = support / cross_length
+        segment_start = len(points) - 2 if corner == 0 else corner - 1
+        segment_length = math.dist(points[segment_start], points[corner])
+        result[corner] = min(distance, max(0.0, segment_length * 0.49))
+    return result
+
+
+def _refine_sweep_shape(shape):
+    """Remove coplanar splitter faces from a swept result when safe.
+
+    Segment-wise RightCorner construction intentionally creates an overlap at
+    each elbow.  OCCT keeps the Boolean splitter faces in the resulting
+    compound, and exporting those faces verbatim can leave inconsistent STL
+    winding/visible seams in a viewer even though the B-Rep is valid.  The
+    same-domain unifier is restricted to sweep results and is accepted only
+    when it preserves validity and the number of solids.
+    """
     try:
-        pipe = BRepOffsetAPI_MakePipeShell(spine)
-        pipe.SetTransitionMode(BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner)
-        for frame in frames:
-            pipe.Add(_region_wire(sketch, region, frame=frame), False, True)
-        pipe.Build()
-        if pipe.IsDone() and pipe.MakeSolid():
-            candidate = pipe.Shape()
-            # OCCT can report a successful PipeShell build while leaving an
-            # invalid/non-manifold shape at a sharp corner when station
-            # profiles use different orientation frames.  Never pass that
-            # shape downstream: use the deterministic sectioned fallback.
-            if BRepCheck_Analyzer(candidate).IsValid():
-                return candidate
+        refined_builder = ShapeUpgrade_UnifySameDomain(shape, True, True, True)
+        refined_builder.SetLinearTolerance(1e-6)
+        refined_builder.SetAngularTolerance(1e-6)
+        refined_builder.Build()
+        refined = refined_builder.Shape()
+        if (
+            not refined.IsNull()
+            and BRepCheck_Analyzer(refined).IsValid()
+            and _solid_count(refined) == _solid_count(shape)
+        ):
+            return refined
     except Exception:
-        # Some OCCT versions reject multiple profile wires on a polyline.  The
-        # deterministic ThruSections fallback retains the same station frames.
         pass
-    operation = BRepOffsetAPI_ThruSections(True, False, 1e-6)
-    operation.SetMaxDegree(8)
-    operation.CheckCompatibility(True)
-    for frame in frames:
-        operation.AddWire(_region_wire(sketch, region, frame=frame))
-    operation.Build()
-    if not operation.IsDone():
+    return shape
+
+
+def _sweep_region(sketch, region, points, frames, corner_extensions=None):
+    """Sweep one material region through straight segments with mitered corners.
+
+    A multi-section ``ThruSections`` fallback interpolates corner stations at
+    high degree and can overshoot a right-angle polyline.  Build one
+    ``PipeShell`` per straight edge instead.  Each profile is perpendicular to
+    that edge.  At each corner the incoming spine is extended by the profile
+    support distance so the segment solids overlap in a true RightCorner
+    miter.  The *frames* argument contains one frame per segment.
+    """
+    solids = []
+    corner_extensions = list(corner_extensions or [])
+    for index, (start, end, frame) in enumerate(zip(points, points[1:], frames)):
+        start_for_spine = start
+        end_for_spine = end
+        frame_for_profile = frame
+        corner_index = index + 1
+        if index == len(frames) - 1 and len(points) > 2 and math.dist(points[0], points[-1]) <= 1e-9:
+            corner_index = 0
+        if corner_index < len(corner_extensions):
+            extension = max(0.0, float(corner_extensions[corner_index]))
+            if extension > 1e-9:
+                tangent = frame[3]
+                end_for_spine = tuple(end[axis] + tangent[axis] * extension for axis in range(3))
+                # Keep a custom caller from creating a malformed edge.
+                if math.dist(start, end_for_spine) <= 1e-9:
+                    end_for_spine = end
+        edge_builder = BRepBuilderAPI_MakeWire()
+        edge_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start_for_spine), gp_Pnt(*end_for_spine)).Edge())
+        spine = edge_builder.Wire()
+        try:
+            pipe = BRepOffsetAPI_MakePipeShell(spine)
+            pipe.SetTransitionMode(BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner)
+            pipe.Add(_region_wire(sketch, region, frame=frame_for_profile), False, True)
+            pipe.Build()
+            if not pipe.IsDone() or not pipe.MakeSolid():
+                raise RuntimeError("PipeShell did not produce a solid")
+            candidate = pipe.Shape()
+            if not BRepCheck_Analyzer(candidate).IsValid():
+                raise RuntimeError("PipeShell produced an invalid solid")
+            solids.append(candidate)
+        except Exception as error:
+            raise RuntimeError(f"Sweep construction failed for region {region['id']} segment {index}: {error}") from error
+    if not solids:
         raise RuntimeError(f"Sweep construction failed for region {region['id']}")
-    return operation.Shape()
+    # The overlap makes the Boolean result one continuous solid and removes
+    # the real outside miter notch left by a zero-length corner join.
+    return _fuse(*solids)
 
 
 def _sketch_sweep(arguments):
@@ -291,21 +428,32 @@ def _sketch_sweep(arguments):
         raise RuntimeError("Sweep path wire construction failed")
     spine = wire_builder.Wire()
     try:
-        frames = path_frames(points, str(arguments.get("orientationMode", "minimumTwist")))
+        frames = segment_start_frames(points, str(arguments.get("orientationMode", "minimumTwist")))
     except ValueError as error:
         raise RuntimeError(str(error)) from error
-    additive = [_sweep_region(sketch, region, points, frames) for region in sketch["regions"] if region["operation"] == "add"]
+    additive_regions = [region for region in sketch["regions"] if region["operation"] == "add"]
+    # Compute the miter support from additive material only.  A subtractive
+    # inner region can have a different radius/extent and must be swept with
+    # its own support below; including it here would make the outer body
+    # extension depend on the size of a hole.
+    corner_extensions = _corner_extension_distances(sketch, additive_regions, points, frames)
+    additive = [
+        _sweep_region(sketch, region, points, frames, corner_extensions)
+        for region in sketch["regions"]
+        if region["operation"] == "add"
+    ]
     if not additive:
         raise RuntimeError("Sweep requires at least one additive region")
     result = _fuse(*additive)
     for region in sketch["regions"]:
         if region["operation"] == "subtract":
-            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, points, frames))
+            hole_extensions = _corner_extension_distances(sketch, [region], points, frames)
+            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, points, frames, hole_extensions))
             cut.Build()
             if not cut.IsDone():
                 raise RuntimeError(f"Sweep inner-region subtraction failed for {region['id']}")
             result = cut.Shape()
-    return result
+    return _refine_sweep_shape(result)
 
 
 def _parse_stations(value: str) -> list[tuple[float, float]]:

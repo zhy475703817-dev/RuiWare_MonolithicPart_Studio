@@ -3,6 +3,7 @@ import type { SketchSolveResult } from "../../../types";
 type Props = {
   solution: SketchSolveResult | null;
   solving: boolean;
+  solveError?: string | null;
   solveCase: "minimum" | "nominal" | "maximum";
   plane: string;
   planeAxes: { horizontal: string; vertical: string; normal: string };
@@ -13,6 +14,7 @@ type Props = {
 export function SketchWorkspaceStatusBar({
   solution,
   solving,
+  solveError,
   solveCase,
   plane,
   planeAxes,
@@ -32,15 +34,19 @@ export function SketchWorkspaceStatusBar({
         <span>{planeAxes.normal} = 0.0 mm</span>
       </div>
       <div className="solver-footer">
-        <span className={solution?.valid ? "ok" : "bad"}>
+        <span className={solution?.valid ? "ok" : solveError ? "bad" : solution ? "bad" : "pending"}>
           <strong>
             {solving
               ? "求解中…"
+              : solveError
+                ? "求解失败"
               : solution?.valid
                 ? "几何通过"
-                : "几何失败"}
+                : solution
+                  ? "几何失败"
+                  : "等待求解"}
           </strong>
-          <small>{solution?.solver || "parametric-sketch"}</small>
+          <small>{solveError || solution?.solver || "parametric-sketch"}</small>
         </span>
         <span>
           <strong>{solution?.degreesOfFreedom ?? "—"}</strong>

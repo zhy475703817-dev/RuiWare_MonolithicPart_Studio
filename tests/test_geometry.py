@@ -2,12 +2,15 @@ import math
 
 import pytest
 
-from cad_worker.geometry import execute_plan
+from cad_worker.geometry import _sketch_sweep, execute_plan
 from template_core.lowering import lower_to_plan
 
 from test_lowering import draft
 from template_core.models import SweepPathGeometry, SweepPathSketch, TemplateDraft
 from template_core.sketch_solver import solve_semantic_sketch
+from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+from OCP.gp import gp_Pnt
+from OCP.TopAbs import TopAbs_IN
 
 
 def test_open_cascade_generates_valid_brep_and_preview(tmp_path) -> None:
@@ -175,10 +178,32 @@ def _configured_sketch_sweep(name: str, sketch_payload: dict, path_points: str =
     value.geometryRecipe.operations[0].pathSketchId = "path.main"
     value.geometryRecipe.operations[0].sourceRefs = ["sketch.section.main", "path.main"]
     value.geometryRecipe.paths = ["path.main"]
+    path_rows = []
+    try:
+        path_rows = [
+            tuple(float(component.strip()) for component in row.split(":"))
+            for row in path_points.split(";") if row.strip()
+        ]
+    except ValueError:
+        # Expression-based paths are still exercised through operation
+        # arguments; only literal rows can be mirrored into the authored path.
+        path_rows = []
+    def path_uv(point):
+        # The test paths use the XY editor convention: X and Z are authored
+        # in the two-dimensional path sketch.
+        return [point[0], point[2]]
+
+    geometry = [
+        {"id": f"path.{index + 1}", "geometryType": "line", "start": path_uv(start), "end": path_uv(end)}
+        for index, (start, end) in enumerate(zip(path_rows, path_rows[1:]))
+        if len(start) == 3 and len(end) == 3
+    ]
+    if not geometry:
+        geometry = [{"id": "path.1", "geometryType": "line", "start": [0, 0], "end": [0, 100]}]
     value.sweepPath = SweepPathSketch.model_validate({
         "id": "path.main", "status": "confirmed",
-        "geometry": [{"id": "path.1", "geometryType": "line", "start": [0, 0], "end": [0, 100]}],
-        "startEndpointRef": {"geometryId": "path.1", "endpoint": "start"},
+        "geometry": geometry,
+        "startEndpointRef": {"geometryId": geometry[0]["id"], "endpoint": "start"},
     })
     return value
 
@@ -246,6 +271,57 @@ def test_sweep_orientation_falls_back_from_invalid_pipeshell(tmp_path, orientati
     result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path / orientation)
     assert result.success, result.diagnostics
     assert result.metrics and result.metrics.valid and result.metrics.solidCount == 1
+
+
+@pytest.mark.parametrize("orientation", ["followPath", "fixedWorld", "minimumTwist"])
+def test_sweep_right_corner_does_not_use_smooth_overshoot(tmp_path, orientation) -> None:
+    value = _configured_sketch_sweep(
+        f"{orientation} strict corner",
+        {"profileMode": "closedRegion"},
+        "0:0:0;0:0:600;300:0:600",
+    )
+    value.geometryRecipe.operations[0].orientationMode = orientation
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path / orientation)
+    assert result.success, result.diagnostics
+    # A RightCorner sweep must fill the outside miter at the elbow.  The
+    # overlap is intentional, so its volume is at least the straight-segment
+    # union and never exceeds the full 900 mm centerline envelope by more
+    # than one profile support width.
+    expected_volume = {
+        "followPath": 4_500_000.0,
+        "fixedWorld": 4_500_000.0,
+        "minimumTwist": 4_500_000.0,
+    }[orientation]
+    assert result.metrics and result.metrics.volume == pytest.approx(expected_volume, rel=1e-6)
+    stl = next(item for item in result.artifacts if item.kind == "stl")
+    stl_path = (tmp_path / orientation / result.inputHash[:16] / "preview.stl")
+    vertices = []
+    for line in stl_path.read_text(encoding="utf-8").splitlines():
+        fields = line.strip().split()
+        if len(fields) == 4 and fields[0] == "vertex":
+            vertices.append(tuple(float(value) for value in fields[1:]))
+    assert vertices
+    assert min(point[0] for point in vertices) >= -50.1
+    assert max(point[0] for point in vertices) <= 300.1
+
+
+@pytest.mark.parametrize("orientation", ["followPath", "fixedWorld", "minimumTwist"])
+def test_sweep_right_corner_fills_outer_miter_gap(orientation) -> None:
+    """The outside elbow sample that was formerly a visible white notch is solid."""
+    value = _configured_sketch_sweep(
+        f"{orientation} miter fill",
+        {"profileMode": "closedRegion"},
+        "0:0:0;0:0:600;300:0:600",
+    )
+    value.geometryRecipe.operations[0].orientationMode = orientation
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+    operation = next(item for item in plan.operations if item.operator == "solid.sweep")
+    shape = _sketch_sweep(operation.arguments)
+    classifier = BRepClass3d_SolidClassifier(shape)
+    # (-25, 0, 610) lies in the outside miter support.  Without the corner
+    # overlap it is outside the union of the two independently swept prisms.
+    classifier.Perform(gp_Pnt(-25.0, 0.0, 610.0), 1e-7)
+    assert classifier.State() == TopAbs_IN
 
 
 def test_sweep_rejects_zero_length_and_reverse_path(tmp_path) -> None:

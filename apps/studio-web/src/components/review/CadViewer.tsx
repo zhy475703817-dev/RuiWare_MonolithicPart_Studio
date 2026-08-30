@@ -34,6 +34,11 @@ export function CadViewer({ result, stale = false }: { result: CompileResult | n
       </div>
     );
   }
+  // The artifact path is deterministic for a draft input hash and therefore
+  // stays the same when a worker recompiles that input after an implementation
+  // change.  Include the content hash in the loader key so Three.js does not
+  // keep rendering a stale STL from its URL cache.
+  const stlLoaderUrl = stl.sha256 ? `${stl.url}?sha256=${stl.sha256}` : stl.url;
   return (
     <div className="cad-viewer">
       {stale && <div className="viewer-stale-banner">当前显示的是上一次成功生成的预览；它对应的扫掠输入已发生变化。</div>}
@@ -43,7 +48,7 @@ export function CadViewer({ result, stale = false }: { result: CompileResult | n
         <directionalLight position={[100, 160, 180]} intensity={2.7} castShadow />
         <Suspense fallback={null}>
           <Bounds fit clip observe margin={1.25}>
-            <Model url={stl.url} />
+            <Model url={stlLoaderUrl} />
           </Bounds>
         </Suspense>
         <Grid

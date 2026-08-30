@@ -162,6 +162,42 @@ def fixed_world_frames(points: Sequence[Vec3]) -> list[Frame]:
     return [initial_frame(_v(point), tangent, reference=(1.0, 0.0, 0.0)) for point, tangent in zip(points, corner_tangents(points))]
 
 
+def segment_start_frames(points: Sequence[Vec3], orientation_mode: str = "minimumTwist") -> list[Frame]:
+    """Return a frame at the start of every *straight* path segment.
+
+    ``path_frames`` intentionally reports a station frame at a corner using
+    the bisector of the incoming and outgoing tangents.  That is useful for a
+    smooth visualisation, but it is not perpendicular to either edge of a
+    right-corner polyline.  CAD construction therefore uses these segment
+    frames instead: each profile wire is normal to the edge that it sweeps,
+    and adjacent solids are joined by their natural overlap at the corner.
+    """
+    points = [_v(point) for point in points]
+    tangents = segment_tangents(points)
+    if orientation_mode == "followPath":
+        result: list[Frame] = []
+        for point, tangent in zip(points, tangents):
+            t = normalize(tangent)
+            up = (0.0, 0.0, 1.0)
+            x = cross(up, t)
+            if norm(x) <= EPSILON:
+                x = cross((0.0, 1.0, 0.0), t)
+            x, y, t = orthonormalize(x, up, t)
+            result.append((_v(point), x, y, t))
+        return result
+    if orientation_mode == "fixedWorld":
+        return [initial_frame(_v(point), tangent, reference=(1.0, 0.0, 0.0)) for point, tangent in zip(points, tangents)]
+    if orientation_mode == "minimumTwist":
+        first = initial_frame(points[0], tangents[0])
+        result = [first]
+        current = first
+        for point, tangent in zip(points[1:-1], tangents[1:]):
+            current = _transport(current, tangent)
+            result.append((_v(point), current[1], current[2], current[3]))
+        return result
+    raise ValueError(f"unsupported sweep orientation mode: {orientation_mode}")
+
+
 def path_frames(points: Sequence[Vec3], orientation_mode: str = "minimumTwist") -> list[Frame]:
     points = [_v(point) for point in points]
     if orientation_mode == "minimumTwist":
@@ -183,3 +219,4 @@ parallel_transport_frames = minimum_twist_frames
 compute_follow_path_frames = follow_path_frames
 compute_fixed_world_frames = fixed_world_frames
 compute_path_frames = path_frames
+compute_segment_start_frames = segment_start_frames

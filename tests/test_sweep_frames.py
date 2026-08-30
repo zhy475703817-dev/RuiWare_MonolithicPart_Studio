@@ -10,6 +10,7 @@ from template_core.sweep_frames import (
     minimum_twist_frames,
     normalize,
     path_frames,
+    segment_start_frames,
     segment_tangents,
 )
 
@@ -68,3 +69,20 @@ def test_reverse_segment_keeps_a_stable_frame():
     for frame in frames:
         _assert_frame(frame)
 
+
+def test_segment_start_frames_are_normal_to_each_edge_for_all_modes():
+    points = [(0, 0, 0), (0, 0, 100), (100, 0, 100), (100, 0, 200)]
+    expected = segment_tangents(points)
+    for mode in ("followPath", "fixedWorld", "minimumTwist"):
+        frames = segment_start_frames(points, mode)
+        assert len(frames) == len(expected)
+        for frame, tangent in zip(frames, expected):
+            _assert_frame(frame)
+            assert frame[3] == tangent
+
+
+def test_segment_start_frames_reject_degenerate_and_unknown_modes():
+    with pytest.raises(ValueError, match="zero-length"):
+        segment_start_frames([(0, 0, 0), (0, 0, 0)], "followPath")
+    with pytest.raises(ValueError, match="unsupported"):
+        segment_start_frames([(0, 0, 0), (0, 0, 1)], "roll")

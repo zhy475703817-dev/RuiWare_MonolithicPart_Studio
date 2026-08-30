@@ -3784,6 +3784,7 @@ function GeometryStage({
     tool,
     setTool,
     solving,
+    solveError,
     viewCommand,
     setViewCommand,
     polylineCommand,
@@ -4150,6 +4151,7 @@ function GeometryStage({
             <SketchWorkspaceStatusBar
               solution={solution}
               solving={solving}
+              solveError={solveError}
               solveCase={solveCase}
               plane={draft.sketch.plane}
               planeAxes={planeAxes}
@@ -4363,6 +4365,7 @@ function SweepPathDialog({
         <SketchWorkspaceStatusBar
           solution={flow.solution}
           solving={flow.solving}
+          solveError={flow.solveError}
           solveCase={flow.solveCase}
           plane={editorDraft.sketch.plane}
           planeAxes={sketchPlaneAxes(editorDraft.sketch.plane)}
