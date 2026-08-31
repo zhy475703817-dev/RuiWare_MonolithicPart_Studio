@@ -1,4 +1,4 @@
-import type { SketchSolveResult } from "../../../types";
+import type { SketchSolveResult } from "../../../../../types";
 
 type Props = {
   solution: SketchSolveResult | null;
@@ -68,6 +68,7 @@ export function SketchWorkspaceStatusBar({
     </>
   );
 }
+
 
 
 

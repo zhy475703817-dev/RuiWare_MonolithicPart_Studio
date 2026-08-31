@@ -1,11 +1,11 @@
 import { Link2, MousePointer2, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Draft } from "../../../types";
+import type { Draft } from "../../../../../types";
 import {
   GEOMETRIC_CONSTRAINTS,
   constraintLabel,
   type ConstraintType,
-} from "../../authoring/authoringUtils";
+} from "../../../../authoring/authoringUtils";
 
 type Props = {
   sketch: Draft["sketch"];
@@ -265,6 +265,7 @@ export function SketchConstraintList({
     </>
   );
 }
+
 
 
 

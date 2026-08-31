@@ -9,8 +9,8 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import type { Draft, GeometryRecipe } from "../../../types";
-import { Field, NumberInput, PanelTitle } from "../../../components/ui/FormParts";
+import type { Draft, GeometryRecipe } from "../../../../../types";
+import { Field, NumberInput, PanelTitle } from "../../../../../components/ui/FormParts";
 
 const csv = (value: string) =>
   value
@@ -503,6 +503,7 @@ export function GeometryRecipePanel({
     </>
   );
 }
+
 
 
 

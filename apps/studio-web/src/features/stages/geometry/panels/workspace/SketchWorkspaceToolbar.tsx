@@ -17,8 +17,8 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { NumberInput, PanelTitle } from "../../../components/ui/FormParts";
-import type { SketchSolveResult } from "../../../types";
+import { NumberInput, PanelTitle } from "../../../../../components/ui/FormParts";
+import type { SketchSolveResult } from "../../../../../types";
 
 type SketchTool = "select" | "point" | "line" | "polyline" | "rectangle" | "circle" | "arc";
 
@@ -295,6 +295,7 @@ export function SketchWorkspaceToolbar({
     </>
   );
 }
+
 
 
 

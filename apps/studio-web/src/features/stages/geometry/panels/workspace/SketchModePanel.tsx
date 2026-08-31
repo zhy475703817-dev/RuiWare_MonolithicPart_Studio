@@ -1,6 +1,6 @@
 import { ChevronDown, MoveHorizontal } from "lucide-react";
-import { Field, NumberInput, PanelTitle } from "../../../components/ui/FormParts";
-import type { Draft } from "../../../types";
+import { Field, NumberInput, PanelTitle } from "../../../../../components/ui/FormParts";
+import type { Draft } from "../../../../../types";
 
 type Props = {
   draft: Draft;
@@ -124,6 +124,7 @@ export function SketchModePanel({
     </>
   );
 }
+
 
 
 

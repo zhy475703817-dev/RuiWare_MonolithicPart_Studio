@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { GitBranch } from "lucide-react";
-import { PanelTitle } from "../../../components/ui/FormParts";
-import type { Draft, ParameterDefinition, ParameterSource, SketchSolveResult } from "../../../types";
-import { SketchConstraintList } from "./SketchConstraintList";
-import { SketchDiagnosticsPanel } from "./SketchDiagnosticsPanel";
-import { SketchDimensionPanel } from "./SketchDimensionPanel";
-import { SketchEntityList } from "./SketchEntityList";
+import { PanelTitle } from "../../../../../components/ui/FormParts";
+import type { Draft, ParameterDefinition, ParameterSource, SketchSolveResult } from "../../../../../types";
+import { SketchConstraintList } from "../constraints/SketchConstraintList";
+import { SketchDiagnosticsPanel } from "../diagnostics/SketchDiagnosticsPanel";
+import { SketchDimensionPanel } from "../dimension/SketchDimensionPanel";
+import { SketchEntityList } from "../constraints/SketchEntityList";
 import { SketchIntentConfirmation } from "./SketchIntentConfirmation";
 import { SketchIntentTabs } from "./SketchIntentTabs";
-import { SketchRegionPanel } from "./SketchRegionPanel";
-import { buildEndToEndJoints, endpointLabel, suggestCoincidentEndpoints } from "../../sketch/sketchAuthoringCore";
+import { SketchRegionPanel } from "../regions/SketchRegionPanel";
+import { buildEndToEndJoints, endpointLabel, suggestCoincidentEndpoints } from "../../../../sketch/sketchAuthoringCore";
 import {
   CONSTRAINT_CONTRACTS,
   DIMENSION_CONSTRAINTS,
@@ -21,7 +21,7 @@ import {
   renameParameterReferences,
   semanticParameterIds,
   sketchPlaneAxes,
-} from "../../authoring/authoringUtils";
+} from "../../../../authoring/authoringUtils";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 export function SketchIntentEditor({
@@ -637,6 +637,7 @@ export function SketchIntentEditor({
     </div>
   );
 }
+
 
 
 

@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../../api";
-import type { Draft, ParameterDefinition } from "../../../types";
+import { api } from "../../../../api";
+import type { Draft, ParameterDefinition } from "../../../../types";
 import {
   CONSTRAINT_CONTRACTS,
   type ConstraintType,
   semanticParameterIds,
-} from "../../authoring/authoringUtils";
+} from "../../../authoring/authoringUtils";
 import {
   commitLocalEntityFixedDimensions,
   commitSharedParameterUpdate,
-} from "../../sketch/sketchGeometryCommit";
+} from "../../../sketch/sketchGeometryCommit";
 import {
   cloneSketchEntities,
   dimensionTypeSet,
   normalizeSketchTopology,
-} from "../../sketch/sketchAuthoringCore";
-import { applyCenterlineThinwallOffset } from "../../sketch/sketchThinwallOffset";
-import { normalizeSketchNumbers } from "../../sketch/sketchNumberNormalization";
+} from "../../../sketch/sketchAuthoringCore";
+import { applyCenterlineThinwallOffset } from "../../../sketch/sketchThinwallOffset";
+import { normalizeSketchNumbers } from "../../../sketch/sketchNumberNormalization";
 
 type SketchSolveResult = Awaited<ReturnType<typeof api.solveSketch>>;
 type SketchTool = "select" | "point" | "line" | "polyline" | "rectangle" | "circle" | "arc";
@@ -774,3 +774,4 @@ export const useGeometryEditFlow = ({
     issueViewCommand,
   };
 };
+

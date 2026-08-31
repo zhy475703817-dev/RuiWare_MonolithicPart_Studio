@@ -1,6 +1,6 @@
 import { RefreshCw, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Draft } from "../../../types";
+import type { Draft } from "../../../../../types";
 
 type SketchRegionPanelProps = {
   draft: Draft;
@@ -96,6 +96,7 @@ export function SketchRegionPanel({
     </>
   );
 }
+
 
 
 

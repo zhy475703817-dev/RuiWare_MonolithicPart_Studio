@@ -1,8 +1,8 @@
 import { Layers3, Braces, Upload } from "lucide-react";
-import { api } from "../../../api";
+import { api } from "../../../../../api";
 import type { Dispatch, SetStateAction } from "react";
-import type { Draft } from "../../../types";
-import { Field, NumberInput, PanelTitle } from "../../../components/ui/FormParts";
+import type { Draft } from "../../../../../types";
+import { Field, NumberInput, PanelTitle } from "../../../../../components/ui/FormParts";
 
 type GeometryAuthoringPanelProps = {
   draft: Draft;
@@ -256,6 +256,7 @@ export function GeometryAuthoringPanel({
     </>
   );
 }
+
 
 
 

@@ -1,8 +1,8 @@
 import { RefreshCw, Trash2 } from "lucide-react";
-import { Field, NumberInput } from "../../../components/ui/FormParts";
-import type { Draft } from "../../../types";
-import { arcFromEntity, arcSweepDegrees, arcWithSweep, toggleArcDirection } from "../../sketch/sketchArc";
-import { endFromLengthAndAngle, linePolar } from "../../sketch/sketchLineMath";
+import { Field, NumberInput } from "../../../../../components/ui/FormParts";
+import type { Draft } from "../../../../../types";
+import { arcFromEntity, arcSweepDegrees, arcWithSweep, toggleArcDirection } from "../../../../sketch/sketchArc";
+import { endFromLengthAndAngle, linePolar } from "../../../../sketch/sketchLineMath";
 
 type Entity = Draft["sketch"]["entities"][number];
 
@@ -344,6 +344,7 @@ export function SketchSelectedEntityEditor({
     </div>
   );
 }
+
 
 
 
