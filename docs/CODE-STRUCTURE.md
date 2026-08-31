@@ -75,23 +75,29 @@
 
 ### 2.9 `geometry` 目录
 
-- `GeometryAuthoringPanel.tsx`：几何阶段主面板，总装配草图编辑相关模块。
-- `GeometryRecipePanel.tsx`：几何配方编辑入口。
-- `DimensionCreationBar.tsx`：尺寸创建入口。
-- `SketchConstraintList.tsx`：草图约束列表和编辑。
-- `SketchDiagnosticsPanel.tsx`：草图诊断信息展示。
-- `SketchDimensionPanel.tsx`：尺寸、参数创建和参数契约入口。
-- `SketchEditConflictDialog.tsx`：草图编辑冲突处理对话框。
-- `SketchEntityList.tsx`：草图图元列表。
-- `SketchIntentConfirmation.tsx`：草图意图确认。
-- `SketchIntentEditor.tsx`：草图意图编辑主面板。
-- `SketchIntentTabs.tsx`：草图意图标签页切换。
-- `SketchModePanel.tsx`：草图模式切换。
-- `SketchRegionPanel.tsx`：草图区域面板。
-- `SketchSelectedEntityEditor.tsx`：选中图元编辑器。
-- `SketchWorkspaceStatusBar.tsx`：草图状态栏。
-- `SketchWorkspaceToolbar.tsx`：草图工具栏。
-- `useGeometryEditFlow.ts`：草图编辑流程 hook，承载拖动、撤销、冲突和提交动作。
+- `index.ts`：geometry 目录聚合出口，对外统一暴露阶段入口与常用 Hook。
+- `GeometryStage.tsx`：几何阶段总装配层，只做页面编排和组件组合。
+- `hooks/useGeometryEditFlow.ts`：几何编辑流程 Hook，承载拖动、撤销、冲突和提交动作。
+- `logic/geometryStageLogic.ts`：几何阶段公共逻辑、配方常量和工具函数。
+- `canvas/ParametricSketchCanvas.tsx`：参数化草图画布。
+- `canvas/canvasLogic.ts`：草图画布交互逻辑。
+- `panels/workspace/GeometryAuthoringPanel.tsx`：几何阶段主面板，总装配草图编辑相关模块。
+- `panels/workspace/GeometryRecipePanel.tsx`：几何配方编辑入口。
+- `panels/workspace/SketchModePanel.tsx`：草图模式切换。
+- `panels/workspace/SketchWorkspaceToolbar.tsx`：草图工具栏。
+- `panels/workspace/SketchWorkspaceStatusBar.tsx`：草图状态栏。
+- `panels/constraints/SketchConstraintList.tsx`：草图约束列表和编辑。
+- `panels/constraints/SketchEntityList.tsx`：草图图元列表。
+- `panels/constraints/SketchSelectedEntityEditor.tsx`：选中图元编辑器。
+- `panels/intent/SketchIntentEditor.tsx`：草图意图编辑主面板。
+- `panels/intent/SketchIntentTabs.tsx`：草图意图标签页切换。
+- `panels/intent/SketchIntentConfirmation.tsx`：草图意图确认。
+- `panels/intent/SketchEditConflictDialog.tsx`：草图编辑冲突处理对话框。
+- `panels/dimension/SketchDimensionPanel.tsx`：尺寸、参数创建和参数契约入口。
+- `panels/dimension/DimensionCreationBar.tsx`：尺寸创建入口。
+- `panels/regions/SketchRegionPanel.tsx`：草图区域面板。
+- `panels/diagnostics/SketchDiagnosticsPanel.tsx`：草图诊断信息展示。
+- `panels/*/index.ts`：各子目录出口文件，方便按功能聚合导入。
 
 ### 2.10 `material` 目录
 
@@ -160,7 +166,12 @@
 
 - `cad_worker/__init__.py`：包标记文件。
 - `cad_worker/cli.py`：命令行入口，读取计划并执行。
-- `cad_worker/geometry.py`：几何执行实现，把计划变成结果。
+- `cad_worker/geometry.py`：几何执行总入口，负责调度整个执行链。
+- `cad_worker/body_ops.py`：基础实体生成、放样、折弯、薄壁中心线等实体算子。
+- `cad_worker/feature_ops.py`：加工特征与布尔切削算子。
+- `cad_worker/sweep_ops.py`：扫掠相关算子与路径处理。
+- `cad_worker/exporters.py`：STEP / STL / 语义图 / 诊断文件导出。
+- `cad_worker/postcheck.py`：B-Rep 后置检查与实体数量统计。
 
 ## 6. MCP 接入 `services/ruiware-mcp`
 
