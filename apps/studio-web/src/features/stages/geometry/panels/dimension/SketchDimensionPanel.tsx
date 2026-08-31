@@ -1,15 +1,15 @@
 import { MousePointer2, Trash2 } from "lucide-react";
-import { Field, NumberInput } from "../../../components/ui/FormParts";
-import type { Draft, ParameterDefinition, ParameterSource } from "../../../types";
-import type { ConstraintType } from "../../authoring/authoringUtils";
+import { Field, NumberInput } from "../../../../../components/ui/FormParts";
+import type { Draft, ParameterDefinition, ParameterSource } from "../../../../../types";
+import type { ConstraintType } from "../../../../authoring/authoringUtils";
 import {
   constraintLabel,
   dimensionDescription,
-} from "../../authoring/authoringUtils";
-import { measureDimensionValue } from "../../sketch/sketchAuthoringCore";
+} from "../../../../authoring/authoringUtils";
+import { measureDimensionValue } from "../../../../sketch/sketchAuthoringCore";
 import { DimensionCreationBar } from "./DimensionCreationBar";
-import { ParameterContractList } from "../workflow/contracts/ParameterContractList";
-import { ParameterCreateCard } from "../workflow/contracts/ParameterCreateCard";
+import { ParameterContractList } from "../../../workflow/contracts/ParameterContractList";
+import { ParameterCreateCard } from "../../../workflow/contracts/ParameterCreateCard";
 
 type Props = {
   draft: Draft;
@@ -347,6 +347,7 @@ export function SketchDimensionPanel({
     </>
   );
 }
+
 
 
 

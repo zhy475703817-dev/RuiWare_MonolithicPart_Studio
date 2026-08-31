@@ -1,5 +1,5 @@
 import { Trash2 } from "lucide-react";
-import type { Draft } from "../../../types";
+import type { Draft } from "../../../../../types";
 
 type Props = {
   entities: Draft["sketch"]["entities"];
@@ -64,6 +64,7 @@ export function SketchEntityList({
     </div>
   );
 }
+
 
 
 

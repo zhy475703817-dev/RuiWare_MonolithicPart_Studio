@@ -1,11 +1,11 @@
 import { ArrowRight, Plus, Variable } from "lucide-react";
-import type { Draft, ParameterDefinition, ParameterSource } from "../../../types";
+import type { Draft, ParameterDefinition, ParameterSource } from "../../../../../types";
 import {
   DIMENSION_CONSTRAINTS,
   constraintLabel,
   dimensionDescription,
   type ConstraintType,
-} from "../../authoring/authoringUtils";
+} from "../../../../authoring/authoringUtils";
 
 type NewParameterDraft = {
   id: string;
@@ -121,6 +121,7 @@ export function DimensionCreationBar({
     </>
   );
 }
+
 
 
 

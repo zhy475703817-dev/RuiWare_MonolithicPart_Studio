@@ -1,6 +1,6 @@
 import { CheckCircle2, CircleAlert } from "lucide-react";
-import type { SketchSolveResult } from "../../../types";
-import type { Draft } from "../../../types";
+import type { SketchSolveResult } from "../../../../../types";
+import type { Draft } from "../../../../../types";
 
 type SketchDiagnosticsPanelProps = {
   draft: Draft;
@@ -95,6 +95,7 @@ export function SketchDiagnosticsPanel({
     </div>
   );
 }
+
 
 
 
