@@ -78,6 +78,22 @@ describe("二维草图连续折线", () => {
     );
   });
 
+  it("keeps free-snapped endpoints positional without creating external constraints", () => {
+    const ids = createIds();
+    const started = advance(null, point(20, 0), emptySketch(), ids);
+    const snapped = point(10, 5, {
+      kind: "lineEndpoint",
+      entityId: "edge.existing",
+      handle: "end",
+      point: [10, 5],
+      createsConstraint: true,
+    });
+    const result = advance(started.session, snapped, started.sketch, ids);
+
+    expect(result.sketch.entities.at(-1)?.end).toEqual([10, 5]);
+    expect(result.sketch.constraints).toHaveLength(0);
+  });
+
   it("finishes and cancels only the preview while retaining confirmed segments", () => {
     const ids = createIds();
     const started = advance(null, point(0, 0), emptySketch(), ids);

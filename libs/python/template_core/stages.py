@@ -7,6 +7,7 @@ from .stage1 import template_info_fingerprint, validate_template_info
 from .rules import RuleEvaluationError, evaluate_template, expression_names, parameter_evaluation_order
 from .material import effective_thickness_domain, material_requirement_mismatches
 from .sketch_solver import solve_semantic_sketch
+from .sweep_path import validate_sweep_path
 
 
 STAGE_ORDER: tuple[StageName, ...] = ("templateInfo", "material", "baseSketch", "features", "variants", "review", "admission")
@@ -88,6 +89,75 @@ def _geometry_parameter_references(draft: TemplateDraft) -> tuple[set[str], bool
             face.vSpanExpression,
         ])
     return _collect_expression_names(expressions)
+
+
+def _sweep_path_validation(draft: TemplateDraft) -> dict[str, Any]:
+    path = draft.sweepPath
+    if path is None:
+        return {"valid": False, "diagnostics": [{"severity": "error", "code": "SWEEP_PATH_EMPTY", "path": "sweepPath", "message": "未配置扫掠路径。"}], "ordered": [], "startEndpointRef": None}
+    result = validate_sweep_path(path)
+    if path.status not in {"valid", "confirmed"}:
+        result["valid"] = False
+        result["diagnostics"].append({"severity": "error", "code": "SWEEP_PATH_NOT_CONFIRMED", "path": "sweepPath.status", "message": "扫掠路径必须先确认后才能进入几何阶段。"})
+    return result
+
+
+def _sweep_path_is_valid(draft: TemplateDraft) -> bool:
+    return bool(_sweep_path_validation(draft)["valid"])
+
+
+def _validate_geometry_sketch_path_references(draft: TemplateDraft) -> tuple[bool, str]:
+    sweep_operations = [item for item in draft.geometryRecipe.operations if item.operator == "solid.sweep"]
+    if not sweep_operations:
+        return True, "无扫掠操作"
+    sketches = set(draft.geometryRecipe.sketches)
+    paths = set(draft.geometryRecipe.paths)
+    profile_id = "sketch.section.main"
+    path_id = "path.main"
+    for operation in sweep_operations:
+        if operation.profileSketchId != profile_id:
+            return False, f"{operation.id} 必须明确引用截面草图 {profile_id}"
+        if operation.pathSketchId != path_id:
+            return False, f"{operation.id} 必须明确引用扫掠路径 {path_id}"
+        if profile_id not in operation.sourceRefs or path_id not in operation.sourceRefs or set(operation.sourceRefs) != {profile_id, path_id}:
+            return False, f"{operation.id} 的 sourceRefs 必须且只能同时包含 {profile_id} 和 {path_id}"
+    if profile_id not in sketches:
+        return False, f"geometryRecipe.sketches 缺少 {profile_id}"
+    if draft.sweepPath is None or draft.sweepPath.id != path_id or path_id not in paths:
+        return False, f"geometryRecipe.paths 缺少 {path_id}"
+    return True, "截面草图与扫掠路径引用完整"
+
+
+def sweep_preview_admission(draft: TemplateDraft, material_snapshot: dict[str, Any] | None = None) -> list[dict[str, str]]:
+    """Return blocking diagnostics before any 3-D preview/CAD work starts."""
+    operations = [item for item in draft.geometryRecipe.operations if item.operator == "solid.sweep"]
+    if not operations:
+        return []
+    missing: list[dict[str, str]] = []
+    entities = [item for item in draft.sketch.entities if not item.construction]
+    entity_ids = {item.id for item in entities}
+    if not entities or not draft.sketch.regions or any(not region.closed or not set(region.boundaryRefs) <= entity_ids for region in draft.sketch.regions):
+        missing.append({"code": "SWEEP_PREVIEW_PROFILE_INVALID", "path": "sketch", "message": "三维预览需要有效且闭合的截面草图。"})
+    path_result = _sweep_path_validation(draft)
+    if draft.sweepPath is None or draft.sweepPath.status != "confirmed":
+        missing.append({"code": "SWEEP_PREVIEW_PATH_UNCONFIRMED", "path": "sweepPath.status", "message": "三维预览需要已确认的扫掠路径。"})
+    for item in path_result.get("diagnostics", []):
+        if item["code"] in {"SWEEP_PATH_DISCONNECTED", "SWEEP_PATH_BRANCH", "SWEEP_PATH_SELF_INTERSECTION", "SWEEP_PATH_DUPLICATE_SEGMENT", "SWEEP_PATH_ILLEGAL_GEOMETRY", "SWEEP_PATH_ZERO_LENGTH", "SWEEP_PATH_GEOMETRY_INVALID", "SWEEP_PATH_START_UNDEFINED"}:
+            missing.append({"code": item["code"], "path": item["path"], "message": item["message"]})
+    if not path_result.get("startEndpointRef"):
+        missing.append({"code": "SWEEP_PREVIEW_START_MISSING", "path": "sweepPath.startEndpointRef", "message": "三维预览需要确定扫掠路径起点。"})
+    reference_ok, reference_message = _validate_geometry_sketch_path_references(draft)
+    if not reference_ok:
+        missing.append({"code": "SWEEP_PREVIEW_REFERENCES_INVALID", "path": "geometryRecipe", "message": reference_message})
+    for operation in operations:
+        if operation.profileAnchor != "sketch.origin" or operation.orientationMode not in {"followPath", "fixedWorld", "minimumTwist"} or operation.scaleMode != "constant" or operation.twistMode != "none" or operation.cornerMode != "right":
+            missing.append({"code": "SWEEP_PREVIEW_CONFIGURATION_INVALID", "path": f"geometryRecipe.operations.{operation.id}", "message": "扫掠配置必须使用草图原点、最小扭转、恒定缩放、无扭转和 RightCorner。"})
+    if not draft.parameterDefinitions:
+        missing.append({"code": "SWEEP_PREVIEW_PARAMETERS_MISSING", "path": "parameterDefinitions", "message": "三维预览缺少生成参数。"})
+    record = (material_snapshot or {}).get("record", material_snapshot or {})
+    if not isinstance(record, dict) or not record.get("code"):
+        missing.append({"code": "SWEEP_PREVIEW_MATERIAL_MISSING", "path": "materialSnapshot", "message": "三维预览缺少完整材料数据。"})
+    return missing
 
 
 def _validation(stage: StageName, checks: list[StageCheck]) -> StageValidation:
@@ -228,6 +298,8 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
     )
     operator_inputs_ok = True
     operator_input_messages: list[str] = []
+    reference_ok, reference_message = _validate_geometry_sketch_path_references(draft)
+    path_validation = _sweep_path_validation(draft) if any(item.operator == "solid.sweep" for item in draft.geometryRecipe.operations) and draft.sweepPath is not None else {"valid": True, "diagnostics": []}
     for operation in draft.geometryRecipe.operations:
         keys = set(operation.arguments) | set(operation.argumentExpressions)
         required_keys = {
@@ -237,9 +309,25 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
             "sheet.bend": {"length", "width", "thickness", "bendPosition", "bendAngleDegrees", "insideRadius", "kFactor"},
         }.get(operation.operator, set())
         missing_keys = required_keys - keys
+        if operation.operator == "solid.sweep" and draft.sweepPath is not None:
+            path_id = operation.pathSketchId or "path.main"
+            if path_id == draft.sweepPath.id or draft.sweepPath.id in operation.sourceRefs:
+                missing_keys.discard("pathPoints")
+                if not _sweep_path_is_valid(draft):
+                    operator_input_messages.append(f"{operation.id} 的扫掠路径尚未确认或无效")
         if missing_keys:
             operator_inputs_ok = False
             operator_input_messages.append(f"{operation.id} 缺少 {', '.join(sorted(missing_keys))}")
+    sweep_path_ok = True
+    sweep_path_message = "未配置扫掠路径"
+    sweep_operations = [item for item in draft.geometryRecipe.operations if item.operator == "solid.sweep"]
+    if sweep_operations:
+        if draft.sweepPath is not None:
+            sweep_path_ok = bool(path_validation["valid"])
+            sweep_path_message = "扫掠路径已确认" if sweep_path_ok else "；".join(item["message"] for item in path_validation["diagnostics"]) or "扫掠路径拓扑无效"
+        else:
+            sweep_path_ok = all("pathPoints" in (set(item.arguments) | set(item.argumentExpressions)) for item in sweep_operations)
+            sweep_path_message = "使用算子内置路径点" if sweep_path_ok else "路径扫掠需要一条已确认的扫掠路径"
     checks = [
         StageCheck(id="driving-parameters", label="几何驱动参数完整", passed=expressions_valid, severity="error", path="geometryRecipe.operations", message=f"几何配方表达式无效，或引用了未声明参数：{', '.join(sorted(missing)) or '请检查表达式语法'}。草图驱动参数只需包含轮廓自身使用的参数。"),
         StageCheck(id="semantic-entities", label="语义图元契约完整", passed=semantic_entities_ok, severity="error", path="sketch.entities", message="请为草图图元定义稳定语义名称，并只引用已声明参数。"),
@@ -253,6 +341,8 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="geometry-recipe", label="基础几何配方已建立", passed=bool(draft.geometryRecipe.operations), severity="error", path="geometryRecipe.operations", message="基础几何必须至少包含一个拉伸、旋转、扫掠、放样、钣金或派生操作。"),
         StageCheck(id="geometry-operators-supported", label="几何算子均已实现", passed=operators_supported, severity="error", path="geometryRecipe.operations", message="当前配方包含CAD内核尚未实现的算子。"),
         StageCheck(id="geometry-operator-inputs", label="几何算子输入完整", passed=operator_inputs_ok, severity="error", path="geometryRecipe.operations", message="；".join(operator_input_messages) or "算子输入完整。"),
+        StageCheck(id="geometry-sketch-path-references", label="截面与路径草图引用完整", passed=reference_ok, severity="error", path="geometryRecipe", message=reference_message),
+        StageCheck(id="sweep-path", label="扫掠路径已定义", passed=sweep_path_ok, severity="error", path="sweepPath", message=sweep_path_message),
         StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
         StageCheck(id="geometry-expressions-id-only", label="几何表达式仅使用参数ID", passed=not base_sketch_alias_violations, severity="error", path="geometryRecipe", message=_alias_violation_message(base_sketch_alias_violations) or "几何表达式仅可使用参数稳定 ID。"),
     ]

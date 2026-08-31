@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowRight,
@@ -120,7 +120,6 @@ import {
   sketchPlaneAxes,
 } from "./features/authoring/authoringUtils";
 import {
-  buildLineSnapCoincidentConstraints,
   DEFAULT_SKETCH_SNAP_OPTIONS,
   endpointSnapToleranceMm,
   isEndpointSnapKind,
@@ -130,6 +129,7 @@ import {
   sketchDrawPointFromSnap,
   sketchPointTooClose,
   type SketchDrawPoint,
+  type SketchSnapKind,
   type SketchSnapHit,
 } from "./features/sketch/sketchObjectSnap";
 import {
@@ -143,6 +143,7 @@ import {
   arcWithSweep,
   pointAngleDegrees,
   projectPointOntoCircle,
+  signedArcSweep,
   signedAngleDelta,
   toggleArcDirection,
   type ArcDrawMode,
@@ -186,6 +187,11 @@ import {
   resolveSketchLineInference,
   type SketchLineInference,
 } from "./features/sketch/sketchLineInference";
+import {
+  sampleSweepPathGeometry,
+  sweepArcDegrees as sweepPathArcDegrees,
+  validateSweepPathTopology,
+} from "./features/sketch/sweepPathTopology";
 import type {
   CompileResult,
   Draft,
@@ -201,6 +207,9 @@ import type {
   SketchSolveResult,
   StageName,
   StageValidation,
+  SweepPathGeometry,
+  SweepPathSketch,
+  SweepPathWindowState,
   TemplateAuthoringRegistry,
   TemplateEvaluation,
   VariantDefinition,
@@ -291,7 +300,7 @@ const operatorStatus = (operator: string) =>
   OPERATORS.find(([id]) => id === operator)?.[2] || "unknown";
 const operatorDefaults = (operator: string): Pick<GeometryRecipe["operations"][number], "arguments" | "argumentExpressions" | "sourceRefs"> => {
   if (operator === "solid.revolve") return { sourceRefs:["sketch.section.main"], arguments:{axisOriginU:-75,axisOriginV:0,axisDirectionU:0,axisDirectionV:1,angleDegrees:360}, argumentExpressions:{} };
-  if (operator === "solid.sweep") return { sourceRefs:["sketch.section.main","path.main"], arguments:{pathPoints:"0:0:0;0:0:length"}, argumentExpressions:{} };
+  if (operator === "solid.sweep") return { sourceRefs:["sketch.section.main","path.main"], arguments:{pathPoints:"0:0:0;0:0:length"}, argumentExpressions:{}, profileAnchor:"sketch.origin", orientationMode:"minimumTwist", scaleMode:"constant", twistMode:"none", cornerMode:"right" } as any;
   if (operator === "solid.loft") return { sourceRefs:["sketch.section.main"], arguments:{stations:"0:1;length:0.75"}, argumentExpressions:{} };
   if (operator === "sheet.bend") return { sourceRefs:[], arguments:{bendAngleDegrees:90,kFactor:0.42}, argumentExpressions:{length:"length",width:"sectionWidth",thickness:"thickness",bendPosition:"length * 0.6",insideRadius:"thickness"} };
   return {sourceRefs:["sketch.section.main"],arguments:{},argumentExpressions:{length:"length"}};
@@ -309,6 +318,116 @@ const scalar = (value: string): string | number | boolean => {
   return value.trim() !== "" && Number.isFinite(number) ? number : value;
 };
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+const createEmptySweepPath = (): SweepPathSketch => ({
+  id: "path.main",
+  plane: "XY",
+  geometry: [],
+  constraints: [],
+  startPointId: null,
+  startEndpointRef: null,
+  status: "empty",
+  generationStatus: "idle",
+  diagnostics: [],
+});
+
+type PathEditorDraft = Draft["sketch"];
+
+const pathToSketch = (path: SweepPathSketch): PathEditorDraft => ({
+  model: "semanticProfile",
+  acquisitionMethod: "manual",
+  plane: path.plane,
+  profileMode: "centerlineThinWall",
+  drivingParameters: [],
+  entities: path.geometry.map((item) => ({
+    id: item.id,
+    role: item.role || "sweep.path.geometry",
+    geometryType: item.geometryType,
+    parameterRefs: item.parameterRefs || [],
+    construction: item.construction,
+    start: item.start ?? null,
+    end: item.end ?? null,
+    center: item.center ?? null,
+    radius: item.radius ?? null,
+    startAngle: item.startAngle ?? null,
+    endAngle: item.endAngle ?? null,
+    largeArc: item.largeArc ?? null,
+    sweepDirection: item.sweepDirection ?? inferSweepDirection(item),
+    points: item.points || [],
+  })),
+  constraints: path.constraints.map((item) => ({ ...item })),
+  regions: [],
+  constraintsReviewed: true,
+  sourceAttachmentId: null,
+  sourceProfileId: null,
+  sourceHash: null,
+  importUnit: null,
+  importScale: null,
+  conversionReviewed: true,
+});
+
+const inferSweepDirection = (geometry: Pick<SweepPathGeometry, "startAngle" | "endAngle" | "largeArc" | "sweepDirection">) => {
+  if (geometry.sweepDirection) return geometry.sweepDirection;
+  if (geometry.startAngle == null || geometry.endAngle == null) return "ccw" as const;
+  return signedArcSweep(geometry.startAngle, geometry.endAngle, geometry.largeArc ?? false) < 0 ? "cw" as const : "ccw" as const;
+};
+
+const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): SweepPathSketch => ({
+  ...previous,
+  id: previous.id || "path.main",
+  plane: sketch.plane,
+  geometry: sketch.entities.map((item) => ({
+    id: item.id,
+    role: item.role,
+    geometryType: item.geometryType,
+    parameterRefs: item.parameterRefs || [],
+    construction: item.construction,
+    start: item.start ?? null,
+    end: item.end ?? null,
+    center: item.center ?? null,
+    radius: item.radius ?? null,
+    startAngle: item.startAngle ?? null,
+    endAngle: item.endAngle ?? null,
+    largeArc: item.largeArc ?? null,
+    sweepDirection: item.sweepDirection ?? inferSweepDirection(item),
+    points: item.points || [],
+  })),
+  constraints: sketch.constraints.map((item) => ({ ...item })),
+  startPointId: previous.startPointId && sketch.entities.some((item) => item.id === previous.startPointId) ? previous.startPointId : null,
+  startEndpointRef: previous.startEndpointRef && sketch.entities.some((item) => item.id === previous.startEndpointRef?.geometryId) ? previous.startEndpointRef : null,
+  status: "editing",
+  generationStatus: "idle",
+  diagnostics: [],
+});
+
+const sweepGeometryPoints = (geometry: SweepPathGeometry): [number, number][] => {
+  return sampleSweepPathGeometry(geometry);
+};
+
+const sweepPathDiagnostics = (path: SweepPathSketch) => {
+  const result = validateSweepPathTopology(path);
+  const unsupported = path.geometry.filter((item) => !["line", "arc"].includes(item.geometryType));
+  if (unsupported.length) result.diagnostics.push({ severity: "warning", code: "SWEEP_PATH_UNSUPPORTED_GEOMETRY", path: "sweepPath.geometry", message: `当前 CAD 扫掠算子暂不支持：${unsupported.map((item) => item.geometryType).join("、")}；图元仍会保留，可在扫掠验证阶段处理。` });
+  return result.diagnostics;
+};
+
+const serializeSweepPathPoints = (path: SweepPathSketch) => {
+  const topology = validateSweepPathTopology(path);
+  const byId = new Map(path.geometry.map((item) => [item.id, item]));
+  const points: [number, number][] = [];
+  for (const item of topology.ordered) {
+    const geometry = byId.get(item.geometryId);
+    if (!geometry) continue;
+    const segment = sweepGeometryPoints(geometry);
+    const ordered = item.forward ? segment : [...segment].reverse();
+    for (const point of ordered) if (!points.length || Math.hypot(points[points.length - 1][0] - point[0], points[points.length - 1][1] - point[1]) > 0.05) points.push(point);
+  }
+  return points
+    .map(([x, y]) =>
+      path.plane === "YZ" ? `0:${x}:${y}` : `${x}:0:${y}`,
+    )
+    .join(";");
+};
 
 function profileModeSketch(
   mode: Draft["sketch"]["profileMode"],
@@ -819,6 +938,110 @@ const analyzeLocalSketchEdit = (
 
 type EndpointHandle = "start" | "end";
 
+type EndpointConnectionCandidate = {
+  sourceEntityId: string;
+  sourceHandle: EndpointHandle;
+  targetEntityId: string;
+  targetHandle: EndpointHandle | null;
+  targetKind: "endpoint" | "line" | "object";
+  snapKind: SketchSnapKind;
+  sourcePoint: [number, number];
+  targetPoint: [number, number];
+  distancePx: number;
+};
+
+const endpointPoint = (
+  entity: Draft["sketch"]["entities"][number],
+  handle: EndpointHandle,
+): [number, number] | null => {
+  const point = entity[handle];
+  return point ? [point[0], point[1]] : null;
+};
+
+const hasCoincidentEndpointConstraint = (
+  constraints: Draft["sketch"]["constraints"],
+  left: { entityId: string; handle: EndpointHandle },
+  right: { entityId: string; handle: EndpointHandle },
+) => constraints.some((constraint) => {
+  if (constraint.constraintType !== "coincident" || constraint.entityRefs.length < 2) return false;
+  const handles = constraint.endpointRefs || [];
+  if (constraint.entityRefs.length === 2 && handles.length >= 2) {
+    const a = { entityId: constraint.entityRefs[0], handle: handles[0] };
+    const b = { entityId: constraint.entityRefs[1], handle: handles[1] };
+    return (a.entityId === left.entityId && a.handle === left.handle && b.entityId === right.entityId && b.handle === right.handle)
+      || (a.entityId === right.entityId && a.handle === right.handle && b.entityId === left.entityId && b.handle === left.handle);
+  }
+  return false;
+});
+
+const findEndpointConnectionCandidate = (
+  entities: Draft["sketch"]["entities"],
+  movingIds: Set<string>,
+  constraints: Draft["sketch"]["constraints"],
+  scale: number,
+  previous: EndpointConnectionCandidate | null,
+): EndpointConnectionCandidate | null => {
+  const moving = entities.filter((entity) => movingIds.has(entity.id));
+  const targets = entities.filter((entity) => !movingIds.has(entity.id));
+  const candidates: EndpointConnectionCandidate[] = [];
+  for (const source of moving) {
+    if (source.geometryType !== "line" && source.geometryType !== "arc") continue;
+    for (const sourceHandle of ["start", "end"] as const) {
+      const sourcePoint = endpointPoint(source, sourceHandle);
+      if (!sourcePoint) continue;
+      for (const target of targets) {
+        const hit = resolveSketchSnap(
+          { x: sourcePoint[0], y: sourcePoint[1] },
+          [target],
+          {
+            enabled: true,
+            toleranceMm: endpointSnapToleranceMm(scale),
+            lineToleranceMm: endpointSnapToleranceMm(scale, 8),
+            kinds: DEFAULT_SKETCH_SNAP_OPTIONS.kinds,
+          },
+        );
+        const snap = hit.target;
+        if (!snap) continue;
+        const targetHandle = isEndpointSnapKind(snap.kind) ? snap.handle || null : null;
+        if (targetHandle && hasCoincidentEndpointConstraint(constraints, { entityId: source.id, handle: sourceHandle }, { entityId: target.id, handle: targetHandle })) continue;
+        candidates.push({
+          sourceEntityId: source.id,
+          sourceHandle,
+          targetEntityId: target.id,
+          targetHandle,
+          targetKind: targetHandle ? "endpoint" : snap.kind === "lineNearest" ? "line" : "object",
+          snapKind: snap.kind,
+          sourcePoint,
+          targetPoint: snap.point,
+          distancePx: Math.hypot(sourcePoint[0] - snap.point[0], sourcePoint[1] - snap.point[1]) * scale,
+        });
+      }
+    }
+  }
+  const hysteresis = previous ? 14 : 10;
+  const stable = previous && candidates.find((item) => item.sourceEntityId === previous.sourceEntityId && item.sourceHandle === previous.sourceHandle && item.targetEntityId === previous.targetEntityId && item.targetHandle === previous.targetHandle && item.targetKind === previous.targetKind && item.snapKind === previous.snapKind && item.distancePx <= hysteresis);
+  if (stable) return stable;
+  return candidates
+    .filter((item) => item.distancePx <= 10)
+    .sort((a, b) => (a.targetKind === "endpoint" ? 0 : 1) - (b.targetKind === "endpoint" ? 0 : 1)
+      || a.distancePx - b.distancePx
+      || a.sourceEntityId.localeCompare(b.sourceEntityId)
+      || a.targetEntityId.localeCompare(b.targetEntityId))[0] || null;
+};
+
+const snapEntityEndpointToCandidate = (
+  entities: Draft["sketch"]["entities"],
+  candidate: EndpointConnectionCandidate,
+) => entities.map((entity) => {
+  if (entity.id !== candidate.sourceEntityId) return entity;
+  const next = { ...entity, [candidate.sourceHandle]: [...candidate.targetPoint] as [number, number] };
+  if (entity.geometryType === "arc" && entity.center) {
+    const angle = (Math.atan2(candidate.targetPoint[1] - entity.center[1], candidate.targetPoint[0] - entity.center[0]) * 180) / Math.PI;
+    return { ...next, [candidate.sourceHandle === "start" ? "startAngle" : "endAngle"]: angle };
+  }
+  return next;
+});
+
 const coincidentEndpointLinks = (
   constraints: Draft["sketch"]["constraints"],
 ) => {
@@ -1013,6 +1236,7 @@ const entitiesToPrimitives = (entities: Draft["sketch"]["entities"]) =>
     startAngle: item.startAngle,
     endAngle: item.endAngle,
     largeArc: item.largeArc,
+    sweepDirection: item.sweepDirection,
     points: item.points.map(([x, y]) => ({ x, y })),
   }));
 
@@ -1028,6 +1252,7 @@ const alignEntitiesToPrimitives = (
     startAngle?: number | null;
     endAngle?: number | null;
     largeArc?: boolean | null;
+    sweepDirection?: "ccw" | "cw";
     points?: { x: number; y: number }[];
   }[],
 ) => {
@@ -1054,6 +1279,7 @@ const alignEntitiesToPrimitives = (
         primitive.endAngle != null ? primitive.endAngle : entity.endAngle,
       largeArc:
         primitive.largeArc != null ? primitive.largeArc : entity.largeArc,
+      sweepDirection: primitive.sweepDirection || entity.sweepDirection,
       points: primitive.points?.length
         ? primitive.points.map(
             (point) => [point.x, point.y] as [number, number],
@@ -1083,6 +1309,7 @@ function ParametricSketchCanvas({
   orthogonalLock,
   objectSnapEnabled,
   arcDrawMode,
+  moveMode = false,
 }: {
   draft: Draft;
   solution: SketchSolveResult | null;
@@ -1109,6 +1336,7 @@ function ParametricSketchCanvas({
   orthogonalLock: boolean;
   objectSnapEnabled: boolean;
   arcDrawMode: ArcDrawMode;
+  moveMode?: boolean;
 }) {
   const solved = solution?.cases.find((entry) => entry.case === caseName);
   const draftPrimitives = entitiesToPrimitives(draft.sketch.entities);
@@ -1137,6 +1365,7 @@ function ParametricSketchCanvas({
     return resolveSketchSnap(worldPoint, latestSketchRef.current.entities, {
       ...snapOptions,
       toleranceMm: endpointSnapToleranceMm(viewMathRef.current.scale),
+      lineToleranceMm: endpointSnapToleranceMm(viewMathRef.current.scale, 8),
       tangentFromCenter,
     });
   };
@@ -1222,6 +1451,7 @@ function ParametricSketchCanvas({
     moveIds: string[];
   } | null>(null);
   const [dragTick, setDragTick] = useState(0);
+  const [connectionPreview, setConnectionPreview] = useState<EndpointConnectionCandidate | null>(null);
   const [viewRevision, setViewRevision] = useState(0);
   const [isPanning, setIsPanning] = useState(false);
   const [settlePrimitives, setSettlePrimitives] = useState<
@@ -1250,6 +1480,7 @@ function ParametricSketchCanvas({
   const activeToolRef = useRef(tool);
   const dragEntitiesRef = useRef<Draft["sketch"]["entities"] | null>(null);
   const dragRef = useRef<typeof drag>(null);
+  const connectionPreviewRef = useRef<EndpointConnectionCandidate | null>(null);
   dragRef.current = drag;
   void dragTick;
   const conflictPrimitives = pendingConflict
@@ -1267,14 +1498,28 @@ function ParametricSketchCanvas({
     ? dragPrimitives || settlePrimitives || basePrimitives
     : pendingConflict
       ? conflictPrimitives || basePrimitives
-      : settlePrimitives || basePrimitives;
+    : settlePrimitives || basePrimitives;
+  const updateConnectionPreview = (candidate: EndpointConnectionCandidate | null) => {
+    const previous = connectionPreviewRef.current;
+    const changed = previous?.sourceEntityId !== candidate?.sourceEntityId
+      || previous?.sourceHandle !== candidate?.sourceHandle
+      || previous?.targetEntityId !== candidate?.targetEntityId
+      || previous?.targetHandle !== candidate?.targetHandle
+      || previous?.targetKind !== candidate?.targetKind
+      || previous?.sourcePoint[0] !== candidate?.sourcePoint[0]
+      || previous?.sourcePoint[1] !== candidate?.sourcePoint[1]
+      || previous?.targetPoint[0] !== candidate?.targetPoint[0]
+      || previous?.targetPoint[1] !== candidate?.targetPoint[1];
+    connectionPreviewRef.current = candidate;
+    if (changed) setConnectionPreview(candidate);
+  };
   const editDisplayEntities = drag
     ? dragEntitiesRef.current || drag.beforeEntities
     : pendingConflict
       ? pendingConflict.afterEntities
       : draft.sketch.entities;
   const entityControls =
-    tool === "select" && caseName === "nominal" && !pendingConflict
+    tool === "select" && caseName === "nominal" && !pendingConflict && !moveMode
       ? getSketchEntityControls(editDisplayEntities, selected)
       : [];
   useEffect(() => {
@@ -1480,11 +1725,19 @@ function ParametricSketchCanvas({
           : ""
       }`.trim(),
     );
-    if (hint && hit.target && isEndpointSnapKind(hit.target.kind)) {
+    if (hint && hit.target) {
       hint.setAttribute("visibility", "visible");
       hint.setAttribute("x", String(screenPoint.x + 10));
       hint.setAttribute("y", String(screenPoint.y - 10));
-      hint.textContent = `端点 · ${hit.target.handle === "start" ? "起点" : "终点"}`;
+      hint.textContent = isEndpointSnapKind(hit.target.kind)
+        ? `端点 · ${hit.target.handle === "start" ? "起点" : "终点"}`
+        : hit.target.kind === "lineNearest"
+          ? "吸附 · 线段"
+          : hit.target.kind === "arcNearest"
+            ? "吸附 · 圆弧"
+            : hit.target.kind === "circleNearest"
+              ? "吸附 · 圆周"
+              : "已吸附";
     } else {
       hint?.setAttribute("visibility", "hidden");
     }
@@ -1931,19 +2184,11 @@ function ParametricSketchCanvas({
       let constraintNumber = 0;
       const createConstraintId = () =>
         uid(`constraint.line.${++constraintNumber}`);
-      const snapConstraints = buildLineSnapCoincidentConstraints(
-        lineId,
-        next[0].snapTarget,
-        next[1].snapTarget,
-        entities,
-        sketch.constraints,
-        createConstraintId,
-      );
       const inferenceConstraints = buildLineInferenceConstraint(
         lineId,
         committedInference,
         entities,
-        [...sketch.constraints, ...snapConstraints],
+        sketch.constraints,
         createConstraintId,
       );
       beginEdit();
@@ -1952,7 +2197,6 @@ function ParametricSketchCanvas({
         entities,
         constraints: [
           ...sketch.constraints,
-          ...snapConstraints,
           ...inferenceConstraints,
         ],
         constraintsReviewed: false,
@@ -2060,6 +2304,7 @@ function ParametricSketchCanvas({
         startAngle: geometry.startAngle,
         endAngle: geometry.endAngle,
         largeArc: geometry.largeArc,
+        sweepDirection: geometry.sweep >= 0 ? "ccw" : "cw",
         points: [],
       });
     }
@@ -2400,6 +2645,7 @@ function ParametricSketchCanvas({
       moveIds,
     };
     dragRef.current = nextDrag;
+    updateConnectionPreview(null);
     setDrag(nextDrag);
     svgRef.current?.setPointerCapture(event.pointerId);
   };
@@ -2462,6 +2708,7 @@ function ParametricSketchCanvas({
       ) {
         // Keep the pressed preview identical to the pre-drag geometry.
         dragEntitiesRef.current = active.beforeEntities;
+        updateConnectionPreview(null);
         return;
       }
       active.hasMoved = true;
@@ -2469,6 +2716,7 @@ function ParametricSketchCanvas({
       setDrag((value) => (value ? { ...value, hasMoved: true } : value));
     }
     if (active.editTarget) {
+      updateConnectionPreview(null);
       const targetPoint: [number, number] = [
         active.editTarget.originPoint[0] + dx,
         active.editTarget.originPoint[1] + dy,
@@ -2479,9 +2727,25 @@ function ParametricSketchCanvas({
         targetPoint,
       );
       if (!edited) return;
+      let editedEntities = edited.entities;
+      if (active.handle === "start" || active.handle === "end") {
+        const candidate = findEndpointConnectionCandidate(
+          editedEntities,
+          new Set([active.id]),
+          draft.sketch.constraints,
+          viewMathRef.current.scale,
+          connectionPreviewRef.current,
+        );
+        if (candidate) {
+          editedEntities = snapEntityEndpointToCandidate(editedEntities, candidate);
+          updateConnectionPreview(candidate);
+        } else {
+          updateConnectionPreview(null);
+        }
+      }
       const propagated = propagateShapeHandleEdit(
         draft.sketch.constraints,
-        edited.entities,
+        editedEntities,
         active.beforeEntities,
         edited.editedEntityIds,
       );
@@ -2495,13 +2759,13 @@ function ParametricSketchCanvas({
       return;
     }
     const source = active.entity;
-    const translateWhole =
-      active.handle === "center" || active.handle === "body";
     const movingIds = new Set(
       active.moveIds.length ? active.moveIds : [active.id],
     );
     const rigidGroup = movingIds.size > 1;
-    const local =
+    const translateWhole =
+      active.handle === "center" || active.handle === "body";
+    let local =
       rigidGroup || translateWhole
         ? translateSketchEntities(
             active.beforeEntities,
@@ -2536,6 +2800,39 @@ function ParametricSketchCanvas({
             }
             return { ...item, [active.handle]: endpoint };
           });
+    if (!active.duplicate && !translateWhole && (active.handle === "start" || active.handle === "end")) {
+      const candidate = findEndpointConnectionCandidate(
+        local,
+        movingIds,
+        draft.sketch.constraints,
+        viewMathRef.current.scale,
+        connectionPreviewRef.current,
+      );
+      if (candidate) {
+        local = snapEntityEndpointToCandidate(local, candidate);
+        updateConnectionPreview(candidate);
+      } else {
+        updateConnectionPreview(null);
+      }
+    } else if (!active.duplicate && translateWhole) {
+      const candidate = findEndpointConnectionCandidate(
+        local,
+        movingIds,
+        draft.sketch.constraints,
+        viewMathRef.current.scale,
+        connectionPreviewRef.current,
+      );
+      if (candidate) {
+        const dxSnap = candidate.targetPoint[0] - candidate.sourcePoint[0];
+        const dySnap = candidate.targetPoint[1] - candidate.sourcePoint[1];
+        local = translateSketchEntities(local, [...movingIds], [dxSnap, dySnap]);
+        updateConnectionPreview(candidate);
+      } else {
+        updateConnectionPreview(null);
+      }
+    } else {
+      updateConnectionPreview(null);
+    }
     if (active.duplicate || rigidGroup) {
       // Group translate (move or Alt-copy) keeps relative topology among moved entities.
       dragEntitiesRef.current = local;
@@ -2562,6 +2859,7 @@ function ParametricSketchCanvas({
     const clearDragState = () => {
       dragEntitiesRef.current = null;
       dragRef.current = null;
+      updateConnectionPreview(null);
       pointerOperationRef.current = endSketchPointerOperation(
         pointerOperationRef.current,
         active.pointerId,
@@ -2631,9 +2929,55 @@ function ParametricSketchCanvas({
       return Math.hypot(to[0] - from[0], to[1] - from[1]);
     })();
     if (displacement < 1e-9) {
+      updateConnectionPreview(null);
       clearDragState();
       return;
     }
+    const releaseConnection = !active.duplicate
+      ? findEndpointConnectionCandidate(
+        afterEntities,
+        new Set(active.moveIds.length ? active.moveIds : [active.id]),
+        draft.sketch.constraints,
+        viewMathRef.current.scale,
+        connectionPreviewRef.current,
+      )
+      : null;
+    const autoConnection = !active.duplicate
+      ? (connectionPreviewRef.current?.targetKind === "endpoint"
+        ? connectionPreviewRef.current
+        : releaseConnection?.targetKind === "endpoint" && releaseConnection.distancePx <= 1
+          ? releaseConnection
+          : null)
+      : null;
+    const addAutoConnection = (
+      committed: { sketch: Draft["sketch"]; parameterDefinitions?: ParameterDefinition[] },
+    ) => {
+      if (!autoConnection || autoConnection.targetHandle == null || autoConnection.targetKind !== "endpoint") return committed;
+      const sourceExists = committed.sketch.entities.some((item) => item.id === autoConnection.sourceEntityId);
+      const targetExists = committed.sketch.entities.some((item) => item.id === autoConnection.targetEntityId);
+      if (!sourceExists || !targetExists || hasCoincidentEndpointConstraint(committed.sketch.constraints, { entityId: autoConnection.sourceEntityId, handle: autoConnection.sourceHandle }, { entityId: autoConnection.targetEntityId, handle: autoConnection.targetHandle })) return committed;
+      const constraint = {
+        id: uid(`constraint.auto.coincident.${autoConnection.sourceEntityId}`),
+        label: `自动重合 · ${autoConnection.sourceEntityId}.${autoConnection.sourceHandle} ↔ ${autoConnection.targetEntityId}.${autoConnection.targetHandle}`,
+        constraintType: "coincident" as const,
+        entityRefs: [autoConnection.sourceEntityId, autoConnection.targetEntityId],
+        endpointRefs: [autoConnection.sourceHandle, autoConnection.targetHandle] as ["start" | "end", "start" | "end"],
+        expression: null,
+        parameterId: null,
+        value: null,
+        driverMode: null,
+        enabled: true,
+        driving: true,
+      };
+      return {
+        ...committed,
+        sketch: {
+          ...committed.sketch,
+          constraints: [...committed.sketch.constraints, constraint],
+          constraintsReviewed: false,
+        },
+      };
+    };
     if (active.duplicate) {
       const idMap = active.duplicateIdMap;
       const copiedConstraints = draft.sketch.constraints
@@ -2698,11 +3042,11 @@ function ParametricSketchCanvas({
         clearDragState();
         return;
       }
-      const committed = commitCompletedGeometryEdit(
+      const committed = addAutoConnection(commitCompletedGeometryEdit(
         draft,
         touchedEntityIds,
         afterEntities,
-      );
+      ));
       await validateAndCommit(committed, afterEntities);
       return;
     }
@@ -2733,11 +3077,11 @@ function ParametricSketchCanvas({
         clearDragState();
         return;
       }
-      const committed = commitCompletedGeometryEdit(
+      const committed = addAutoConnection(commitCompletedGeometryEdit(
         draft,
         touched,
         entities,
-      );
+      ));
       await validateAndCommit(committed, entities);
       return;
     }
@@ -2763,11 +3107,11 @@ function ParametricSketchCanvas({
       return;
     }
     // Freeze the released pose until draft catches up — avoids flashing stale solve geometry.
-    const committed = commitCompletedGeometryEdit(
+    const committed = addAutoConnection(commitCompletedGeometryEdit(
       draft,
       propagated.touchedIds,
       propagated.entities,
-    );
+    ));
     await validateAndCommit(committed, propagated.entities);
   };
   const cancelEntityDrag = () => {
@@ -2964,7 +3308,7 @@ function ParametricSketchCanvas({
     event: React.PointerEvent,
     control: (typeof entityControls)[number],
   ) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || moveMode) return;
     event.stopPropagation();
     if (control.editTarget) {
       const handle =
@@ -3099,6 +3443,7 @@ function ParametricSketchCanvas({
         startAngle,
         endAngle,
         largeArc,
+        sweepDirection: primitive.sweepDirection,
         sweep: 0,
       };
       const fromEntity = arcFromEntity({
@@ -3110,7 +3455,27 @@ function ParametricSketchCanvas({
         endAngle,
         largeArc,
       });
-      const arcPath = arcSvgPath(fromEntity || geometry, screen, scale);
+      const renderedGeometry = fromEntity || geometry;
+      if (primitive.sweepDirection) {
+        const selectedSweep = sweepPathArcDegrees({
+          id: primitive.id,
+          role: primitive.role,
+          geometryType: "arc",
+          parameterRefs: [],
+          construction: primitive.construction,
+          start: geometry.start,
+          end: geometry.end,
+          center: geometry.center,
+          radius: geometry.radius,
+          startAngle,
+          endAngle,
+          largeArc,
+          sweepDirection: primitive.sweepDirection,
+          points: [],
+        });
+        if (selectedSweep != null) renderedGeometry.sweep = selectedSweep;
+      }
+      const arcPath = arcSvgPath(renderedGeometry, screen, scale);
       const beginArcDrag = (event: React.PointerEvent) => {
         beginEntityPointerOperation(event, primitive.id, "body");
       };
@@ -3133,7 +3498,7 @@ function ParametricSketchCanvas({
         isPanning ? " panning" : ""
       }${drag ? ` ${drag.operationKind}` : ""}${
         boxSelection ? " box-selecting" : ""
-      }`}
+      }${moveMode ? " move-mode" : ""}`}
       style={drag?.editCursor ? { cursor: drag.editCursor } : undefined}
       viewBox="0 0 460 330"
       preserveAspectRatio="xMidYMid meet"
@@ -3306,6 +3671,26 @@ function ParametricSketchCanvas({
           ))}
         </g>
       ) : null}
+      {connectionPreview ? (() => {
+        const source = screen({ x: connectionPreview.sourcePoint[0], y: connectionPreview.sourcePoint[1] });
+        const target = screen({ x: connectionPreview.targetPoint[0], y: connectionPreview.targetPoint[1] });
+        const labelX = (source.x + target.x) / 2 + 10;
+        const labelY = (source.y + target.y) / 2 - 10;
+        return (
+          <g className="endpoint-connection-preview" pointerEvents="none">
+            <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} />
+            <circle className="endpoint-connection-source" cx={source.x} cy={source.y} r="8" />
+            <circle className="endpoint-connection-target" cx={target.x} cy={target.y} r="5" />
+            <text x={labelX} y={labelY}>
+              {connectionPreview.targetKind === "endpoint"
+                ? "重合"
+                : connectionPreview.targetKind === "line"
+                  ? "吸附 · 线段"
+                  : "吸附 · 图元"}
+            </text>
+          </g>
+        );
+      })() : null}
       {pending.map((point, index) => {
         const item = screen({ x: point.x, y: point.y });
         return (
@@ -3439,6 +3824,7 @@ function GeometryStage({
     tool,
     setTool,
     solving,
+    solveError,
     viewCommand,
     setViewCommand,
     polylineCommand,
@@ -3481,6 +3867,14 @@ function GeometryStage({
   const [pendingProfileMode, setPendingProfileMode] = useState<
     Draft["sketch"]["profileMode"] | null
   >(null);
+  const [pathWindowState, setPathWindowState] = useState<SweepPathWindowState>("pathWindowClosed");
+  const [moveMode, setMoveMode] = useState(false);
+  const committedSweepPath = draft.sweepPath || createEmptySweepPath();
+  const sweepPathLabel = committedSweepPath.status === "confirmed"
+    ? "路径已定义"
+    : committedSweepPath.geometry.length
+      ? "编辑扫掠路径"
+      : "绘制扫掠路径";
   const setRecipe = (patch: Partial<GeometryRecipe>) =>
     change({ ...draft, geometryRecipe: { ...recipe, ...patch } });
   const editOp = (
@@ -3760,6 +4154,11 @@ function GeometryStage({
               onDelete={deleteSelectedEntities}
               issueViewCommand={issueViewCommand}
               planeAxes={planeAxes}
+              moveMode={moveMode}
+              onToggleMoveMode={() => setMoveMode((value) => !value)}
+              onOpenSweepPath={() => setPathWindowState(committedSweepPath.geometry.length ? "pathEditing" : "pathWindowOpen")}
+              sweepPathLabel={sweepPathLabel}
+              sweepPathStatus={committedSweepPath.status === "confirmed" ? "已确认的扫掠路径，可点击编辑" : "按需打开扫掠路径编辑窗口"}
             />
             {sketchEditConflict ? (
               <SketchEditConflictDialog
@@ -3787,10 +4186,12 @@ function GeometryStage({
               orthogonalLock={orthogonalLock}
               objectSnapEnabled={objectSnapEnabled}
               arcDrawMode={arcDrawMode}
+              moveMode={moveMode}
             />
             <SketchWorkspaceStatusBar
               solution={solution}
               solving={solving}
+              solveError={solveError}
               solveCase={solveCase}
               plane={draft.sketch.plane}
               planeAxes={planeAxes}
@@ -3847,7 +4248,179 @@ function GeometryStage({
         operatorStatus={operatorStatus}
         operatorDefaults={operatorDefaults}
       />
+      {pathWindowState !== "pathWindowClosed" && (
+        <SweepPathDialog
+          draft={draft}
+          path={committedSweepPath}
+          showError={showError}
+          onConfirm={(nextPath) => {
+            const pathId = nextPath.id || "path.main";
+            const pathPoints = serializeSweepPathPoints(nextPath);
+            const nextOperations = recipe.operations.map((operation) =>
+              operation.operator === "solid.sweep"
+                ? {
+                    ...operation,
+                    profileSketchId: "sketch.section.main",
+                    pathSketchId: pathId,
+                    sourceRefs: ["sketch.section.main", pathId],
+                    arguments: { ...operation.arguments, ...(pathPoints ? { pathPoints } : {}) },
+                  }
+                : operation,
+            );
+            change({
+              ...draft,
+              sweepPath: nextPath,
+              geometryRecipe: {
+                ...recipe,
+                sketches: Array.from(new Set(["sketch.section.main", ...recipe.sketches])),
+                paths: Array.from(new Set([...recipe.paths, pathId])),
+                operations: nextOperations,
+                reviewed: false,
+              },
+            });
+            setPathWindowState("pathWindowClosed");
+          }}
+          onCancel={() => setPathWindowState("pathWindowClosed")}
+        />
+      )}
     </>
+  );
+}
+
+function SweepPathDialog({
+  draft,
+  path,
+  onConfirm,
+  onCancel,
+  showError,
+}: {
+  draft: Draft;
+  path: SweepPathSketch;
+  onConfirm: (path: SweepPathSketch) => void;
+  onCancel: () => void;
+  showError: (error: unknown) => void;
+}) {
+  const [workingPath, setWorkingPath] = useState<SweepPathSketch>(() => structuredClone(path));
+  const [moveMode, setMoveMode] = useState(false);
+  const initialPathRef = useRef(structuredClone(path));
+  const editorDraft = useMemo(() => ({ ...draft, sketch: pathToSketch(workingPath) }), [draft, workingPath]);
+  const changeEditorDraft = (next: Draft) => {
+    setWorkingPath(sketchToPath(next.sketch, workingPath));
+  };
+  const flow = useGeometryEditFlow({ draft: editorDraft, change: changeEditorDraft, showError });
+  const topology = useMemo(() => validateSweepPathTopology(workingPath), [workingPath]);
+  const diagnostics = useMemo(() => sweepPathDiagnostics(workingPath), [workingPath]);
+  const hasErrors = diagnostics.some((item) => item.severity === "error");
+  const dirty = JSON.stringify(initialPathRef.current.geometry) !== JSON.stringify(workingPath.geometry)
+    || JSON.stringify(initialPathRef.current.constraints) !== JSON.stringify(workingPath.constraints);
+  const cancel = useCallback(() => {
+    if (dirty && !window.confirm("扫掠路径存在未确认修改，取消后将恢复打开窗口前的路径。确定取消吗？")) return;
+    onCancel();
+  }, [dirty, onCancel]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select") || target?.isContentEditable) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancel();
+      } else if (flow.tool === "polyline" && event.key === "Enter") {
+        event.preventDefault();
+        flow.setPolylineCommand({ id: Date.now(), type: "finish" });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cancel, flow.tool]);
+  const confirm = () => {
+    if (hasErrors || !workingPath.geometry.length) return;
+    onConfirm({ ...workingPath, startEndpointRef: topology.startEndpointRef, status: "confirmed", diagnostics, generationStatus: "idle" });
+  };
+  const pathStatus = hasErrors ? "路径有错误" : workingPath.geometry.length ? "路径有效" : "未定义";
+  return (
+    <div className="dialog-scrim" role="presentation" onPointerDown={cancel}>
+      <section className="sweep-path-dialog" role="dialog" aria-modal="true" aria-labelledby="sweep-path-title" onPointerDown={(event) => event.stopPropagation()}>
+        <header className="sweep-path-dialog-head">
+          <div><span className="eyebrow">SWEEP / PIPE</span><h2 id="sweep-path-title">扫掠路径编辑器</h2><p>完整二维参数化草图编辑器；仅数据用途限定为扫掠路径，原有截面草图保持不变。</p></div>
+          <button className="icon-btn" title="关闭" onClick={cancel}><X size={17} /></button>
+        </header>
+        <SketchWorkspaceToolbar
+          solution={flow.solution}
+          solveCase={flow.solveCase}
+          setSolveCase={flow.setSolveCase}
+          tool={flow.tool}
+          setTool={flow.setTool}
+          allowedTools={["select", "line", "polyline", "arc"]}
+          arcDrawMode={flow.arcDrawMode}
+          setArcDrawMode={flow.setArcDrawMode}
+          historyLength={flow.history.length}
+          futureLength={flow.future.length}
+          selectedCount={flow.selectedEntities.length}
+          moveOffset={flow.moveOffset}
+          setMoveOffset={flow.setMoveOffset}
+          objectSnapEnabled={flow.objectSnapEnabled}
+          setObjectSnapEnabled={flow.setObjectSnapEnabled}
+          orthogonalLock={flow.orthogonalLock}
+          setOrthogonalLock={flow.setOrthogonalLock}
+          sketchClipboardSize={flow.sketchClipboard?.entities.length || 0}
+          onUndo={flow.undo}
+          onRedo={flow.redo}
+          onMove={flow.moveSelectedEntities}
+          onCopy={flow.copySelectedEntities}
+          onPaste={flow.pasteClipboardEntities}
+          onDelete={flow.deleteSelectedEntities}
+          issueViewCommand={flow.issueViewCommand}
+          planeAxes={sketchPlaneAxes(editorDraft.sketch.plane)}
+          onOpenSweepPath={() => undefined}
+          sweepPathLabel="扫掠路径"
+          sweepPathStatus="当前已在扫掠路径编辑器"
+          showSweepPathButton={false}
+          moveMode={moveMode}
+          onToggleMoveMode={() => setMoveMode((value) => !value)}
+          title="扫掠路径草图"
+          subtitle="与主画布共用同一套绘图、选择、约束、吸附、提示、平移、缩放和撤销逻辑。"
+        />
+        {flow.sketchEditConflict ? <SketchEditConflictDialog conflict={flow.sketchEditConflict} onResolve={flow.resolveSketchEditConflict} /> : null}
+        <ParametricSketchCanvas
+          draft={editorDraft}
+          solution={flow.solution}
+          caseName={flow.solveCase}
+          selected={flow.selectedEntities}
+          tool={flow.tool}
+          onSelect={flow.selectEntity}
+          onSketch={flow.applySketch}
+          onGeometryEdit={flow.applyGeometryEdit}
+          validateGeometryEdit={flow.validateSketchGeometryEdit}
+          onGeometryEditRejected={showError}
+          onEditConflict={flow.setSketchEditConflict}
+          pendingConflict={flow.sketchEditConflict}
+          beginEdit={flow.beginSketchEdit}
+          viewCommand={flow.viewCommand}
+          polylineCommand={flow.polylineCommand}
+          onCursorChange={flow.publishCursorPoint}
+          orthogonalLock={flow.orthogonalLock}
+          objectSnapEnabled={flow.objectSnapEnabled}
+          arcDrawMode={flow.arcDrawMode}
+          moveMode={moveMode}
+        />
+        <SketchWorkspaceStatusBar
+          solution={flow.solution}
+          solving={flow.solving}
+          solveError={flow.solveError}
+          solveCase={flow.solveCase}
+          plane={editorDraft.sketch.plane}
+          planeAxes={sketchPlaneAxes(editorDraft.sketch.plane)}
+          cursorPoint={flow.cursorPoint}
+          selectedEntity={flow.selectedEntity || "未选择"}
+        />
+        <div className="sweep-path-status-row"><span className={hasErrors ? "status-bad" : "status-good"}>{hasErrors ? <CircleAlert size={14} /> : <Check size={14} />} {pathStatus}</span><span>{workingPath.geometry.length} 个路径图元 · {workingPath.constraints.length} 条约束{dirty ? " · 有未确认修改" : ""}</span></div>
+        {diagnostics.length > 0 && <div className="sweep-path-diagnostics">{diagnostics.map((item) => <div key={`${item.code}-${item.path}`}><strong>{item.severity === "error" ? "错误" : "提示"}</strong><code>{item.code}</code><span>{item.message}</span></div>)}</div>}
+        <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{topology.startEndpointRef ? `${topology.startEndpointRef.geometryId}（${topology.startEndpointRef.endpoint === "start" ? "起点" : "终点"}）` : "未定义"} · 第一段方向 →（按连接图推导）</div>
+        <div className="sweep-path-start-picks">{workingPath.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc").map((item) => <span key={item.id}><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "start" }, startPointId: item.id }))}>{item.id} 起点</button><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "end" }, startPointId: item.id }))}>{item.id} 终点</button></span>)}</div>
+        <footer className="sweep-path-dialog-actions"><button className="secondary-btn" onClick={cancel}>取消</button><button className="secondary-btn" onClick={cancel}>关闭</button><button className="primary-btn" disabled={hasErrors || !workingPath.geometry.length} onClick={confirm}><Check size={15} />确认路径</button></footer>
+        <small className="sweep-path-footnote">路径编辑器保留直线、连续折线和参数化圆弧；点、圆、矩形等截面图元在路径模式下会被诊断为非法。</small>
+      </section>
+    </div>
   );
 }
 
@@ -3858,6 +4431,8 @@ export default function App() {
     stage,
     validation,
     compile,
+    compileStatus,
+    compileStale,
     versions,
     materials,
     registry,
@@ -4023,6 +4598,9 @@ export default function App() {
                 run={runCompile}
                 busy={busy}
                 complete={completeStage}
+                draft={draft}
+                compileStatus={compileStatus}
+                compileStale={compileStale}
               />
             )}
             {stage === "admission" && (

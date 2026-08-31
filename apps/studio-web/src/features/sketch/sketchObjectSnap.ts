@@ -8,6 +8,7 @@ import {
 
 /** Supported object-snap target kinds. Extend this union for future snap modes. */
 export type SketchSnapKind =
+  | "point"
   | "lineEndpoint"
   | "lineNearest"
   | "arcEndpoint"
@@ -25,8 +26,9 @@ export type SketchSnapTarget = {
   handle?: SketchSnapEndpointHandle;
   point: [number, number];
   /**
-   * When false, snap only relocates the draw point and must not create constraints.
-   * Endpoint snaps may create coincident (line tool only); nearest/tangent never do.
+  * When false, snap only relocates the draw point and must not create constraints.
+  * Drawing consumers treat every resolved snap as positional assistance; the
+  * explicit constraint helper is reserved for intentional topology operations.
    */
   createsConstraint: boolean;
 };
@@ -67,6 +69,7 @@ export const DEFAULT_SKETCH_SNAP_OPTIONS: Pick<
   toleranceMm: 2,
   lineToleranceMm: 1,
   kinds: [
+    "point",
     "lineEndpoint",
     "arcEndpoint",
     "tangent",
@@ -255,6 +258,16 @@ const arcEndpointCandidates = (
   return targets;
 };
 
+const pointCandidates = (entities: SketchEntity[]): SketchSnapTarget[] =>
+  entities
+    .filter((entity) => entity.geometryType === "point" && !!entity.start)
+    .map((entity) => ({
+      kind: "point" as const,
+      entityId: entity.id,
+      point: [entity.start![0], entity.start![1]] as [number, number],
+      createsConstraint: false,
+    }));
+
 /** Project a world point onto a finite line segment; returns null for degenerate segments. */
 export const projectPointOntoLineSegment = (
   point: { x: number; y: number },
@@ -437,6 +450,7 @@ const findBestCircleNearestSnap = (
 };
 
 const SNAP_KIND_PRIORITY: Record<SketchSnapKind, number> = {
+  point: 0,
   lineEndpoint: 0,
   arcEndpoint: 0,
   tangent: 0,
@@ -469,6 +483,16 @@ export function resolveSketchSnap(
 
   type Candidate = { target: SketchSnapTarget; distance: number };
   const candidates: Candidate[] = [];
+
+  if (kinds.includes("point")) {
+    for (const target of pointCandidates(entities)) {
+      const distance = Math.hypot(
+        target.point[0] - worldPoint.x,
+        target.point[1] - worldPoint.y,
+      );
+      if (distance <= endpointTolerance) candidates.push({ target, distance });
+    }
+  }
 
   if (kinds.includes("lineEndpoint")) {
     for (const target of lineEndpointCandidates(entities)) {
@@ -606,9 +630,9 @@ const makeCoincidentConstraint = (
 };
 
 /**
- * Build coincident constraints for a newly drawn line whose endpoints were snapped
- * to other line/arc endpoints. On-curve nearest snaps never create constraints.
- * Circle/arc drawing tools must not call this helper.
+ * Build coincident constraints for an intentional topology operation (for
+ * example, a polyline's own shared joint or explicit closure). Free drawing
+ * snap callers must not pass external snap targets to this helper.
  */
 export function buildLineSnapCoincidentConstraints(
   newLineId: string,

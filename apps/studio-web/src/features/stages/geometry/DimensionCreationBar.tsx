@@ -1,7 +1,7 @@
 import { ArrowRight, Plus, Variable } from "lucide-react";
 import type { Draft, ParameterDefinition, ParameterSource } from "../../../types";
 import {
-  GEOMETRIC_CONSTRAINTS,
+  DIMENSION_CONSTRAINTS,
   constraintLabel,
   dimensionDescription,
   type ConstraintType,
@@ -74,7 +74,7 @@ export function DimensionCreationBar({
               setNewDimensionType(event.target.value as ConstraintType)
             }
           >
-            {GEOMETRIC_CONSTRAINTS.map(([type, label]) => (
+            {DIMENSION_CONSTRAINTS.map(([type, label]) => (
               <option key={type} value={type}>
                 {constraintLabel(type, draft.sketch.plane) || label}
               </option>

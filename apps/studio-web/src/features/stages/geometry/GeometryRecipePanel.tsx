@@ -203,6 +203,12 @@ export function GeometryRecipePanel({
                 {op.operator === "solid.sweep" && (
                   <div className="operator-special-form">
                     <strong>三维扫掠路径</strong>
+                    <div className="form-grid three">
+                      <Field label="截面锚点"><select value={op.profileAnchor ?? "sketch.origin"} onChange={(e) => editOp(index, { profileAnchor: e.target.value })}><option value="sketch.origin">草图原点</option></select></Field>
+                      <Field label="姿态"><select value={op.orientationMode ?? "minimumTwist"} onChange={(e) => editOp(index, { orientationMode: e.target.value as "followPath" | "fixedWorld" | "minimumTwist" })}><option value="followPath">跟随路径</option><option value="fixedWorld">固定世界方向</option><option value="minimumTwist">最小扭转 / 平行传输</option></select></Field>
+                      <Field label="拐角"><select value={op.cornerMode ?? "right"} onChange={(e) => editOp(index, { cornerMode: e.target.value as "right" })}><option value="right">RightCorner</option></select></Field>
+                    </div>
+                    <div className="form-grid two"><Field label="缩放"><select value={op.scaleMode ?? "constant"} onChange={(e) => editOp(index, { scaleMode: e.target.value as "constant" })}><option value="constant">恒定</option></select></Field><Field label="扭转"><select value={op.twistMode ?? "none"} onChange={(e) => editOp(index, { twistMode: e.target.value as "none" })}><option value="none">关闭</option></select></Field></div>
                     <Field
                       label="路径点表达式"
                       hint="x:y:z；使用分号分隔节点，可直接引用模板参数。例如 0:0:0;0:0:length"

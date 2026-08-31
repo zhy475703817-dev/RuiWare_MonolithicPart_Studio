@@ -34,7 +34,7 @@ def write_source_package(
     target = package_directory / f"{draft.code or draft.id}-r{draft.revision}.rwpart"
     latest = repository.latest_compile(draft.id) if draft.id else None
     documents = {
-        "manifest.json": draft.model_dump(exclude={"parameterDefinitions", "variants", "sketch", "blank", "admission", "materialRequirements", "materialValidationSamples", "geometryRecipe", "featureRules", "interfaces", "evidence", "aiProposals"}),
+        "manifest.json": draft.model_dump(exclude={"parameterDefinitions", "variants", "sketch", "sweepPath", "blank", "admission", "materialRequirements", "materialValidationSamples", "geometryRecipe", "featureRules", "interfaces", "evidence", "aiProposals"}),
         "classification.json": {"templateKind": draft.templateKind, "manufacturing": draft.manufacturingClassification.model_dump(), "geometryPrototypeId": draft.geometryPrototypeId, "registryVersion": TEMPLATE_AUTHORING_REGISTRY.version},
         "evidence.json": {"items": [item.model_dump() for item in draft.evidence], "aiProposals": [item.model_dump() for item in draft.aiProposals]},
         "material-requirements.json": {"requirements": [item.model_dump() for item in draft.materialRequirements], "effectiveThicknessDomains": {item.id: effective_thickness_domain(item) for item in draft.materialRequirements}, "blank": draft.blank.model_dump()},
@@ -45,6 +45,7 @@ def write_source_package(
         "feature-rules.json": {"reviewed": draft.featureRulesReviewed, "rules": [item.model_dump() for item in draft.featureRules]},
         "variants.json": {"variants": [item.model_dump() for item in draft.variants]},
         "constraints.json": draft.sketch.model_dump(),
+        "sweep-path.json": draft.sweepPath.model_dump() if draft.sweepPath else {"status": "empty", "geometry": [], "constraints": []},
         "sketch-solver.json": solve_semantic_sketch(draft),
         "interfaces.json": {"coordinateSystem": draft.coordinateSystem, "interfaces": [item.model_dump() for item in draft.interfaces]},
         "outputs.json": latest.model_dump() if latest else {"outputs": []},

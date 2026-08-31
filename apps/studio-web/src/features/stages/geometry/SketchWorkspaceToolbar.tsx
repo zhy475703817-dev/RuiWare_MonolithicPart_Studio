@@ -28,6 +28,8 @@ type Props = {
   setSolveCase: (value: "minimum" | "nominal" | "maximum") => void;
   tool: SketchTool;
   setTool: (value: SketchTool) => void;
+  /** Restrict creation tools for specialized editors such as sweep paths. */
+  allowedTools?: readonly SketchTool[];
   arcDrawMode: "centerEndpoints" | "threePoint";
   setArcDrawMode: (value: "centerEndpoints" | "threePoint") => void;
   historyLength: number;
@@ -45,11 +47,19 @@ type Props = {
   onUndo: () => void;
   onRedo: () => void;
   onMove: () => void;
+  moveMode?: boolean;
+  onToggleMoveMode?: () => void;
   onCopy: () => void;
   onPaste: () => void;
   onDelete: () => void;
   issueViewCommand: (type: "zoomIn" | "zoomOut" | "fit") => void;
   planeAxes: { horizontal: string; vertical: string; normal: string };
+  onOpenSweepPath: () => void;
+  sweepPathLabel: string;
+  sweepPathStatus: string;
+  showSweepPathButton?: boolean;
+  title?: string;
+  subtitle?: string;
 };
 
 export function SketchWorkspaceToolbar({
@@ -58,6 +68,7 @@ export function SketchWorkspaceToolbar({
   setSolveCase,
   tool,
   setTool,
+  allowedTools,
   arcDrawMode,
   setArcDrawMode,
   historyLength,
@@ -73,18 +84,26 @@ export function SketchWorkspaceToolbar({
   onUndo,
   onRedo,
   onMove,
+  moveMode = false,
+  onToggleMoveMode,
   onCopy,
   onPaste,
   onDelete,
   issueViewCommand,
   planeAxes,
+  onOpenSweepPath,
+  sweepPathLabel,
+  sweepPathStatus,
+  showSweepPathButton = true,
+  title = "1. 通用二维参数化草图",
+  subtitle = "绘制零部件的二维截面；三维方向由基准平面和后续几何配方决定。",
 }: Props) {
   return (
     <>
       <PanelTitle
         icon={Box}
-        title="1. 通用二维参数化草图"
-        subtitle="绘制零部件的二维截面；三维方向由基准平面和后续几何配方决定。"
+        title={title}
+        subtitle={subtitle}
         actions={
           <div className="case-switch">
             {(["minimum", "nominal", "maximum"] as const).map((item) => {
@@ -107,6 +126,15 @@ export function SketchWorkspaceToolbar({
         }
       />
       <div className="sketch-toolbar">
+        {showSweepPathButton ? (
+          <>
+            <button className="sweep-path-open-btn" onClick={onOpenSweepPath} title={sweepPathStatus}>
+              <Spline size={14} />
+              {sweepPathLabel}
+            </button>
+            <span className="toolbar-divider" />
+          </>
+        ) : null}
         {(
           [
             ["select", MousePointer2, "选择"],
@@ -117,7 +145,8 @@ export function SketchWorkspaceToolbar({
             ["circle", CircleDot, "圆"],
             ["arc", RefreshCw, "圆弧"],
           ] as const
-        ).map(([id, Icon, label]) => (
+        ).filter(([id]) => !allowedTools || allowedTools.includes(id))
+        .map(([id, Icon, label]) => (
           <button
             key={id}
             className={tool === id ? "active" : ""}
@@ -158,12 +187,22 @@ export function SketchWorkspaceToolbar({
         </button>
         <span className="toolbar-divider" />
         <button
+          disabled={solveCase !== "nominal"}
+          className={moveMode ? "active" : ""}
+          aria-pressed={moveMode}
+          onClick={() => (onToggleMoveMode ? onToggleMoveMode() : onMove())}
+          title="拖动图元主体并在端点接近时自动吸附连接"
+        >
+          <Move size={14} />
+          移动
+        </button>
+        <button
           disabled={!selectedCount || solveCase !== "nominal"}
           onClick={onMove}
           title="按下方偏移量移动选中图元"
         >
-          <Move size={14} />
-          移动
+          <MoveHorizontal size={14} />
+          偏移移动
         </button>
         <button
           disabled={!selectedCount || solveCase !== "nominal"}

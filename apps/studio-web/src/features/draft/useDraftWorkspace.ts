@@ -21,6 +21,10 @@ export type ErrorNotice = {
   traceId?: string;
 };
 
+export function preservePreviousCompileArtifacts(previous: CompileResult | null, failed: CompileResult): CompileResult {
+  return previous ? { ...failed, artifacts: previous.artifacts, metrics: previous.metrics } : failed;
+}
+
 /** 将 API、浏览器和未知异常转换成统一的页面提示结构。 */
 function toErrorNotice(error: unknown): ErrorNotice {
   if (error instanceof ApiError) {
@@ -53,6 +57,8 @@ export function useDraftWorkspace() {
   const [stage, setStage] = useState<StageName>("templateInfo");
   const [validation, setValidation] = useState<StageValidation | null>(null);
   const [compile, setCompile] = useState<CompileResult | null>(null);
+  const [compileStatus, setCompileStatus] = useState<"idle" | "generating" | "succeeded" | "failed">("idle");
+  const [compileStale, setCompileStale] = useState(false);
   const [versions, setVersions] = useState<PublishedVersion[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [registry, setRegistry] = useState<TemplateAuthoringRegistry | null>(null);
@@ -76,6 +82,8 @@ export function useDraftWorkspace() {
     setDirty(false);
     setValidation(null);
     setCompile(null);
+    setCompileStatus("idle");
+    setCompileStale(false);
     setVersions([]);
     const next = STAGES.find((itemStage) => item.stageStatus[itemStage.id] !== "complete");
     setStage(next?.id || "variants");
@@ -114,7 +122,11 @@ export function useDraftWorkspace() {
       void api.materials(materialSearch, draft.id).then(setMaterials).catch(showError);
     }
     if (stage === "review") {
-      void api.latestCompile(draft.id).then(setCompile).catch(showError);
+      void api.latestCompile(draft.id).then((result) => {
+        setCompile(result);
+        setCompileStatus(result ? (result.success ? "succeeded" : "failed") : "idle");
+        setCompileStale(false);
+      }).catch(showError);
     }
     if (stage === "admission") {
       void api.versions(draft.id).then(setVersions).catch(showError);
@@ -144,6 +156,7 @@ export function useDraftWorkspace() {
     setDraft(next);
     setDirty(true);
     setValidation(null);
+    if (compile) setCompileStale(true);
   }
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -302,12 +315,21 @@ export function useDraftWorkspace() {
     const saved = dirty ? await save() : draft;
     if (!saved?.id) return;
     setBusy("compile");
+    setCompileStatus("generating");
     try {
       const result = await api.compile(saved.id);
-      setCompile(result);
+      if (result.success) {
+        setCompile(result);
+        setCompileStale(false);
+        setCompileStatus("succeeded");
+      } else {
+        setCompile((previous) => preservePreviousCompileArtifacts(previous, result));
+        setCompileStatus("failed");
+      }
       setValidation(await api.validateStage(saved.id, "review"));
       if (!result.success) showError(result.diagnostics.map((item) => item.message).join("；"));
     } catch (errorValue) {
+      setCompileStatus("failed");
       showError(errorValue);
     } finally {
       setBusy("");
@@ -338,6 +360,8 @@ export function useDraftWorkspace() {
     stage,
     validation,
     compile,
+    compileStatus,
+    compileStale,
     versions,
     materials,
     registry,

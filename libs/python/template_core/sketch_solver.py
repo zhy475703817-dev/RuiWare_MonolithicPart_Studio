@@ -331,10 +331,43 @@ def _solve_state(
     jacobian = numerical_jacobian(state, residual_vector)
     if owners:
         jacobian = jacobian[: len(owners), :]
-    singular_values = np.linalg.svd(jacobian, compute_uv=False) if jacobian.size else np.asarray([])
-    rank_tolerance = max(jacobian.shape, default=0) * np.finfo(float).eps * (singular_values[0] if len(singular_values) else 0)
-    rank = int(np.sum(singular_values > max(rank_tolerance, 1e-8)))
-    degrees_of_freedom = max(0, len(initial) - rank)
+    # Construction geometry is still part of the solved state: constraints
+    # such as horizontal, fixed, symmetry, etc. may use it as a reference.
+    # It is not, however, design geometry and its own unconstrained movement
+    # must not make the profile report under-constrained.  Compute the
+    # dimension of the constraint null-space *projected onto non-construction
+    # columns*. This preserves constraints coupling a construction reference
+    # to a real profile entity while dropping construction-only motion.
+    construction_columns = [
+        column
+        for entity in draft.sketch.entities
+        if entity.construction
+        for column in range(slices[entity.id].start, slices[entity.id].stop)
+    ]
+
+    def matrix_rank(value: np.ndarray) -> int:
+        if not value.size:
+            return 0
+        singular_values = np.linalg.svd(value, compute_uv=False)
+        scale = singular_values[0] if len(singular_values) else 0.0
+        tolerance = max(value.shape, default=0) * np.finfo(float).eps * scale
+        return int(np.sum(singular_values > max(tolerance, 1e-8)))
+
+    rank = matrix_rank(jacobian)
+    profile_columns = [column for column in range(len(initial)) if column not in set(construction_columns)]
+    if profile_columns and jacobian.size:
+        # SVD gives a stable basis for the null-space even when redundant
+        # construction constraints are present. The projected basis rank is
+        # the number of remaining design degrees of freedom.
+        _, singular_values, vh = np.linalg.svd(jacobian, full_matrices=True)
+        nullity = len(initial) - rank
+        if nullity:
+            null_basis = vh[-nullity:, :].T
+            degrees_of_freedom = matrix_rank(null_basis[profile_columns, :])
+        else:
+            degrees_of_freedom = 0
+    else:
+        degrees_of_freedom = 0
     redundant: list[str] = []
     previous_rank = 0
     for owner in dict.fromkeys(owners):

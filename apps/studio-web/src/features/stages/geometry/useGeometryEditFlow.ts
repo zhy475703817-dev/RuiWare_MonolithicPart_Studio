@@ -302,6 +302,7 @@ export const useGeometryEditFlow = ({
     { sketch: Draft["sketch"]; parameterDefinitions: ParameterDefinition[] }[]
   >([]);
   const [solving, setSolving] = useState(false);
+  const [solveError, setSolveError] = useState<string | null>(null);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
   const [polylineCommand, setPolylineCommand] =
     useState<SketchPolylineCommand>(null);
@@ -367,15 +368,23 @@ export const useGeometryEditFlow = ({
     if (sketchEditConflict) return;
     const requestId = ++solveRequest.current;
     setSolution(null);
+    setSolveError(null);
     const timer = setTimeout(() => {
       setSolving(true);
       void api
         .solveSketch(draft)
         .then((result) => {
-          if (requestId === solveRequest.current) setSolution(result);
+          if (requestId === solveRequest.current) {
+            setSolution(result);
+            setSolveError(null);
+          }
         })
         .catch((error) => {
-          if (requestId === solveRequest.current) showError(error);
+          if (requestId === solveRequest.current) {
+            const message = error instanceof Error ? error.message : String(error);
+            setSolveError(message);
+            showError(error);
+          }
         })
         .finally(() => {
           if (requestId === solveRequest.current) setSolving(false);
@@ -724,6 +733,7 @@ export const useGeometryEditFlow = ({
     tool,
     setTool,
     solving,
+    solveError,
     viewCommand,
     setViewCommand,
     polylineCommand,
