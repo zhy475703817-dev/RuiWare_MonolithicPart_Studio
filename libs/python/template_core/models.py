@@ -156,6 +156,11 @@ class SweepPathGeometry(BaseModel):
     startAngle: float | None = None
     endAngle: float | None = None
     largeArc: bool | None = None
+    # Explicit traversal direction for parameterized arcs.  Legacy drafts did
+    # not persist this field; CCW is the canonical backwards-compatible
+    # default and validation still rejects any other value supplied by a raw
+    # payload before it reaches the geometry worker.
+    sweepDirection: Literal["cw", "ccw"] = "ccw"
     points: list[tuple[float, float]] = Field(default_factory=list)
 
 

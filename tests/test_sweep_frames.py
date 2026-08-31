@@ -70,6 +70,41 @@ def test_reverse_segment_keeps_a_stable_frame():
         _assert_frame(frame)
 
 
+def test_follow_path_preserves_prior_axis_at_vertical_singularity():
+    points = [(0, 0, 0), (0, 10, 0), (0, 10, 10)]
+    overrides = [(0, 1, 0), (0, 0, 1), (0, 1, 0)]
+    frames = follow_path_frames(points, overrides)
+    for frame in frames:
+        _assert_frame(frame)
+    # At a tangent parallel to world-up, followPath carries the previous
+    # section axis instead of selecting a new axis and rolling by 90 degrees.
+    assert frames[1][1] == pytest.approx((-1.0, 0.0, 0.0))
+    assert frames[1][2] == pytest.approx((0.0, -1.0, 0.0))
+    assert frames[1][3] == pytest.approx((0.0, 0.0, 1.0))
+
+
+def test_fixed_world_uses_stable_fallback_when_world_x_is_parallel():
+    points = [(0, 0, 0), (10, 0, 0), (10, 0, 10)]
+    overrides = [(0, 1, 0), (1, 0, 0), (0, 1, 0)]
+    frames = fixed_world_frames(points, overrides)
+    for frame in frames:
+        _assert_frame(frame)
+    # The first station establishes the X axis as the prior profile axis.  At
+    # the world-X singularity the helper chooses a deterministic world-Z
+    # fallback, then resumes the world-X projection afterward.
+    assert frames[1][1] == pytest.approx((0.0, 0.0, 1.0))
+    assert frames[1][2] == pytest.approx((0.0, -1.0, 0.0))
+    assert frames[1][3] == pytest.approx((1.0, 0.0, 0.0))
+
+
+@pytest.mark.parametrize("builder", [follow_path_frames, fixed_world_frames])
+def test_non_minimum_twist_modes_handle_180_degree_foldback(builder):
+    frames = builder([(0, 0, 0), (0, 0, 10), (0, 0, 0)])
+    for frame in frames:
+        _assert_frame(frame)
+    assert frames[-1][3] == pytest.approx((0.0, 0.0, -1.0))
+
+
 def test_segment_start_frames_are_normal_to_each_edge_for_all_modes():
     points = [(0, 0, 0), (0, 0, 100), (100, 0, 100), (100, 0, 200)]
     expected = segment_tangents(points)

@@ -112,6 +112,60 @@ def initial_frame(origin: Vec3, tangent: Vec3, *, reference: Vec3 = (1.0, 0.0, 0
     return _v(origin), x, y, t
 
 
+def _flip_if_discontinuous(x: Vec3, y: Vec3, previous: Frame | None) -> tuple[Vec3, Vec3]:
+    """Choose the equivalent signed frame closest to the previous station."""
+
+    if previous is not None and dot(x, previous[1]) + dot(y, previous[2]) < 0.0:
+        return scale(x, -1.0), scale(y, -1.0)
+    return x, y
+
+
+def _follow_frame(origin: Vec3, tangent: Vec3, previous: Frame | None = None) -> Frame:
+    """Build a world-up-following frame with a continuous singular fallback."""
+
+    t = normalize(tangent)
+    up = (0.0, 0.0, 1.0)
+    # Prefer the projection of world-up as the section y axis.  At a vertical
+    # tangent that projection vanishes; carrying the prior x axis through the
+    # singularity prevents the otherwise unavoidable 180-degree roll flip.
+    y_reference = project_perpendicular(up, t)
+    if norm(y_reference) > EPSILON:
+        y = normalize(y_reference)
+        x = normalize(cross(y, t))
+    else:
+        # Keep the historical profile orientation for the first vertical
+        # station; later vertical stations carry the previous axis through
+        # the singularity to avoid a roll jump.
+        fallback = previous[1] if previous is not None else (1.0, 0.0, 0.0)
+        x = project_perpendicular(fallback, t)
+        if norm(x) <= EPSILON:
+            x = project_perpendicular((1.0, 0.0, 0.0), t)
+        x = normalize(x)
+        y = normalize(cross(t, x))
+    x, y = _flip_if_discontinuous(x, y, previous)
+    x, y, t = orthonormalize(x, y, t)
+    return _v(origin), x, y, t
+
+
+def _fixed_world_frame(origin: Vec3, tangent: Vec3, previous: Frame | None = None) -> Frame:
+    """Build a frame whose x axis follows world X where geometrically possible."""
+
+    t = normalize(tangent)
+    x_reference = project_perpendicular((1.0, 0.0, 0.0), t)
+    if norm(x_reference) <= EPSILON:
+        # World X is parallel to the path.  Reuse the transported prior axis
+        # when available so crossing this singularity does not flip the frame.
+        fallback = previous[1] if previous is not None else (0.0, 1.0, 0.0)
+        x_reference = project_perpendicular(fallback, t)
+        if norm(x_reference) <= EPSILON:
+            x_reference = project_perpendicular((0.0, 0.0, 1.0), t)
+    x = normalize(x_reference)
+    y = normalize(cross(t, x))
+    x, y = _flip_if_discontinuous(x, y, previous)
+    x, y, t = orthonormalize(x, y, t)
+    return _v(origin), x, y, t
+
+
 def _transport(frame: Frame, tangent: Vec3) -> Frame:
     origin, x, y, previous = frame
     target = normalize(tangent)
@@ -134,8 +188,22 @@ def _transport(frame: Frame, tangent: Vec3) -> Frame:
     return origin, x2, y2, target
 
 
-def minimum_twist_frames(points: Sequence[Vec3]) -> list[Frame]:
-    tangents = corner_tangents(points)
+def _station_tangents(points: Sequence[Vec3], overrides: Sequence[Vec3] | None = None) -> list[Vec3]:
+    if overrides is None:
+        return corner_tangents(points)
+    if len(overrides) != len(points):
+        raise ValueError("station tangent metadata must match path stations")
+    result: list[Vec3] = []
+    for index, tangent in enumerate(overrides):
+        try:
+            result.append(normalize(_v(tangent)))
+        except ValueError as error:
+            raise ValueError(f"invalid station tangent at index {index}") from error
+    return result
+
+
+def minimum_twist_frames(points: Sequence[Vec3], station_tangent_overrides: Sequence[Vec3] | None = None) -> list[Frame]:
+    tangents = _station_tangents(points, station_tangent_overrides)
     frames = [initial_frame(_v(points[0]), tangents[0])]
     for point, tangent in zip(points[1:], tangents[1:]):
         transported = _transport(frames[-1], tangent)
@@ -143,26 +211,33 @@ def minimum_twist_frames(points: Sequence[Vec3]) -> list[Frame]:
     return frames
 
 
-def follow_path_frames(points: Sequence[Vec3]) -> list[Frame]:
+def follow_path_frames(points: Sequence[Vec3], station_tangent_overrides: Sequence[Vec3] | None = None) -> list[Frame]:
     """Orient the section with a world-up preference while following tangent."""
     frames: list[Frame] = []
-    for point, tangent in zip(points, corner_tangents(points)):
-        t = normalize(tangent)
-        up = (0.0, 0.0, 1.0)
-        x = cross(up, t)
-        if norm(x) <= EPSILON:
-            x = cross((0.0, 1.0, 0.0), t)
-        x, y, t = orthonormalize(x, up, t)
-        frames.append((_v(point), x, y, t))
+    previous: Frame | None = None
+    for point, tangent in zip(points, _station_tangents(points, station_tangent_overrides)):
+        frame = _follow_frame(_v(point), tangent, previous)
+        frames.append(frame)
+        previous = frame
     return frames
 
 
-def fixed_world_frames(points: Sequence[Vec3]) -> list[Frame]:
+def fixed_world_frames(points: Sequence[Vec3], station_tangent_overrides: Sequence[Vec3] | None = None) -> list[Frame]:
     """Keep the profile's world-X direction wherever the tangent permits it."""
-    return [initial_frame(_v(point), tangent, reference=(1.0, 0.0, 0.0)) for point, tangent in zip(points, corner_tangents(points))]
+    frames: list[Frame] = []
+    previous: Frame | None = None
+    for point, tangent in zip(points, _station_tangents(points, station_tangent_overrides)):
+        frame = _fixed_world_frame(_v(point), tangent, previous)
+        frames.append(frame)
+        previous = frame
+    return frames
 
 
-def segment_start_frames(points: Sequence[Vec3], orientation_mode: str = "minimumTwist") -> list[Frame]:
+def segment_start_frames(
+    points: Sequence[Vec3],
+    orientation_mode: str = "minimumTwist",
+    segment_tangent_overrides: Sequence[Vec3] | None = None,
+) -> list[Frame]:
     """Return a frame at the start of every *straight* path segment.
 
     ``path_frames`` intentionally reports a station frame at a corner using
@@ -173,20 +248,29 @@ def segment_start_frames(points: Sequence[Vec3], orientation_mode: str = "minimu
     and adjacent solids are joined by their natural overlap at the corner.
     """
     points = [_v(point) for point in points]
-    tangents = segment_tangents(points)
+    tangents = (
+        [normalize(_v(tangent)) for tangent in segment_tangent_overrides]
+        if segment_tangent_overrides is not None
+        else segment_tangents(points)
+    )
+    if len(tangents) != len(points) - 1:
+        raise ValueError("segment tangent metadata must match path segments")
     if orientation_mode == "followPath":
         result: list[Frame] = []
+        previous: Frame | None = None
         for point, tangent in zip(points, tangents):
-            t = normalize(tangent)
-            up = (0.0, 0.0, 1.0)
-            x = cross(up, t)
-            if norm(x) <= EPSILON:
-                x = cross((0.0, 1.0, 0.0), t)
-            x, y, t = orthonormalize(x, up, t)
-            result.append((_v(point), x, y, t))
+            frame = _follow_frame(_v(point), tangent, previous)
+            result.append(frame)
+            previous = frame
         return result
     if orientation_mode == "fixedWorld":
-        return [initial_frame(_v(point), tangent, reference=(1.0, 0.0, 0.0)) for point, tangent in zip(points, tangents)]
+        result = []
+        previous = None
+        for point, tangent in zip(points, tangents):
+            frame = _fixed_world_frame(_v(point), tangent, previous)
+            result.append(frame)
+            previous = frame
+        return result
     if orientation_mode == "minimumTwist":
         first = initial_frame(points[0], tangents[0])
         result = [first]
@@ -198,14 +282,18 @@ def segment_start_frames(points: Sequence[Vec3], orientation_mode: str = "minimu
     raise ValueError(f"unsupported sweep orientation mode: {orientation_mode}")
 
 
-def path_frames(points: Sequence[Vec3], orientation_mode: str = "minimumTwist") -> list[Frame]:
+def path_frames(
+    points: Sequence[Vec3],
+    orientation_mode: str = "minimumTwist",
+    station_tangent_overrides: Sequence[Vec3] | None = None,
+) -> list[Frame]:
     points = [_v(point) for point in points]
     if orientation_mode == "minimumTwist":
-        return minimum_twist_frames(points)
+        return minimum_twist_frames(points, station_tangent_overrides)
     if orientation_mode == "followPath":
-        return follow_path_frames(points)
+        return follow_path_frames(points, station_tangent_overrides)
     if orientation_mode == "fixedWorld":
-        return fixed_world_frames(points)
+        return fixed_world_frames(points, station_tangent_overrides)
     raise ValueError(f"unsupported sweep orientation mode: {orientation_mode}")
 
 

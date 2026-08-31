@@ -143,6 +143,7 @@ import {
   arcWithSweep,
   pointAngleDegrees,
   projectPointOntoCircle,
+  signedArcSweep,
   signedAngleDelta,
   toggleArcDirection,
   type ArcDrawMode,
@@ -186,7 +187,11 @@ import {
   resolveSketchLineInference,
   type SketchLineInference,
 } from "./features/sketch/sketchLineInference";
-import { validateSweepPathTopology } from "./features/sketch/sweepPathTopology";
+import {
+  sampleSweepPathGeometry,
+  sweepArcDegrees as sweepPathArcDegrees,
+  validateSweepPathTopology,
+} from "./features/sketch/sweepPathTopology";
 import type {
   CompileResult,
   Draft,
@@ -347,6 +352,7 @@ const pathToSketch = (path: SweepPathSketch): PathEditorDraft => ({
     startAngle: item.startAngle ?? null,
     endAngle: item.endAngle ?? null,
     largeArc: item.largeArc ?? null,
+    sweepDirection: item.sweepDirection ?? inferSweepDirection(item),
     points: item.points || [],
   })),
   constraints: path.constraints.map((item) => ({ ...item })),
@@ -359,6 +365,12 @@ const pathToSketch = (path: SweepPathSketch): PathEditorDraft => ({
   importScale: null,
   conversionReviewed: true,
 });
+
+const inferSweepDirection = (geometry: Pick<SweepPathGeometry, "startAngle" | "endAngle" | "largeArc" | "sweepDirection">) => {
+  if (geometry.sweepDirection) return geometry.sweepDirection;
+  if (geometry.startAngle == null || geometry.endAngle == null) return "ccw" as const;
+  return signedArcSweep(geometry.startAngle, geometry.endAngle, geometry.largeArc ?? false) < 0 ? "cw" as const : "ccw" as const;
+};
 
 const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): SweepPathSketch => ({
   ...previous,
@@ -377,6 +389,7 @@ const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): Sweep
     startAngle: item.startAngle ?? null,
     endAngle: item.endAngle ?? null,
     largeArc: item.largeArc ?? null,
+    sweepDirection: item.sweepDirection ?? inferSweepDirection(item),
     points: item.points || [],
   })),
   constraints: sketch.constraints.map((item) => ({ ...item })),
@@ -388,9 +401,7 @@ const sketchToPath = (sketch: PathEditorDraft, previous: SweepPathSketch): Sweep
 });
 
 const sweepGeometryPoints = (geometry: SweepPathGeometry): [number, number][] => {
-  if (geometry.points.length) return geometry.points;
-  if (geometry.start && geometry.end) return [geometry.start, geometry.end];
-  return [];
+  return sampleSweepPathGeometry(geometry);
 };
 
 const sweepPathDiagnostics = (path: SweepPathSketch) => {
@@ -411,7 +422,11 @@ const serializeSweepPathPoints = (path: SweepPathSketch) => {
     const ordered = item.forward ? segment : [...segment].reverse();
     for (const point of ordered) if (!points.length || Math.hypot(points[points.length - 1][0] - point[0], points[points.length - 1][1] - point[1]) > 0.05) points.push(point);
   }
-  return points.map(([x, y]) => `${x}:0:${y}`).join(";");
+  return points
+    .map(([x, y]) =>
+      path.plane === "YZ" ? `0:${x}:${y}` : `${x}:0:${y}`,
+    )
+    .join(";");
 };
 
 function profileModeSketch(
@@ -1221,6 +1236,7 @@ const entitiesToPrimitives = (entities: Draft["sketch"]["entities"]) =>
     startAngle: item.startAngle,
     endAngle: item.endAngle,
     largeArc: item.largeArc,
+    sweepDirection: item.sweepDirection,
     points: item.points.map(([x, y]) => ({ x, y })),
   }));
 
@@ -1236,6 +1252,7 @@ const alignEntitiesToPrimitives = (
     startAngle?: number | null;
     endAngle?: number | null;
     largeArc?: boolean | null;
+    sweepDirection?: "ccw" | "cw";
     points?: { x: number; y: number }[];
   }[],
 ) => {
@@ -1262,6 +1279,7 @@ const alignEntitiesToPrimitives = (
         primitive.endAngle != null ? primitive.endAngle : entity.endAngle,
       largeArc:
         primitive.largeArc != null ? primitive.largeArc : entity.largeArc,
+      sweepDirection: primitive.sweepDirection || entity.sweepDirection,
       points: primitive.points?.length
         ? primitive.points.map(
             (point) => [point.x, point.y] as [number, number],
@@ -2286,6 +2304,7 @@ function ParametricSketchCanvas({
         startAngle: geometry.startAngle,
         endAngle: geometry.endAngle,
         largeArc: geometry.largeArc,
+        sweepDirection: geometry.sweep >= 0 ? "ccw" : "cw",
         points: [],
       });
     }
@@ -3424,6 +3443,7 @@ function ParametricSketchCanvas({
         startAngle,
         endAngle,
         largeArc,
+        sweepDirection: primitive.sweepDirection,
         sweep: 0,
       };
       const fromEntity = arcFromEntity({
@@ -3435,7 +3455,27 @@ function ParametricSketchCanvas({
         endAngle,
         largeArc,
       });
-      const arcPath = arcSvgPath(fromEntity || geometry, screen, scale);
+      const renderedGeometry = fromEntity || geometry;
+      if (primitive.sweepDirection) {
+        const selectedSweep = sweepPathArcDegrees({
+          id: primitive.id,
+          role: primitive.role,
+          geometryType: "arc",
+          parameterRefs: [],
+          construction: primitive.construction,
+          start: geometry.start,
+          end: geometry.end,
+          center: geometry.center,
+          radius: geometry.radius,
+          startAngle,
+          endAngle,
+          largeArc,
+          sweepDirection: primitive.sweepDirection,
+          points: [],
+        });
+        if (selectedSweep != null) renderedGeometry.sweep = selectedSweep;
+      }
+      const arcPath = arcSvgPath(renderedGeometry, screen, scale);
       const beginArcDrag = (event: React.PointerEvent) => {
         beginEntityPointerOperation(event, primitive.id, "body");
       };
@@ -4310,6 +4350,7 @@ function SweepPathDialog({
           setSolveCase={flow.setSolveCase}
           tool={flow.tool}
           setTool={flow.setTool}
+          allowedTools={["select", "line", "polyline", "arc"]}
           arcDrawMode={flow.arcDrawMode}
           setArcDrawMode={flow.setArcDrawMode}
           historyLength={flow.history.length}
@@ -4377,7 +4418,7 @@ function SweepPathDialog({
         <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{topology.startEndpointRef ? `${topology.startEndpointRef.geometryId}（${topology.startEndpointRef.endpoint === "start" ? "起点" : "终点"}）` : "未定义"} · 第一段方向 →（按连接图推导）</div>
         <div className="sweep-path-start-picks">{workingPath.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc").map((item) => <span key={item.id}><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "start" }, startPointId: item.id }))}>{item.id} 起点</button><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "end" }, startPointId: item.id }))}>{item.id} 终点</button></span>)}</div>
         <footer className="sweep-path-dialog-actions"><button className="secondary-btn" onClick={cancel}>取消</button><button className="secondary-btn" onClick={cancel}>关闭</button><button className="primary-btn" disabled={hasErrors || !workingPath.geometry.length} onClick={confirm}><Check size={15} />确认路径</button></footer>
-        <small className="sweep-path-footnote">路径编辑器保留点、直线、连续折线、矩形、圆和圆弧等完整编辑能力；当前 CAD Sweep 算子对不支持的路径图元会在验证阶段提示。</small>
+        <small className="sweep-path-footnote">路径编辑器保留直线、连续折线和参数化圆弧；点、圆、矩形等截面图元在路径模式下会被诊断为非法。</small>
       </section>
     </div>
   );

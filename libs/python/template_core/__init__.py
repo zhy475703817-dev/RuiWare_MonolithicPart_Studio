@@ -2,6 +2,12 @@
 
 from .models import CompileRequest, CompileResult, Diagnostic, SweepPathSketch, TemplateDraft
 from .lowering import lower_to_plan
+from .sweep_path_sampling import (
+    map_point_to_3d,
+    sample_arc_points,
+    sample_ordered_path_points,
+    sample_ordered_path_points_3d,
+)
 
 __all__ = [
     "CompileRequest",
@@ -10,4 +16,8 @@ __all__ = [
     "TemplateDraft",
     "SweepPathSketch",
     "lower_to_plan",
+    "map_point_to_3d",
+    "sample_arc_points",
+    "sample_ordered_path_points",
+    "sample_ordered_path_points_3d",
 ]

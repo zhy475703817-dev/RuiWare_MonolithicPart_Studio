@@ -29,7 +29,7 @@ from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Vec
 
 from template_core.models import Artifact, CanonicalPlan, CompileResult, Diagnostic, GeometryMetrics
-from template_core.sweep_frames import segment_start_frames
+from template_core.sweep_frames import path_frames, segment_start_frames
 
 
 def _box(x: float, y: float, z: float, dx: float, dy: float, dz: float):
@@ -229,9 +229,36 @@ def _parse_points(value: str) -> list[tuple[float, float, float]]:
         raise RuntimeError("Path points must use x:y:z;x:y:z format") from error
     if len(points) < 2 or any(len(point) != 3 for point in points):
         raise RuntimeError("Sweep path requires at least two 3D points")
+    if any(not all(math.isfinite(component) for component in point) for point in points):
+        raise RuntimeError("Sweep path points must be finite")
     if any(math.dist(a, b) <= 1e-9 for a, b in zip(points, points[1:])):
         raise RuntimeError("Sweep path contains a zero-length segment")
     return points
+
+
+def _map_path_tangent(value, plane: str) -> tuple[float, float, float] | None:
+    """Map a sampled 2-D tangent into the worker's historical 3-D plane.
+
+    Lowering stores analytic source tangents as two components.  Keeping the
+    conversion next to ``_parse_points`` ensures frame construction uses the
+    same XY-as-XZ convention as path point mapping.
+    """
+    if value is None:
+        return None
+    try:
+        values = tuple(float(component) for component in value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if len(values) == 3:
+        return values
+    if len(values) != 2:
+        return None
+    u, v = values
+    if plane in {"XY", "XZ"}:
+        return (u, 0.0, v)
+    if plane == "YZ":
+        return (0.0, u, v)
+    return None
 
 
 def _profile_support_along(sketch, regions, frame, direction) -> float:
@@ -276,7 +303,7 @@ def _profile_support_along(sketch, regions, frame, direction) -> float:
     return support
 
 
-def _corner_extension_distances(sketch, regions, points, frames) -> list[float]:
+def _corner_extension_distances(sketch, regions, points, frames, segment_kinds=None) -> list[float]:
     """Compute incoming-section overlap distances for each interior corner.
 
     Entry ``i`` belongs to station ``i`` and is applied to the end of segment
@@ -284,6 +311,11 @@ def _corner_extension_distances(sketch, regions, points, frames) -> list[float]:
     the exact RightCorner overlap for the supported orthogonal paths.
     """
     result = [0.0] * len(frames)
+    # ``points`` may contain tessellated arc stations.  Only a vertex between
+    # two authored line segments is a true RightCorner; applying a miter to
+    # each five-degree arc sample would turn a smooth circle into a chain of
+    # artificial spikes.  Missing metadata is the legacy all-line contract.
+    kinds = list(segment_kinds or ["line"] * max(0, len(points) - 1))
     if len(points) < 3 or not frames:
         return result
     corners = list(range(1, len(points) - 1))
@@ -296,6 +328,10 @@ def _corner_extension_distances(sketch, regions, points, frames) -> list[float]:
     for corner in corners:
         incoming_index = len(frames) - 1 if corner == 0 else corner - 1
         outgoing_index = 0 if corner == 0 else corner
+        incoming_kind = kinds[incoming_index] if incoming_index < len(kinds) else "line"
+        outgoing_kind = kinds[outgoing_index] if outgoing_index < len(kinds) else "line"
+        if incoming_kind != "line" or outgoing_kind != "line":
+            continue
         incoming = frames[incoming_index][3]
         outgoing = frames[outgoing_index][3]
         cross = (
@@ -362,7 +398,7 @@ def _refine_sweep_shape(shape):
     return shape
 
 
-def _sweep_region(sketch, region, points, frames, corner_extensions=None):
+def _sweep_region(sketch, region, points, frames, corner_extensions=None, segment_kinds=None, station_frames=None):
     """Sweep one material region through straight segments with mitered corners.
 
     A multi-section ``ThruSections`` fallback interpolates corner stations at
@@ -374,6 +410,46 @@ def _sweep_region(sketch, region, points, frames, corner_extensions=None):
     """
     solids = []
     corner_extensions = list(corner_extensions or [])
+    kinds = list(segment_kinds or ["line"] * max(0, len(points) - 1))
+
+    # A sampled circular edge is a smooth spine, not a succession of sharp
+    # RightCorner elbows.  When the path contains no authored line-to-line
+    # corner, construct one multi-section solid so adjacent arc stations share
+    # continuous side faces.  Frames are still evaluated at every station;
+    # the last station reuses the final segment orientation with a translated
+    # origin because ``segment_start_frames`` intentionally returns one frame
+    # per segment.
+    has_real_line_corner = any(
+        kinds[index - 1] == "line" and kinds[index] == "line"
+        for index in range(1, min(len(kinds), len(points) - 1))
+    )
+    if "arc" in kinds and not has_real_line_corner:
+        station_frames = list(station_frames or frames)
+        if len(station_frames) < len(points) and station_frames:
+            last = station_frames[-1]
+            station_frames.append((points[-1], last[1], last[2], last[3]))
+        section = BRepOffsetAPI_ThruSections(True, bool(False), 1e-6)
+        try:
+            for point, frame in zip(points, station_frames):
+                # Ensure the frame origin is exactly the station (the math
+                # module already does this, but this also protects callers
+                # passing legacy custom frames).
+                station_frame = (point, frame[1], frame[2], frame[3])
+                section.AddWire(_region_wire(sketch, region, frame=station_frame))
+            section.CheckCompatibility(True)
+            section.Build()
+            # The first constructor argument requests a solid; unlike
+            # PipeShell, ThruSections has no MakeSolid method in the OCP
+            # Python bindings.
+            if not section.IsDone():
+                raise RuntimeError("ThruSections did not produce a solid")
+            candidate = section.Shape()
+            if not BRepCheck_Analyzer(candidate).IsValid():
+                raise RuntimeError("ThruSections produced an invalid solid")
+            return candidate
+        except Exception as error:
+            raise RuntimeError(f"Sweep construction failed for region {region['id']} arc path: {error}") from error
+
     for index, (start, end, frame) in enumerate(zip(points, points[1:], frames)):
         start_for_spine = start
         end_for_spine = end
@@ -427,18 +503,84 @@ def _sketch_sweep(arguments):
     if not wire_builder.IsDone():
         raise RuntimeError("Sweep path wire construction failed")
     spine = wire_builder.Wire()
+    segment_tangent_overrides = arguments.get("pathSegmentTangents")
+    if segment_tangent_overrides is not None:
+        if not isinstance(segment_tangent_overrides, (list, tuple)) or len(segment_tangent_overrides) != len(points) - 1:
+            raise RuntimeError("Sweep path tangent metadata does not match pathPoints")
+        plane = str(arguments.get("pathPlane", sketch.get("plane", "XY")))
+        mapped_tangents = []
+        for value in segment_tangent_overrides:
+            if not isinstance(value, (list, tuple)):
+                raise RuntimeError("Sweep path tangent metadata is invalid")
+            tangent = _map_path_tangent(value, plane)
+            if tangent is None:
+                raise RuntimeError(f"Unsupported sweep path plane: {plane}")
+            if not all(math.isfinite(component) for component in tangent):
+                raise RuntimeError("Sweep path tangent metadata must be finite")
+            mapped_tangents.append(tangent)
+    else:
+        mapped_tangents = None
+    station_tangent_overrides = arguments.get("pathStationTangents")
+    if station_tangent_overrides is not None:
+        if not isinstance(station_tangent_overrides, (list, tuple)) or len(station_tangent_overrides) != len(points):
+            raise RuntimeError("Sweep path station tangent metadata does not match pathPoints")
+        plane = str(arguments.get("pathPlane", sketch.get("plane", "XY")))
+        mapped_station_tangents = []
+        for value in station_tangent_overrides:
+            if value is None:
+                mapped_station_tangents.append(None)
+                continue
+            if not isinstance(value, (list, tuple)):
+                raise RuntimeError("Sweep path station tangent metadata is invalid")
+            tangent = _map_path_tangent(value, plane)
+            if tangent is None:
+                raise RuntimeError(f"Unsupported sweep path plane: {plane}")
+            if not all(math.isfinite(component) for component in tangent):
+                raise RuntimeError("Sweep path station tangent metadata must be finite")
+            mapped_station_tangents.append(tangent)
+        if any(item is None for item in mapped_station_tangents):
+            mapped_station_tangents = None
+    else:
+        mapped_station_tangents = None
     try:
-        frames = segment_start_frames(points, str(arguments.get("orientationMode", "minimumTwist")))
+        # Always derive station frames.  Arc metadata from newer plans has
+        # analytic station tangents, while legacy callers may provide only
+        # pathPoints; the latter still gets a deterministic corner frame
+        # instead of silently falling back to the shorter segment-frame list.
+        station_frames = path_frames(
+            points,
+            str(arguments.get("orientationMode", "minimumTwist")),
+            station_tangent_overrides=mapped_station_tangents,
+        )
     except ValueError as error:
         raise RuntimeError(str(error)) from error
+    try:
+        frames = segment_start_frames(
+            points,
+            str(arguments.get("orientationMode", "minimumTwist")),
+            segment_tangent_overrides=mapped_tangents,
+        )
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
+    segment_kinds = arguments.get("pathSegmentKinds")
+    if segment_kinds is not None and not isinstance(segment_kinds, (list, tuple)):
+        raise RuntimeError("Sweep path segment metadata must be a list")
+    # One kind per polyline interval is emitted by lowering.  Legacy callers
+    # that only provide pathPoints continue to use the all-line behaviour.
+    segment_kinds = list(segment_kinds or ["line"] * max(0, len(points) - 1))
+    if len(segment_kinds) != len(points) - 1:
+        raise RuntimeError("Sweep path segment metadata does not match pathPoints")
+    unsupported_kinds = {str(kind) for kind in segment_kinds} - {"line", "arc"}
+    if unsupported_kinds:
+        raise RuntimeError("Unsupported sweep path segment type")
     additive_regions = [region for region in sketch["regions"] if region["operation"] == "add"]
     # Compute the miter support from additive material only.  A subtractive
     # inner region can have a different radius/extent and must be swept with
     # its own support below; including it here would make the outer body
     # extension depend on the size of a hole.
-    corner_extensions = _corner_extension_distances(sketch, additive_regions, points, frames)
+    corner_extensions = _corner_extension_distances(sketch, additive_regions, points, frames, segment_kinds)
     additive = [
-        _sweep_region(sketch, region, points, frames, corner_extensions)
+        _sweep_region(sketch, region, points, frames, corner_extensions, segment_kinds, station_frames)
         for region in sketch["regions"]
         if region["operation"] == "add"
     ]
@@ -447,8 +589,8 @@ def _sketch_sweep(arguments):
     result = _fuse(*additive)
     for region in sketch["regions"]:
         if region["operation"] == "subtract":
-            hole_extensions = _corner_extension_distances(sketch, [region], points, frames)
-            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, points, frames, hole_extensions))
+            hole_extensions = _corner_extension_distances(sketch, [region], points, frames, segment_kinds)
+            cut = BRepAlgoAPI_Cut(result, _sweep_region(sketch, region, points, frames, hole_extensions, segment_kinds, station_frames))
             cut.Build()
             if not cut.IsDone():
                 raise RuntimeError(f"Sweep inner-region subtraction failed for {region['id']}")

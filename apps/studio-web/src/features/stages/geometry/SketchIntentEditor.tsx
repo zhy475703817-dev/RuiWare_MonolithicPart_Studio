@@ -591,6 +591,18 @@ export function SketchIntentEditor({
           renameParameter={renameParameter}
           editParameter={editParameter}
           operatorsForParameter={operatorsForParameter}
+          dimensions={dimensions}
+          dimensionName={dimensionName}
+          onEditConstraint={editConstraint}
+          onDeleteConstraint={(index) =>
+            setSketch({
+              constraints: draft.sketch.constraints.filter(
+                (_, itemIndex) => itemIndex !== index,
+              ),
+            })
+          }
+          onAssignSelection={assignSelection}
+          onSelect={onSelect}
         />
       )}
       {tab === "regions" && (

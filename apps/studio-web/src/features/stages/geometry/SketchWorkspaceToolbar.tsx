@@ -28,6 +28,8 @@ type Props = {
   setSolveCase: (value: "minimum" | "nominal" | "maximum") => void;
   tool: SketchTool;
   setTool: (value: SketchTool) => void;
+  /** Restrict creation tools for specialized editors such as sweep paths. */
+  allowedTools?: readonly SketchTool[];
   arcDrawMode: "centerEndpoints" | "threePoint";
   setArcDrawMode: (value: "centerEndpoints" | "threePoint") => void;
   historyLength: number;
@@ -66,6 +68,7 @@ export function SketchWorkspaceToolbar({
   setSolveCase,
   tool,
   setTool,
+  allowedTools,
   arcDrawMode,
   setArcDrawMode,
   historyLength,
@@ -142,7 +145,8 @@ export function SketchWorkspaceToolbar({
             ["circle", CircleDot, "圆"],
             ["arc", RefreshCw, "圆弧"],
           ] as const
-        ).map(([id, Icon, label]) => (
+        ).filter(([id]) => !allowedTools || allowedTools.includes(id))
+        .map(([id, Icon, label]) => (
           <button
             key={id}
             className={tool === id ? "active" : ""}

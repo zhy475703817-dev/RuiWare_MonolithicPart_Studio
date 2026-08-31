@@ -9,6 +9,10 @@ from .models import CanonicalPlan, Diagnostic, StaticOperation, TemplateDraft
 from .rules import RuleEvaluationError, evaluate_expression, evaluate_template
 from .sketch_solver import solve_semantic_sketch
 from .sweep_path import ordered_path_points, validate_sweep_path
+from .sweep_path_sampling import (
+    map_point_to_3d,
+    sample_ordered_path_data,
+)
 
 
 def canonical_json(value: Any) -> str:
@@ -53,32 +57,67 @@ def _resolve_structured_geometry_argument(
     return ";".join(rows)
 
 
+def _sampled_path_payload(path_sketch) -> tuple[str, list[str], list[str], list[dict[str, Any]], list[tuple[float, float] | None], list[tuple[float, float] | None]]:
+    """Sample an ordered authored path and retain segment provenance.
+
+    The CAD worker intentionally consumes a polyline during this first arc
+    implementation.  ``sample_ordered_path_data`` is the single source of
+    truth for arc sampling; this helper only maps its output into the legacy
+    worker string format and records which sampled edges came from an authored
+    line versus an arc.  The provenance lets the worker apply RightCorner to
+    actual line/polyline vertices without treating every arc sample as a
+    sharp corner.
+    """
+    topology = validate_sweep_path(path_sketch)
+    ordered = topology.get("ordered", [])
+    plane = getattr(path_sketch, "plane", "XY")
+    try:
+        sampled_data = sample_ordered_path_data(
+            path_sketch,
+            ordered,
+            max_angle_degrees=5.0,
+            max_chord_error=0.1,
+        )
+    except (TypeError, ValueError):
+        sampled_data = {"points": [], "segments": []}
+    mapped = [
+        tuple(float(component) for component in map_point_to_3d(point, plane, xy_as_xz=True))
+        for point in sampled_data.get("points", [])
+    ]
+    segment_records = [dict(item) for item in sampled_data.get("segments", [])]
+    segment_kinds = [str(item.get("geometryType", "line")) for item in segment_records]
+    segment_geometry_ids = [str(item.get("geometryId", "")) for item in segment_records]
+    segment_tangents = [
+        tuple(float(component) for component in map_point_to_3d(tangent, plane, xy_as_xz=True))
+        if isinstance(tangent, (list, tuple)) and len(tangent) >= 2 else None
+        for tangent in (item.get("tangent2d") for item in segment_records)
+    ]
+    station_tangents = [
+        tuple(float(component) for component in map_point_to_3d(tangent, plane, xy_as_xz=True))
+        if isinstance(tangent, (list, tuple)) and len(tangent) >= 2 else None
+        for tangent in sampled_data.get("stationTangents2d", [])
+    ]
+
+    if len(mapped) < 2:
+        # Legacy drafts may not have a graph order (for example while a path
+        # is still being edited).  Retain the old endpoint best effort.
+        points = ordered_path_points(path_sketch)
+        mapped = [map_point_to_3d(point, plane, xy_as_xz=True) for point in points]
+        segment_kinds = ["line"] * max(0, len(mapped) - 1)
+        segment_geometry_ids = [""] * max(0, len(mapped) - 1)
+        segment_records = []
+        segment_tangents = [None] * max(0, len(mapped) - 1)
+        station_tangents = [None] * len(mapped)
+
+    if len(mapped) < 2:
+        return "", [], [], [], [], []
+    encoded = ";".join(":".join(str(float(component)) for component in point) for point in mapped)
+    return encoded, segment_kinds, segment_geometry_ids, segment_records, segment_tangents, station_tangents
+
+
 def _path_points_from_sketch(path_sketch) -> str:
     """Convert the authored 2D sweep path into the worker's 3D point string."""
-    points = ordered_path_points(path_sketch)
-    # Legacy drafts may not contain a usable start ref; retain their endpoint
-    # conversion as a best-effort fallback for backwards compatibility.
-    if len(points) < 2:
-        points = []
-        for geometry in path_sketch.geometry:
-            if geometry.geometryType not in {"line", "arc"}:
-                continue
-            segment = list(geometry.points) or ([geometry.start, geometry.end] if geometry.start is not None and geometry.end is not None else [])
-            if len(segment) >= 2:
-                points.extend(segment if not points else (segment[1:] if points[-1] == segment[0] else segment))
-    if len(points) < 2:
-        return ""
-    mapped: list[tuple[float, float, float]] = []
-    for first, second in points:
-        if path_sketch.plane == "XZ":
-            mapped.append((float(first), 0.0, float(second)))
-        elif path_sketch.plane == "YZ":
-            mapped.append((0.0, float(first), float(second)))
-        else:
-            # XY path editor coordinates are shown as X/Z so a vertical
-            # authored path follows the normal of the default XY profile.
-            mapped.append((float(first), 0.0, float(second)))
-    return ";".join(f"{x:g}:{y:g}:{z:g}" for x, y, z in mapped)
+    return _sampled_path_payload(path_sketch)[0]
 
 
 def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
@@ -163,12 +202,11 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     "twistMode": definition.twistMode,
                     "cornerMode": definition.cornerMode,
                 })
+            sampled_path_payload: tuple[str, list[str], list[str], list[dict[str, Any]], list[tuple[float, float] | None], list[tuple[float, float] | None]] | None = None
             if definition.operator == "solid.sweep" and draft.sweepPath is not None:
                 path_id = definition.pathSketchId or "path.main"
                 if path_id == draft.sweepPath.id or draft.sweepPath.id in definition.sourceRefs:
-                    generated_path = _path_points_from_sketch(draft.sweepPath)
-                    if generated_path:
-                        arguments["pathPoints"] = generated_path
+                    sampled_path_payload = _sampled_path_payload(draft.sweepPath)
             arguments = {
                 name: _resolve_structured_geometry_argument(
                     name, value, geometry_context
@@ -177,6 +215,20 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
             }
             for name, expression in sorted(definition.argumentExpressions.items()):
                 arguments[name] = evaluate_expression(expression, geometry_context)
+            # A confirmed sweepPath is authoritative over legacy/manual
+            # pathPoints arguments.  Keep provenance alongside the sampled
+            # points so the worker can distinguish true line corners from arc
+            # tessellation stations.
+            if sampled_path_payload is not None:
+                generated_path, segment_kinds, segment_geometry_ids, segment_records, segment_tangents, station_tangents = sampled_path_payload
+                if generated_path:
+                    arguments["pathPoints"] = generated_path
+                    arguments["pathSegmentKinds"] = segment_kinds
+                    arguments["pathSegmentGeometryIds"] = segment_geometry_ids
+                    arguments["pathSegments"] = segment_records
+                    arguments["pathSegmentTangents"] = segment_tangents
+                    arguments["pathStationTangents"] = station_tangents
+                    arguments["pathPlane"] = getattr(draft.sweepPath, "plane", "XY")
             if definition.operator in {"sketch.region_extrude", "sketch.centerline_thinwall_extrude", "solid.revolve", "solid.sweep", "solid.loft"} and sketch_case is not None:
                 arguments["sketch"] = {
                     "profileMode": draft.sketch.profileMode,

@@ -142,7 +142,7 @@ def sweep_preview_admission(draft: TemplateDraft, material_snapshot: dict[str, A
     if draft.sweepPath is None or draft.sweepPath.status != "confirmed":
         missing.append({"code": "SWEEP_PREVIEW_PATH_UNCONFIRMED", "path": "sweepPath.status", "message": "三维预览需要已确认的扫掠路径。"})
     for item in path_result.get("diagnostics", []):
-        if item["code"] in {"SWEEP_PATH_DISCONNECTED", "SWEEP_PATH_BRANCH", "SWEEP_PATH_SELF_INTERSECTION", "SWEEP_PATH_DUPLICATE_SEGMENT", "SWEEP_PATH_ILLEGAL_GEOMETRY", "SWEEP_PATH_ZERO_LENGTH", "SWEEP_PATH_GEOMETRY_INVALID", "SWEEP_PATH_ARC_UNSUPPORTED", "SWEEP_PATH_START_UNDEFINED"}:
+        if item["code"] in {"SWEEP_PATH_DISCONNECTED", "SWEEP_PATH_BRANCH", "SWEEP_PATH_SELF_INTERSECTION", "SWEEP_PATH_DUPLICATE_SEGMENT", "SWEEP_PATH_ILLEGAL_GEOMETRY", "SWEEP_PATH_ZERO_LENGTH", "SWEEP_PATH_GEOMETRY_INVALID", "SWEEP_PATH_START_UNDEFINED"}:
             missing.append({"code": item["code"], "path": item["path"], "message": item["message"]})
     if not path_result.get("startEndpointRef"):
         missing.append({"code": "SWEEP_PREVIEW_START_MISSING", "path": "sweepPath.startEndpointRef", "message": "三维预览需要确定扫掠路径起点。"})

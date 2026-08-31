@@ -165,6 +165,7 @@ export type SketchPrimitive = {
   startAngle?: number | null;
   endAngle?: number | null;
   largeArc?: boolean | null;
+  sweepDirection?: SweepDirection;
   points?: SketchPoint[];
 };
 export type SketchSolveCase = {
@@ -227,6 +228,9 @@ export type SweepPathStatus =
   | "invalid"
   | "confirmed";
 
+/** Directed orientation of a circular sweep-path arc. */
+export type SweepDirection = "ccw" | "cw";
+
 export type SweepPathWindowState =
   | "pathWindowClosed"
   | "pathWindowOpen"
@@ -251,6 +255,7 @@ export type SweepPathGeometry = {
   startAngle?: number | null;
   endAngle?: number | null;
   largeArc?: boolean | null;
+  sweepDirection?: SweepDirection;
   points: [number, number][];
 };
 
@@ -497,6 +502,7 @@ export type Draft = {
       startAngle?: number | null;
       endAngle?: number | null;
       largeArc?: boolean | null;
+      sweepDirection?: SweepDirection;
       points: [number, number][];
     }[];
     constraints: {

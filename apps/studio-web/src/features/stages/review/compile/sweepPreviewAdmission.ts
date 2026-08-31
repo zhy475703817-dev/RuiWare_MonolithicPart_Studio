@@ -16,7 +16,7 @@ export function sweepPreviewAdmission(draft: Draft): SweepPreviewAdmission {
   if (!path || !path.geometry.length || path.status !== "confirmed") missing.push("已确认扫掠路径");
   if (path) {
     const topology = validateSweepPathTopology(path);
-    if (topology.diagnostics.some((item) => item.severity === "error" && item.code !== "SWEEP_PATH_ARC_UNSUPPORTED")) missing.push("有效路径拓扑");
+    if (topology.diagnostics.some((item) => item.severity === "error")) missing.push("有效路径拓扑");
     if (!topology.startEndpointRef) missing.push("路径起点");
   }
   if (sweep.profileSketchId !== "sketch.section.main" || sweep.pathSketchId !== "path.main" || new Set(sweep.sourceRefs).size !== 2 || !sweep.sourceRefs.includes("sketch.section.main") || !sweep.sourceRefs.includes("path.main") || !draft.geometryRecipe.sketches.includes("sketch.section.main") || !draft.geometryRecipe.paths.includes("path.main")) missing.push("一致的截面/路径草图引用");
