@@ -268,7 +268,7 @@ export function GeometryStage({
         ...recipe.operations,
         {
           id: uid("body"),
-          operator: "sketch.region_extrude",
+          operator: "profile.open_profile_tube_extrude",
           sourceRefs: ["sketch.section.main"],
           arguments: {},
           argumentExpressions: {
@@ -351,7 +351,7 @@ export function GeometryStage({
             ? operation
             : {
                 ...operation,
-                operator: "sketch.region_extrude",
+                operator: "profile.open_profile_tube_extrude",
                 argumentExpressions: {
                   ...operation.argumentExpressions,
                   length:

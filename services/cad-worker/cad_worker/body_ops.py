@@ -297,6 +297,15 @@ def _centerline_thinwall_extrude(arguments):
 
 def _body(operation):
     p = operation.arguments
+    if operation.operator == "profile.open_profile_tube_extrude":
+        sketch = p.get("sketch")
+        if sketch:
+            if sketch.get("profileMode") == "centerlineThinWall":
+                return _centerline_thinwall_extrude(p)
+            return _sketch_region_extrude(p)
+        # Compatibility for callers that still provide rectangular tube
+        # dimensions instead of a parameterized sketch.
+        operation = type("LegacyOperation", (), {"operator": "profile.rectangular_tube_extrude", "arguments": p})()
     if operation.operator == "sketch.region_extrude":
         return _sketch_region_extrude(p)
     if operation.operator == "sketch.centerline_thinwall_extrude":
