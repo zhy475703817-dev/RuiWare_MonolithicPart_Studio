@@ -1,1 +1,0 @@
-export { SketchRegionPanel } from "./SketchRegionPanel";
