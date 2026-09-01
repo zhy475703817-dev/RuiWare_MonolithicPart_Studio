@@ -288,6 +288,7 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
     )
     sketch_solution = solve_semantic_sketch(draft)
     supported_operators = {
+        "profile.open_profile_tube_extrude",
         "sketch.region_extrude", "sketch.centerline_thinwall_extrude",
         "sheet.blank_extrude", "profile.rectangular_tube_extrude",
         "solid.revolve", "solid.sweep", "solid.loft", "sheet.bend",
