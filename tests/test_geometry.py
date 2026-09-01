@@ -102,6 +102,25 @@ def test_centerline_thinwall_respects_sketch_plane(tmp_path, plane) -> None:
     assert result.metrics is not None and result.metrics.solidCount == 1
 
 
+def test_unified_profile_extrude_compiles_closed_region(tmp_path) -> None:
+    value = TemplateDraft(name="unified closed profile")
+    value.geometryRecipe.operations[0].operator = "profile.open_profile_tube_extrude"
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+    assert result.success, result.diagnostics
+    assert result.metrics is not None and result.metrics.solidCount == 1
+
+
+def test_unified_profile_extrude_compiles_open_centerline(tmp_path) -> None:
+    value = TemplateDraft(name="unified open profile")
+    value.sketch.profileMode = "centerlineThinWall"
+    value.sketch.regions = []
+    value.geometryRecipe.operations[0].operator = "profile.open_profile_tube_extrude"
+    value.geometryRecipe.operations[0].argumentExpressions = {"length": "length", "thickness": "thickness"}
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+    assert result.success, result.diagnostics
+    assert result.metrics is not None and result.metrics.solidCount == 1
+
+
 def _compile_operator(tmp_path, operator: str, arguments: dict[str, object]):
     value = TemplateDraft(name=f"{operator} test")
     operation = value.geometryRecipe.operations[0]

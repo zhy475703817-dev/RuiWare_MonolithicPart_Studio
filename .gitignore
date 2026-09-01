@@ -9,7 +9,10 @@ __pycache__/
 *.egg-info/
 .idea/
 .npm-cache/
+.pnpm-store/
+.vite-local/
 .tmp/
+.pytest-tmp/
 .vite/
 data/*.db
 ruiware.db

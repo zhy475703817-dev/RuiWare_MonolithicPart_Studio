@@ -141,9 +141,9 @@ def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
         for item in [*sketch_solution["topologyDiagnostics"], *nominal["diagnostics"]]
     )
     first_operator = draft.geometryRecipe.operations[0].operator if draft.geometryRecipe.operations else ""
-    if first_operator == "sketch.centerline_thinwall_extrude" and float(values.get("thickness", 0)) <= 0:
+    if first_operator in {"sketch.centerline_thinwall_extrude", "profile.open_profile_tube_extrude"} and draft.sketch.profileMode == "centerlineThinWall" and float(values.get("thickness", 0)) <= 0:
         diagnostics.append(Diagnostic(severity="error", code="THINWALL_THICKNESS_INVALID", path="parameters.thickness", message="中心线薄壁算子的厚度必须大于 0。"))
-    if first_operator == "profile.rectangular_tube_extrude" and (
+    if first_operator in {"profile.rectangular_tube_extrude", "profile.open_profile_tube_extrude"} and "depth" in values and (
         float(values.get("depth", 0)) <= float(values.get("thickness", 0)) * 2
     ):
         diagnostics.append(
@@ -151,7 +151,7 @@ def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
                 severity="error",
                 code="TUBE_WALL_INVALID",
                 path="parameters.depth",
-                message="矩形管深度必须大于两倍壁厚。",
+                message="管材深度必须大于两倍壁厚。",
             )
         )
     return diagnostics
@@ -229,7 +229,7 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     arguments["pathSegmentTangents"] = segment_tangents
                     arguments["pathStationTangents"] = station_tangents
                     arguments["pathPlane"] = getattr(draft.sweepPath, "plane", "XY")
-            if definition.operator in {"sketch.region_extrude", "sketch.centerline_thinwall_extrude", "solid.revolve", "solid.sweep", "solid.loft"} and sketch_case is not None:
+            if definition.operator in {"profile.open_profile_tube_extrude", "sketch.region_extrude", "sketch.centerline_thinwall_extrude", "solid.revolve", "solid.sweep", "solid.loft"} and sketch_case is not None:
                 arguments["sketch"] = {
                     "profileMode": draft.sketch.profileMode,
                     "plane": draft.sketch.plane,
