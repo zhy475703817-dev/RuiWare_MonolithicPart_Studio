@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 .idea/
 .npm-cache/
+.pnpm-store/
 .tmp/
 .vite/
 data/*.db
