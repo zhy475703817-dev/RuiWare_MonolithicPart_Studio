@@ -23,7 +23,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => ({ detail: response.statusText }));
     const error = payload.error || payload.detail;
     if (error && typeof error === "object" && "code" in error && "message" in error) {
-      throw new ApiError(response.status, error as ApiErrorPayload);
+      throw new ApiError(response.status, {
+        fields: [],
+        ...error,
+        context: payload.context || error.context || {},
+      } as ApiErrorPayload);
     }
     const detail = typeof payload.detail === "string" ? payload.detail : response.statusText;
     throw new ApiError(response.status, {
@@ -31,6 +35,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
       message: detail || "请求处理失败",
       action: "请刷新页面后重试。",
       fields: [],
+      retryable: response.status >= 500,
     });
   }
   if (response.status === 204) return undefined as T;
@@ -71,4 +76,3 @@ export const api = {
 };
 
 export { ApiError };
-

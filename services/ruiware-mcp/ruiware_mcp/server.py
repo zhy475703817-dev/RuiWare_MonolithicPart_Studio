@@ -45,6 +45,19 @@ def _result(value: Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, indent=2)}]}
 
 
+def _error_result(error: RuiWareApiError) -> dict[str, Any]:
+    return {
+        "content": [{
+            "type": "text",
+            "text": json.dumps({
+                "error": error.payload,
+                "status": error.status,
+            }, ensure_ascii=False, indent=2),
+        }],
+        "isError": True,
+    }
+
+
 class McpApplication:
     def __init__(self, client: RuiWareApiClient | None = None) -> None:
         self.client = client or RuiWareApiClient()
@@ -81,8 +94,25 @@ class McpApplication:
         if method == "tools/call":
             try:
                 result = self.call_tool(request["params"]["name"], request["params"].get("arguments", {}))
-            except (KeyError, ValueError, RuiWareApiError) as error:
-                result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
+            except RuiWareApiError as error:
+                result = _error_result(error)
+            except (KeyError, ValueError) as error:
+                result = {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps({
+                            "error": {
+                                "code": "MCP_TOOL_INVALID",
+                                "message": str(error),
+                                "action": "请检查工具名称和输入参数。",
+                                "fields": [],
+                                "traceId": "",
+                                "retryable": False,
+                            },
+                        }, ensure_ascii=False, indent=2),
+                    }],
+                    "isError": True,
+                }
             return {"jsonrpc": "2.0", "id": request_id, "result": result}
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, api } from "../../api";
+import { api, toErrorNotice, type ErrorNotice } from "../../api";
 import { STAGES } from "../workflow/stageConfig";
 import type {
   CompileResult,
@@ -12,34 +12,8 @@ import type {
   TemplateAuthoringRegistry,
 } from "../../types";
 
-/** 前端统一展示的错误信息，避免页面组件直接解析 HTTP 响应。 */
-export type ErrorNotice = {
-  code: string;
-  message: string;
-  action?: string | null;
-  fields: { path?: string; message: string; type?: string }[];
-  traceId?: string;
-};
-
 export function preservePreviousCompileArtifacts(previous: CompileResult | null, failed: CompileResult): CompileResult {
   return previous ? { ...failed, artifacts: previous.artifacts, metrics: previous.metrics } : failed;
-}
-
-/** 将 API、浏览器和未知异常转换成统一的页面提示结构。 */
-function toErrorNotice(error: unknown): ErrorNotice {
-  if (error instanceof ApiError) {
-    return {
-      code: error.code,
-      message: error.message,
-      action: error.action,
-      fields: error.fields,
-      traceId: error.traceId,
-    };
-  }
-  if (error instanceof Error) {
-    return { code: "CLIENT_ERROR", message: error.message, fields: [] };
-  }
-  return { code: "CLIENT_ERROR", message: String(error), fields: [] };
 }
 
 /**
