@@ -175,11 +175,55 @@
 
 ## 6. MCP 接入 `services/ruiware-mcp`
 
-- `README.md`：MCP 服务使用说明。
-- `pyproject.toml`：该服务的 Python 构建配置。
-- `ruiware_mcp/__init__.py`：包标记文件。
-- `ruiware_mcp/api_client.py`：对外部 RuiWare API 的调用封装。
-- `ruiware_mcp/server.py`：MCP 服务入口与工具暴露。
+- `README.md`：MCP 服务启动方式、依赖的模板 API 和当前工具说明。
+- `pyproject.toml`：MCP 服务的 Python 包配置和 `ruiware-mcp` 启动命令。
+- `ruiware_mcp/__init__.py`：MCP Python 包标记文件。
+- `ruiware_mcp/api_client.py`：调用模板 API 的 HTTP 客户端；负责请求发送、JSON 解析和 API 错误转换。
+- `ruiware_mcp/server.py`：MCP stdio 启动入口和兼容分发入口；保留现有工具名称与业务调用方式。
+
+### 6.1 MCP 核心层 `ruiware_mcp/core`
+
+- `__init__.py`：核心基础设施包说明。
+- `contracts.py`：MCP 对外接口兼容基线，记录协议版本、服务信息、工具名称、必填参数以及只读 / 写入属性。
+- `protocol.py`：处理 JSON-RPC 的初始化、工具列表、工具调用、未知方法和非法 JSON 请求。
+- `responses.py`：统一包装成功结果、API 错误和工具输入错误，保证 Agent 能读取结构化错误。
+
+### 6.2 MCP 工具层 `ruiware_mcp/tools`
+
+- `__init__.py`：工具层包说明。
+- `read/__init__.py`：只读工具的统一导出入口。
+- `read/draft_context.py`：调用模板 API 读取指定草稿的完整工程上下文；不修改数据。
+- `read/attachments.py`：读取草稿附件列表并筛选指定附件；附件不属于当前草稿时返回结构化错误。
+- `read/validation.py`：读取指定模板阶段的确定性校验结果；不修改数据。
+- `authoring/__init__.py`：编辑和提案类工具的预留目录，目前用于后续迁移草图求解、提案预览和提案提交。
+- `workflow/__init__.py`：CAD 编译、B-Rep 检查和导出工具的预留目录。
+- `guidance/__init__.py`：Agent 参数解释、错误解释和下一步建议工具的预留目录。
+
+### 6.3 MCP 资源层 `ruiware_mcp/resources`
+
+- `__init__.py`：Agent 资源包说明；后续用于放置工具能力目录、阶段指南和参数 Schema 说明。
+
+### 6.4 当前 MCP 数据流
+
+```text
+Agent / MCP 客户端
+        ↓ JSON-RPC
+server.py
+        ↓
+core/protocol.py
+        ↓
+McpApplication.call_tool()
+        ↓
+tools/read/*
+        ↓
+api_client.py
+        ↓ HTTP
+services/template-api
+        ↓
+业务服务 / Repository / 领域层
+```
+
+当前已经完成 MCP 接口冻结、核心协议拆分和只读工具拆分。`authoring`、`workflow`、`guidance` 与 `resources` 目录已经建立，业务工具将在后续阶段逐步迁移和补充。
 
 ## 7. 现有文档
 

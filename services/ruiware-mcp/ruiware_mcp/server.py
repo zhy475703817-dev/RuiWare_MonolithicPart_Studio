@@ -4,7 +4,10 @@ import json
 import sys
 from typing import Any
 
-from .api_client import RuiWareApiClient, RuiWareApiError
+from .api_client import RuiWareApiClient
+from .core.protocol import McpProtocolHandler, parse_error_response
+from .core.responses import tool_result
+from .tools.read import get_attachment, get_draft_context, get_validation_result
 
 
 TOOLS = [
@@ -41,80 +44,29 @@ TOOLS = [
 ]
 
 
-def _result(value: Any) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, indent=2)}]}
-
-
-def _error_result(error: RuiWareApiError) -> dict[str, Any]:
-    return {
-        "content": [{
-            "type": "text",
-            "text": json.dumps({
-                "error": error.payload,
-                "status": error.status,
-            }, ensure_ascii=False, indent=2),
-        }],
-        "isError": True,
-    }
-
-
 class McpApplication:
     def __init__(self, client: RuiWareApiClient | None = None) -> None:
         self.client = client or RuiWareApiClient()
+        self.protocol = McpProtocolHandler(self.call_tool, TOOLS)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         draft_id = arguments.get("draftId", "")
         if name == "ruiware_get_draft_context":
-            return _result(self.client.get(f"/template-drafts/{draft_id}"))
+            return get_draft_context(self.client, arguments)
         if name == "ruiware_get_attachment":
-            draft = self.client.get(f"/template-drafts/{draft_id}")
-            attachment = next((item for item in draft.get("attachments", []) if item.get("id") == arguments.get("attachmentId")), None)
-            if attachment is None:
-                raise RuiWareApiError("指定附件不属于该模板。")
-            return _result(attachment)
+            return get_attachment(self.client, arguments)
         if name == "ruiware_solve_sketch":
-            return _result(self.client.post("/sketches/solve", {"draft": arguments["draft"], "overrides": arguments.get("overrides", {})}))
+            return tool_result(self.client.post("/sketches/solve", {"draft": arguments["draft"], "overrides": arguments.get("overrides", {})}))
         if name == "ruiware_preview_proposal":
-            return _result(self.client.post(f"/template-drafts/{draft_id}/proposals/preview", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
+            return tool_result(self.client.post(f"/template-drafts/{draft_id}/proposals/preview", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
         if name == "ruiware_submit_proposal":
-            return _result(self.client.post(f"/template-drafts/{draft_id}/proposals/apply", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
+            return tool_result(self.client.post(f"/template-drafts/{draft_id}/proposals/apply", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
         if name == "ruiware_get_validation_result":
-            return _result(self.client.get(f"/template-drafts/{draft_id}/stages/{arguments['stage']}/validate"))
+            return get_validation_result(self.client, arguments)
         raise ValueError(f"Unknown tool: {name}")
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
-        method = request.get("method")
-        request_id = request.get("id")
-        if method == "notifications/initialized":
-            return None
-        if method == "initialize":
-            return {"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "ruiware-mcp", "version": "0.1.0"}}}
-        if method == "tools/list":
-            return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": TOOLS}}
-        if method == "tools/call":
-            try:
-                result = self.call_tool(request["params"]["name"], request["params"].get("arguments", {}))
-            except RuiWareApiError as error:
-                result = _error_result(error)
-            except (KeyError, ValueError) as error:
-                result = {
-                    "content": [{
-                        "type": "text",
-                        "text": json.dumps({
-                            "error": {
-                                "code": "MCP_TOOL_INVALID",
-                                "message": str(error),
-                                "action": "请检查工具名称和输入参数。",
-                                "fields": [],
-                                "traceId": "",
-                                "retryable": False,
-                            },
-                        }, ensure_ascii=False, indent=2),
-                    }],
-                    "isError": True,
-                }
-            return {"jsonrpc": "2.0", "id": request_id, "result": result}
-        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
+        return self.protocol.handle(request)
 
 
 def main() -> None:
@@ -125,7 +77,7 @@ def main() -> None:
             if response is not None:
                 print(json.dumps(response, ensure_ascii=False), flush=True)
         except json.JSONDecodeError as error:
-            print(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(error)}}, ensure_ascii=False), flush=True)
+            print(json.dumps(parse_error_response(error), ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

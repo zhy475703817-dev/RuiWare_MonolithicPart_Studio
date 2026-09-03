@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ruiware-mcp"))
 
 from ruiware_mcp.api_client import RuiWareApiError
+from ruiware_mcp.core.contracts import TOOL_CONTRACTS
 from ruiware_mcp.server import McpApplication, TOOLS
 
 
@@ -25,6 +26,13 @@ class FakeClient:
 
 def content(result):
     return json.loads(result["content"][0]["text"])
+
+
+def test_existing_tool_contract_is_preserved():
+    current_tools = {tool["name"]: tool for tool in TOOLS}
+    assert set(current_tools) == set(TOOL_CONTRACTS)
+    for name, contract in TOOL_CONTRACTS.items():
+        assert tuple(current_tools[name]["inputSchema"].get("required", ())) == contract["required"]
 
 
 def test_tools_list_and_initialize_are_mcp_compatible():
