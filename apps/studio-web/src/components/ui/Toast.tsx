@@ -1,4 +1,4 @@
-import type { ErrorNotice } from "../../features/draft/useDraftWorkspace";
+import type { ErrorNotice } from "../../api/errors";
 
 /** 全局操作提示，兼容成功通知和结构化 API 错误。 */
 export function Toast({

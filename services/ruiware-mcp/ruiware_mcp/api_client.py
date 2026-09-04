@@ -8,7 +8,25 @@ from typing import Any
 
 
 class RuiWareApiError(RuntimeError):
-    """A non-successful response from the local RuiWare API."""
+    """携带 API 结构化错误信息的本地 RuiWare API 异常。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.payload = payload or {
+            "code": "MCP_API_ERROR",
+            "message": message,
+            "action": "请检查 API 服务状态后重试。",
+            "fields": [],
+            "traceId": "",
+            "retryable": True,
+        }
 
 
 class RuiWareApiClient:
@@ -33,9 +51,33 @@ class RuiWareApiClient:
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
             try:
-                detail = json.loads(body).get("detail", body)
+                response_payload = json.loads(body)
             except json.JSONDecodeError:
-                detail = body
-            raise RuiWareApiError(f"RuiWare API {error.code}: {detail}") from error
+                response_payload = {}
+            detail = response_payload.get("error") or response_payload.get("detail")
+            if not isinstance(detail, dict) or "code" not in detail:
+                detail = {
+                    "code": f"HTTP_{error.code}",
+                    "message": detail if isinstance(detail, str) else body or error.reason,
+                    "action": "请检查请求参数或服务状态后重试。",
+                    "fields": [],
+                    "traceId": "",
+                    "retryable": error.code >= 500,
+                }
+            raise RuiWareApiError(
+                str(detail.get("message") or f"RuiWare API {error.code}"),
+                status=error.code,
+                payload=detail,
+            ) from error
         except urllib.error.URLError as error:
-            raise RuiWareApiError(f"无法连接 RuiWare API（{self.base_url}）：{error.reason}") from error
+            raise RuiWareApiError(
+                f"无法连接 RuiWare API（{self.base_url}）：{error.reason}",
+                payload={
+                    "code": "MCP_API_UNAVAILABLE",
+                    "message": f"无法连接 RuiWare API（{self.base_url}）。",
+                    "action": "请启动模板 API 后重试。",
+                    "fields": [],
+                    "traceId": "",
+                    "retryable": True,
+                },
+            ) from error
