@@ -92,3 +92,48 @@ def test_api_errors_are_returned_to_agents_as_structured_payloads():
     assert payload["status"] == 409
     assert payload["error"]["code"] == "DRAFT_REVISION_CONFLICT"
     assert payload["error"]["retryable"] is True
+
+
+def test_authoring_and_workflow_tools_keep_api_routes_explicit():
+    client = FakeClient()
+    app = McpApplication(client)
+    app.call_tool("ruiware_solve_sketch", {"draft": {"id": "draft-1"}})
+    app.call_tool("ruiware_preview_proposal", {"draftId": "draft-1", "proposal": {"id": "p-1"}})
+    app.call_tool("ruiware_submit_proposal", {"draftId": "draft-1", "proposal": {"id": "p-1"}})
+    app.call_tool("ruiware_compile_draft", {"draftId": "draft-1"})
+    app.call_tool("ruiware_get_latest_compile", {"draftId": "draft-1"})
+    app.call_tool("ruiware_evaluate_draft", {"draftId": "draft-1"})
+    app.call_tool("ruiware_complete_stage", {"draftId": "draft-1", "stage": "baseSketch"})
+    assert client.calls == [
+        ("POST", "/sketches/solve", {"draft": {"id": "draft-1"}, "overrides": {}}),
+        ("POST", "/template-drafts/draft-1/proposals/preview", {"proposal": {"id": "p-1"}, "selectedCommandIds": None}),
+        ("POST", "/template-drafts/draft-1/proposals/apply", {"proposal": {"id": "p-1"}, "selectedCommandIds": None}),
+        ("POST", "/template-drafts/draft-1/compile", {}),
+        ("GET", "/template-drafts/draft-1/compile-runs/latest", None),
+        ("POST", "/template-drafts/draft-1/evaluate", {"overrides": {}, "material": {}, "product": {}, "component": {}, "projectZone": {}}),
+        ("POST", "/template-drafts/draft-1/stages/baseSketch/complete", {}),
+    ]
+
+
+def test_guidance_tools_return_agent_facing_information():
+    class GuidanceClient(FakeClient):
+        def get(self, path):
+            self.calls.append(("GET", path, None))
+            if path.endswith("/draft-1"):
+                return {
+                    "id": "draft-1",
+                    "stageStatus": {"templateInfo": "in_progress"},
+                    "parameterDefinitions": [{"id": "length", "label": "长度", "default": 100}],
+                    "variants": [{"id": "nominal", "overrides": {"length": 120}}],
+                }
+            return {"stage": "templateInfo", "complete": False, "checks": [{"passed": False, "path": "name"}]}
+
+    app = McpApplication(GuidanceClient())
+    parameter = content(app.call_tool("ruiware_get_parameter_help", {"draftId": "draft-1", "parameterId": "length"}))
+    guidance = content(app.call_tool("ruiware_get_next_actions", {"draftId": "draft-1"}))
+    explained = content(app.call_tool("ruiware_explain_error", {"error": {"code": "REQUEST_INVALID", "retryable": True}}))
+    assert parameter["variantOverride"] == 120
+    assert guidance["currentStage"] == "templateInfo"
+    assert guidance["blockingChecks"]
+    assert explained["code"] == "REQUEST_INVALID"
+    assert explained["retryable"] is True

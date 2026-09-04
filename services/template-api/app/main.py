@@ -72,6 +72,8 @@ from .services.operations import (  # noqa: E402
     update_template_draft as update_template_draft_service,
     validate_template_stage as validate_template_stage_service,
     write_source_package as write_source_package_service,
+    get_current_draft as get_current_draft_service,
+    set_current_draft as set_current_draft_service,
 )  # noqa: E402
 
 
@@ -82,6 +84,10 @@ class BindingRequest(BaseModel):
 
 class NewDraftRequest(BaseModel):
     name: str = "未命名零部件模板"
+
+
+class CurrentDraftRequest(BaseModel):
+    draftId: str = Field(min_length=1)
 
 
 class StageActionResult(BaseModel):
@@ -229,6 +235,16 @@ def create_blank_template_draft(request: NewDraftRequest):
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])
 def list_template_drafts(includeArchived: bool = False):
     return repository.list_drafts(include_archived=includeArchived)
+
+
+@app.get("/api/v1/workspace/current-draft")
+def get_current_workspace_draft():
+    return get_current_draft_service(repository)
+
+
+@app.put("/api/v1/workspace/current-draft")
+def set_current_workspace_draft(request: CurrentDraftRequest):
+    return set_current_draft_service(repository, request.draftId)
 
 
 @app.post("/api/v1/template-drafts", response_model=TemplateDraft, status_code=201)

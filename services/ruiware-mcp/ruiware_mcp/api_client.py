@@ -36,7 +36,7 @@ class RuiWareApiClient:
     def get(self, path: str) -> Any:
         return self._request("GET", path)
 
-    def post(self, path: str, payload: dict[str, Any]) -> Any:
+    def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
         return self._request("POST", path, payload)
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:

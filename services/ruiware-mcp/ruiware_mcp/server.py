@@ -7,7 +7,11 @@ from typing import Any
 from .api_client import RuiWareApiClient
 from .core.protocol import McpProtocolHandler, parse_error_response
 from .core.responses import tool_result
-from .tools.read import get_attachment, get_draft_context, get_validation_result
+from .core.additional_tools import ADDITIONAL_TOOLS
+from .tools.authoring import preview_proposal, solve_sketch, submit_proposal
+from .tools.guidance import explain_error, get_next_actions, get_parameter_help
+from .tools.read import get_attachment, get_current_draft_status, get_draft_context, get_validation_result
+from .tools.workflow import check_brep, compile_draft, complete_stage, evaluate_draft, get_compile_artifacts, get_latest_compile
 
 
 TOOLS = [
@@ -42,6 +46,7 @@ TOOLS = [
         "inputSchema": {"type": "object", "required": ["draftId", "stage"], "properties": {"draftId": {"type": "string"}, "stage": {"type": "string", "enum": ["templateInfo", "material", "baseSketch", "features", "variants", "review", "admission"]}}},
     },
 ]
+TOOLS.extend(ADDITIONAL_TOOLS)
 
 
 class McpApplication:
@@ -51,18 +56,38 @@ class McpApplication:
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         draft_id = arguments.get("draftId", "")
+        if name == "ruiware_get_current_draft_status":
+            return get_current_draft_status(self.client, arguments)
         if name == "ruiware_get_draft_context":
             return get_draft_context(self.client, arguments)
         if name == "ruiware_get_attachment":
             return get_attachment(self.client, arguments)
         if name == "ruiware_solve_sketch":
-            return tool_result(self.client.post("/sketches/solve", {"draft": arguments["draft"], "overrides": arguments.get("overrides", {})}))
+            return solve_sketch(self.client, arguments)
         if name == "ruiware_preview_proposal":
-            return tool_result(self.client.post(f"/template-drafts/{draft_id}/proposals/preview", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
+            return preview_proposal(self.client, arguments)
         if name == "ruiware_submit_proposal":
-            return tool_result(self.client.post(f"/template-drafts/{draft_id}/proposals/apply", {"proposal": arguments["proposal"], "selectedCommandIds": arguments.get("selectedCommandIds")}))
+            return submit_proposal(self.client, arguments)
         if name == "ruiware_get_validation_result":
             return get_validation_result(self.client, arguments)
+        if name == "ruiware_compile_draft":
+            return compile_draft(self.client, arguments)
+        if name == "ruiware_get_latest_compile":
+            return get_latest_compile(self.client, arguments)
+        if name == "ruiware_check_brep":
+            return check_brep(self.client, arguments)
+        if name == "ruiware_get_compile_artifacts":
+            return get_compile_artifacts(self.client, arguments)
+        if name == "ruiware_evaluate_draft":
+            return evaluate_draft(self.client, arguments)
+        if name == "ruiware_complete_stage":
+            return complete_stage(self.client, arguments)
+        if name == "ruiware_get_next_actions":
+            return get_next_actions(self.client, arguments)
+        if name == "ruiware_get_parameter_help":
+            return get_parameter_help(self.client, arguments)
+        if name == "ruiware_explain_error":
+            return explain_error(arguments)
         raise ValueError(f"Unknown tool: {name}")
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:

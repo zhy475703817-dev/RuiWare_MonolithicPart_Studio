@@ -92,7 +92,16 @@ class Repository:
                     created_at TEXT NOT NULL,
                     UNIQUE(template_id, version)
                 );
+                CREATE TABLE IF NOT EXISTS workspace_context (
+                    id TEXT PRIMARY KEY,
+                    current_draft_id TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO workspace_context (id, current_draft_id, updated_at) VALUES (?, ?, ?)",
+                ("default", None, _now()),
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(template_drafts)")}
             if "archived_at" not in columns:
@@ -286,8 +295,39 @@ class Repository:
                 "UPDATE template_drafts SET archived_at = ? WHERE id = ? AND archived_at IS NULL",
                 (_now(), draft_id),
             )
+            connection.execute(
+                "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = 'default' AND current_draft_id = ?",
+                (_now(), draft_id),
+            )
         if result.rowcount == 0:
             raise KeyError(draft_id)
+
+    def set_current_draft(self, draft_id: str) -> str:
+        """记录本地工作区当前选中的未归档零部件。"""
+        self.get_draft(draft_id)
+        updated_at = _now()
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE workspace_context SET current_draft_id = ?, updated_at = ? WHERE id = 'default'",
+                (draft_id, updated_at),
+            )
+        return updated_at
+
+    def get_current_draft_id(self) -> str | None:
+        """读取本地工作区当前选中的零部件 ID。"""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT current_draft_id FROM workspace_context WHERE id = 'default'"
+            ).fetchone()
+        return row["current_draft_id"] if row else None
+
+    def clear_current_draft(self) -> None:
+        """清除当前工作区选择。"""
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = 'default'",
+                (_now(),),
+            )
 
     def restore_draft(self, draft_id: str) -> TemplateDraft:
         draft = self.get_draft(draft_id, include_archived=True)
