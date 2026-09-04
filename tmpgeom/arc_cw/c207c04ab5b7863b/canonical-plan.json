@@ -1,0 +1,816 @@
+{
+  "version": "3.0",
+  "inputHash": "c207c04ab5b7863bd427db228476ea2238bd4e2e313a26a39eb74b029a60bc92",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "solid.sweep",
+      "arguments": {
+        "pathPoints": "100.0:0.0:0.0;99.61946980917456:0.0:-8.715574274765817;98.4807753012208:0.0:-17.364817766693033;96.59258262890683:0.0:-25.881904510252074;93.96926207859084:0.0:-34.20201433256687;90.63077870366499:0.0:-42.26182617406994;86.60254037844388:0.0:-49.99999999999999;81.91520442889917:0.0:-57.357643635104615;76.60444431189781:0.0:-64.27876096865393;70.71067811865476:0.0:-70.71067811865476;64.27876096865394:0.0:-76.6044443118978;57.35764363510461:0.0:-81.91520442889917;50.000000000000014:0.0:-86.60254037844386;42.261826174069945:0.0:-90.63077870366499;34.20201433256686:0.0:-93.96926207859084;25.881904510252074:0.0:-96.59258262890683;17.36481776669304:0.0:-98.4807753012208;8.715574274765835:0.0:-99.61946980917456;6.123233995736766e-15:0.0:-100.0;-8.715574274765801:0.0:-99.61946980917456;-17.364817766693008:0.0:-98.48077530122082;-25.881904510252085:0.0:-96.59258262890683;-34.20201433256687:0.0:-93.96926207859084;-42.26182617406993:0.0:-90.630778703665;-49.99999999999998:0.0:-86.60254037844388;-57.35764363510458:0.0:-81.9152044288992;-64.27876096865394:0.0:-76.60444431189781;-70.71067811865474:0.0:-70.71067811865476;-76.60444431189782:0.0:-64.27876096865391;-81.91520442889916:0.0:-57.35764363510464;-86.60254037844388:0.0:-49.99999999999999;-90.63077870366497:0.0:-42.26182617406999;-93.96926207859083:0.0:-34.20201433256689;-96.59258262890683:0.0:-25.881904510252056;-98.4807753012208:0.0:-17.36481776669307;-99.61946980917456:0.0:-8.71557427476582;-100.0:0.0:-1.2246467991473532e-14;-99.61946980917456:0.0:8.715574274765794;-98.48077530122082:0.0:17.364817766693;-96.59258262890683:0.0:25.88190451025208;-93.96926207859086:0.0:34.20201433256682;-90.630778703665:0.0:42.261826174069924;-86.60254037844386:0.0:50.000000000000014;-81.9152044288992:0.0:57.35764363510458;-76.60444431189781:0.0:64.27876096865393;-70.71067811865477:0.0:70.71067811865474;-64.27876096865394:0.0:76.6044443118978;-57.35764363510464:0.0:81.91520442889916;-50.00000000000004:0.0:86.60254037844385;-42.26182617406992:0.0:90.63077870366502;-34.20201433256694:0.0:93.96926207859082;-25.881904510252063:0.0:96.59258262890683;-17.364817766693033:0.0:98.4807753012208;-8.715574274765824:0.0:99.61946980917456;0.0:0.0:100.0",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right",
+        "pathSegmentKinds": [
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc"
+        ],
+        "pathSegmentGeometryIds": [
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc"
+        ],
+        "pathSegments": [
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 0,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.0,
+              -1.0
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 1,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.08715574274765817,
+              -0.9961946980917455
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 2,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.17364817766693033,
+              -0.984807753012208
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 3,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.25881904510252074,
+              -0.9659258262890683
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 4,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.3420201433256687,
+              -0.9396926207859084
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 5,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.4226182617406994,
+              -0.9063077870366499
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 6,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.49999999999999994,
+              -0.8660254037844387
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 7,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.5735764363510462,
+              -0.8191520442889918
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 8,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.6427876096865393,
+              -0.766044443118978
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 9,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.7071067811865476,
+              -0.7071067811865476
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 10,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.7660444431189779,
+              -0.6427876096865395
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 11,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.8191520442889918,
+              -0.573576436351046
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 12,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.8660254037844386,
+              -0.5000000000000001
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 13,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9063077870366499,
+              -0.42261826174069944
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 14,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9396926207859084,
+              -0.3420201433256686
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 15,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9659258262890683,
+              -0.25881904510252074
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 16,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.984807753012208,
+              -0.17364817766693041
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 17,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9961946980917455,
+              -0.08715574274765836
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 18,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -1.0,
+              -6.123233995736766e-17
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 19,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9961946980917455,
+              0.08715574274765801
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 20,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9848077530122081,
+              0.17364817766693008
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 21,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9659258262890683,
+              0.25881904510252085
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 22,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.9396926207859084,
+              0.3420201433256687
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 23,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.90630778703665,
+              0.42261826174069933
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 24,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.8660254037844387,
+              0.4999999999999998
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 25,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.819152044288992,
+              0.5735764363510458
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 26,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.766044443118978,
+              0.6427876096865394
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 27,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.7071067811865476,
+              0.7071067811865475
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 28,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.6427876096865391,
+              0.7660444431189782
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 29,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.5735764363510464,
+              0.8191520442889916
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 30,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.49999999999999994,
+              0.8660254037844387
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 31,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.4226182617406999,
+              0.9063077870366497
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 32,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.3420201433256689,
+              0.9396926207859083
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 33,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.2588190451025206,
+              0.9659258262890683
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 34,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.1736481776669307,
+              0.984807753012208
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 35,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -0.0871557427476582,
+              0.9961946980917455
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 36,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              -1.2246467991473532e-16,
+              1.0
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 37,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.08715574274765794,
+              0.9961946980917455
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 38,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.17364817766693003,
+              0.9848077530122081
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 39,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.2588190451025208,
+              0.9659258262890683
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 40,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.3420201433256682,
+              0.9396926207859085
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 41,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.4226182617406993,
+              0.90630778703665
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 42,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.5000000000000001,
+              0.8660254037844386
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 43,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.5735764363510458,
+              0.819152044288992
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 44,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.6427876096865393,
+              0.766044443118978
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 45,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.7071067811865475,
+              0.7071067811865477
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 46,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.7660444431189779,
+              0.6427876096865395
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 47,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.8191520442889916,
+              0.5735764363510464
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 48,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.8660254037844385,
+              0.5000000000000004
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 49,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9063077870366502,
+              0.42261826174069916
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 50,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9396926207859082,
+              0.3420201433256694
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 51,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9659258262890683,
+              0.25881904510252063
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 52,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.984807753012208,
+              0.17364817766693033
+            ]
+          },
+          {
+            "geometryId": "arc",
+            "geometryType": "arc",
+            "orderIndex": 0,
+            "sampleIndex": 53,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9961946980917455,
+              0.08715574274765825
+            ]
+          }
+        ],
+        "sketch": {
+          "profileMode": "closedRegion",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "edge.bottom",
+              "role": "section.edge.bottom",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": -25.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": -25.0
+              }
+            },
+            {
+              "id": "edge.right",
+              "role": "section.edge.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": -25.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.top",
+              "role": "section.edge.top",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": 25.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.left",
+              "role": "section.edge.left",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": 25.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": -25.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.main",
+              "operation": "add",
+              "boundaryRefs": [
+                "edge.bottom",
+                "edge.right",
+                "edge.top",
+                "edge.left"
+              ],
+              "closed": true,
+              "area": 5000.0
+            }
+          ],
+          "topologySignature": "add:edge.bottom,edge.right,edge.top,edge.left",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

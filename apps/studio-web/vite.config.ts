@@ -4,8 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // Keep the dev cache outside the managed node_modules tree.
-  cacheDir: '.vite-local',
   build: {
     chunkSizeWarningLimit: 750,
     rollupOptions: {

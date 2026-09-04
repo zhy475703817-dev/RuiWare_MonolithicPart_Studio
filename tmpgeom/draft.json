@@ -1,0 +1,828 @@
+{
+  "schemaVersion": "3.0",
+  "templateKind": "monolithicPart",
+  "id": "draft-eac77a704024",
+  "code": "RW-TPL-0001",
+  "name": "Ω型立柱模板",
+  "description": "v第三方GV发反反复复发发发发发发发发发发发发发发发发发发发发发",
+  "designIntent": "对对对对对对的点点滴滴哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒哒",
+  "manufacturingClassification": {
+    "originId": "inHouse",
+    "primaryProcessId": "coldRollForming",
+    "secondaryProcessIds": [],
+    "reviewed": true
+  },
+  "geometryPrototypeId": "prototype.customRecipe",
+  "tags": [],
+  "owner": "呜呜呜",
+  "organization": "",
+  "unitSystem": "mm-kg-s",
+  "coordinateSystem": "right-handed-z-up",
+  "lifecycleStatus": "draft",
+  "stageStatus": {
+    "templateInfo": "complete",
+    "material": "complete",
+    "baseSketch": "complete",
+    "features": "complete",
+    "variants": "complete",
+    "review": "not_started",
+    "admission": "not_started"
+  },
+  "attachments": [],
+  "materialRequirements": [
+    {
+      "id": "material.main",
+      "selectionMode": "specificRecord",
+      "supplyForm": "coil",
+      "familyTags": [],
+      "allowedGrades": [
+        "Q345"
+      ],
+      "standards": [
+        "GB/T 2518"
+      ],
+      "surfaces": [
+        "镀锌"
+      ],
+      "thickness": {
+        "parameterId": "thickness",
+        "allowedValues": [],
+        "minimum": 2.0,
+        "maximum": 2.0
+      },
+      "requiredProperties": {},
+      "allowInstanceSubstitution": true,
+      "specificBindingId": "mat-84cab6e79d6d",
+      "reviewed": true
+    }
+  ],
+  "materialValidationSamples": [
+    {
+      "id": "material.nominal",
+      "role": "nominal",
+      "name": "Q345冷轧卷材 2mm",
+      "bindingId": "mat-84cab6e79d6d",
+      "bindingMode": "copy",
+      "materialCode": "COIL-Q345-2",
+      "materialName": "Q345冷轧卷材",
+      "materialThickness": 2.0,
+      "variantId": "nominal",
+      "requiredForAdmission": true,
+      "reviewed": true
+    }
+  ],
+  "blank": {
+    "form": "strip",
+    "preparationMode": "preparedBlank",
+    "preparationProcesses": [
+      "uncoiling",
+      "slitting"
+    ],
+    "manufacturingRoute": "coldRollForming",
+    "lengthExpression": "length",
+    "widthExpression": "sectionWidth",
+    "thicknessExpression": "thickness",
+    "lengthAllowance": 0.0,
+    "widthAllowance": 0.0,
+    "grainDirection": "longitudinal"
+  },
+  "sketch": {
+    "model": "semanticProfile",
+    "acquisitionMethod": "manual",
+    "plane": "XY",
+    "profileMode": "closedRegion",
+    "drivingParameters": [
+      "sectionWidth",
+      "sectionHeight"
+    ],
+    "entities": [
+      {
+        "id": "edge.bottom",
+        "role": "section.edge.bottom",
+        "geometryType": "line",
+        "parameterRefs": [
+          "sectionWidth"
+        ],
+        "construction": false,
+        "start": [
+          -50.0,
+          -25.0
+        ],
+        "end": [
+          50.0,
+          -25.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.right",
+        "role": "section.edge.right",
+        "geometryType": "line",
+        "parameterRefs": [
+          "sectionHeight"
+        ],
+        "construction": false,
+        "start": [
+          50.0,
+          -25.0
+        ],
+        "end": [
+          50.0,
+          25.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.top",
+        "role": "section.edge.top",
+        "geometryType": "line",
+        "parameterRefs": [
+          "sectionWidth"
+        ],
+        "construction": false,
+        "start": [
+          50.0,
+          25.0
+        ],
+        "end": [
+          -50.0,
+          25.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.left",
+        "role": "section.edge.left",
+        "geometryType": "line",
+        "parameterRefs": [
+          "sectionHeight"
+        ],
+        "construction": false,
+        "start": [
+          -50.0,
+          25.0
+        ],
+        "end": [
+          -50.0,
+          -25.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.mtfl5pkz",
+        "role": "section.edge",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": true,
+        "start": [
+          22.22,
+          48.6
+        ],
+        "end": [
+          22.22,
+          -43.98
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c1",
+        "label": "首尾相连 1",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "edge.bottom",
+          "edge.right"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "c2",
+        "label": "首尾相连 2",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "edge.right",
+          "edge.top"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "c3",
+        "label": "首尾相连 3",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "edge.top",
+          "edge.left"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "c4",
+        "label": "首尾相连 4",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "edge.left",
+          "edge.bottom"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "ch",
+        "label": "水平",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "edge.bottom",
+          "edge.top"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "cv",
+        "label": "竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.left",
+          "edge.right"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dw",
+        "label": "宽度",
+        "constraintType": "distanceX",
+        "entityRefs": [
+          "edge.bottom"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "sectionWidth",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dh",
+        "label": "高度",
+        "constraintType": "distanceY",
+        "entityRefs": [
+          "edge.right"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "sectionHeight",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.origin",
+        "label": "原点固定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.bottom"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.line.1.mtfl5pkz",
+        "label": "自动推断 · 竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.mtflt9jz",
+        "label": "固定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.mtfltgoc",
+        "label": "沿 Y 轴",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dimension.mtflu2ld",
+        "label": "section.edge · 沿 Y 轴",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": "unset",
+        "enabled": true,
+        "driving": false
+      },
+      {
+        "id": "dimension.mtflud65",
+        "label": "section.edge · 沿 Y 轴",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": "unset",
+        "enabled": true,
+        "driving": false
+      },
+      {
+        "id": "dimension.mtfluw4p",
+        "label": "section.edge · 沿 Y 轴",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfl5pkz"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": "unset",
+        "enabled": true,
+        "driving": false
+      }
+    ],
+    "regions": [
+      {
+        "id": "section.region.main",
+        "boundaryRefs": [
+          "edge.bottom",
+          "edge.right",
+          "edge.top",
+          "edge.left"
+        ],
+        "closed": true,
+        "role": "section.materialRegion",
+        "operation": "add"
+      }
+    ],
+    "constraintsReviewed": true,
+    "sourceAttachmentId": null,
+    "sourceProfileId": null,
+    "sourceHash": null,
+    "importUnit": null,
+    "importScale": null,
+    "conversionReviewed": false
+  },
+  "sweepPath": {
+    "id": "path.main",
+    "plane": "XY",
+    "geometry": [
+      {
+        "id": "path.a",
+        "role": "sweep.path.segment",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          0.0,
+          0.0
+        ],
+        "end": [
+          0.0,
+          600.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "path.b",
+        "role": "sweep.path.segment",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          0.0,
+          600.0
+        ],
+        "end": [
+          300.0,
+          600.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.mtfvh7bo",
+        "role": "section.edge",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          300.0,
+          311.15
+        ],
+        "end": [
+          300.0,
+          600.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      }
+    ],
+    "constraints": [
+      {
+        "id": "constraint.line.1.mtfvh7bo",
+        "label": "自动推断 · 竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.mtfvh7bo"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.auto.coincident.edge.mtfvh7bo.mtfvhc8m",
+        "label": "自动重合 · edge.mtfvh7bo.end ↔ path.b.end",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "edge.mtfvh7bo",
+          "path.b"
+        ],
+        "endpointRefs": [
+          "end",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      }
+    ],
+    "startPointId": "path.a",
+    "startEndpointRef": {
+      "geometryId": "path.a",
+      "endpoint": "start"
+    },
+    "status": "confirmed",
+    "generationStatus": "idle",
+    "diagnostics": []
+  },
+  "parameterDefinitions": [
+    {
+      "id": "length",
+      "label": "长度",
+      "displayName": "长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 1000.0,
+      "minimum": 100.0,
+      "maximum": 6000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "description": ""
+    },
+    {
+      "id": "sectionWidth",
+      "label": "截面宽度",
+      "displayName": "截面宽度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 10.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "description": ""
+    },
+    {
+      "id": "sectionHeight",
+      "label": "截面高度",
+      "displayName": "截面高度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 50.0,
+      "minimum": 10.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "description": ""
+    },
+    {
+      "id": "thickness",
+      "label": "壁厚",
+      "displayName": "壁厚",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 2.0,
+      "minimum": 2.0,
+      "maximum": 2.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "material",
+      "sourceDefinition": {
+        "type": "materialProperty",
+        "reference": "material.thickness",
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 2.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "description": ""
+    }
+  ],
+  "variants": [
+    {
+      "id": "nominal",
+      "name": "标称实例",
+      "kind": "standard",
+      "overrides": {},
+      "expected": "valid",
+      "requiredForAdmission": false,
+      "purpose": ""
+    }
+  ],
+  "geometryRecipe": {
+    "id": "geometry.main",
+    "constructionMode": "sweep",
+    "sketches": [
+      "sketch.section.main"
+    ],
+    "paths": [
+      "path.main"
+    ],
+    "operations": [
+      {
+        "id": "body.main",
+        "operator": "solid.sweep",
+        "sourceRefs": [
+          "sketch.section.main",
+          "path.main"
+        ],
+        "arguments": {
+          "pathPoints": "0:0:0;0:0:600;300:0:600;300:0:311.15"
+        },
+        "argumentExpressions": {},
+        "conditionExpression": "True",
+        "semanticOutputs": [
+          "part.body",
+          "part.referenceFrame",
+          "part.endFace.start",
+          "part.endFace.end"
+        ],
+        "pathSketchId": "path.main",
+        "profileSketchId": "sketch.section.main",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right"
+      }
+    ],
+    "semanticFaces": [
+      {
+        "id": "part.face.front",
+        "label": "前侧面",
+        "hostFrame": "negativeY",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.face.back",
+        "label": "后侧面",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.face.left",
+        "label": "左侧面",
+        "hostFrame": "negativeX",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionHeight / 2",
+        "uSpanExpression": "sectionHeight",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.face.right",
+        "label": "右侧面",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionHeight / 2",
+        "uSpanExpression": "sectionHeight",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.endFace.start",
+        "label": "起始端面",
+        "hostFrame": "negativeZ",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "-sectionHeight / 2",
+        "vSpanExpression": "sectionHeight"
+      },
+      {
+        "id": "part.endFace.end",
+        "label": "终止端面",
+        "hostFrame": "positiveZ",
+        "sourceOperationId": "body.main",
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "-sectionHeight / 2",
+        "vSpanExpression": "sectionHeight"
+      }
+    ],
+    "reviewed": true
+  },
+  "featureRules": [],
+  "featureRulesReviewed": true,
+  "interfaces": [],
+  "evidence": [],
+  "aiProposals": [],
+  "admission": {
+    "changeNote": "",
+    "reviewer": "",
+    "releaseChannel": "development"
+  },
+  "revision": 87,
+  "createdAt": "2026-08-26T16:51:48.679141+08:00",
+  "updatedAt": "2026-08-30T21:56:55.507924+08:00"
+}

@@ -7,7 +7,7 @@ from template_core.models import CanonicalPlan, CompileResult, Diagnostic, Geome
 from .exporters import write_compile_artifacts
 from .body_ops import build_body
 from .feature_ops import apply_operation
-from .sweep_ops import _sketch_sweep
+from .sweep_ops import SweepPathConstructionError, _build_sweep_path_wire, _sketch_sweep
 from .postcheck import check_brep
 
 
@@ -62,6 +62,17 @@ def execute_plan(plan: CanonicalPlan, output_root: Path, public_prefix: str = "/
             ),
             artifacts=artifacts,
         )
+    except SweepPathConstructionError as error:
+        diagnostics.append(
+            Diagnostic(
+                severity="error",
+                code=error.code,
+                path="geometry.sweepPath",
+                message=str(error),
+                suggestion="检查圆弧参数、路径段连接和连接处解析切线是否连续；若为 line-arc/arc-line，请执行“修复为相切”后重试。",
+            )
+        )
+        return CompileResult(success=False, inputHash=plan.inputHash, diagnostics=diagnostics)
     except Exception as error:
         diagnostics.append(
             Diagnostic(

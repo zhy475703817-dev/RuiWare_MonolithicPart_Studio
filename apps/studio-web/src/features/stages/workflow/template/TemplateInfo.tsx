@@ -49,7 +49,10 @@ export function TemplateInfo({
       return;
     }
     const first = draft.geometryRecipe.operations[0];
-    const operator = prototype.operator;
+    const operator =
+      prototype.operator === "sketch.centerline_thinwall_extrude"
+        ? "sketch.region_extrude"
+        : prototype.operator;
     const defaults = operatorDefaults(operator);
     const operation = first
       ? {
