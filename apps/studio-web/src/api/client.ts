@@ -51,6 +51,8 @@ const json = (method: string, body?: unknown): RequestInit => ({
 export const api = {
   templateAuthoringRegistry: () => request<TemplateAuthoringRegistry>("/api/v1/registries/template-authoring"),
   drafts: () => request<Draft[]>("/api/v1/template-drafts"),
+  setCurrentDraft: (draftId: string) => request<{ draftId: string }>("/api/v1/workspace/current-draft", json("PUT", { draftId })),
+  currentDraft: () => request<{ draftId: string | null }>("/api/v1/workspace/current-draft"),
   createBlank: (name = "未命名零部件模板") => request<Draft>("/api/v1/template-drafts/blank", json("POST", { name })),
   saveDraft: (draft: Draft) => request<Draft>(`/api/v1/template-drafts/${draft.id}`, json("PUT", draft)),
   duplicateDraft: (id: string) => request<Draft>(`/api/v1/template-drafts/${id}/duplicate`, json("POST")),

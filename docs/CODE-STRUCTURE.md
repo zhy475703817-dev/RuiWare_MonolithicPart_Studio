@@ -185,6 +185,7 @@
 
 - `__init__.py`：核心基础设施包说明。
 - `contracts.py`：MCP 对外接口兼容基线，记录协议版本、服务信息、工具名称、必填参数以及只读 / 写入属性。
+- `additional_tools.py`：后三阶段新增工具的 MCP 描述，集中维护 CAD、试算、Agent 指引和阶段推进工具的名称及输入 Schema。
 - `protocol.py`：处理 JSON-RPC 的初始化、工具列表、工具调用、未知方法和非法 JSON 请求。
 - `responses.py`：统一包装成功结果、API 错误和工具输入错误，保证 Agent 能读取结构化错误。
 
@@ -193,11 +194,20 @@
 - `__init__.py`：工具层包说明。
 - `read/__init__.py`：只读工具的统一导出入口。
 - `read/draft_context.py`：调用模板 API 读取指定草稿的完整工程上下文；不修改数据。
+- `read/current_draft.py`：读取 GUI 通过工作区上下文保存的当前零部件；没有当前选择时明确返回未选择，不按更新时间兜底。
 - `read/attachments.py`：读取草稿附件列表并筛选指定附件；附件不属于当前草稿时返回结构化错误。
 - `read/validation.py`：读取指定模板阶段的确定性校验结果；不修改数据。
-- `authoring/__init__.py`：编辑和提案类工具的预留目录，目前用于后续迁移草图求解、提案预览和提案提交。
-- `workflow/__init__.py`：CAD 编译、B-Rep 检查和导出工具的预留目录。
-- `guidance/__init__.py`：Agent 参数解释、错误解释和下一步建议工具的预留目录。
+- `authoring/__init__.py`：编辑和提案工具的统一导出入口。
+- `authoring/sketch.py`：调用草图确定性求解接口，不保存草稿。
+- `authoring/proposals.py`：调用提案预览和提案提交接口；提交操作会产生新修订。
+- `workflow/__init__.py`：CAD、规则试算和阶段推进工具的统一导出入口。
+- `workflow/compile.py`：调用 CAD 编译、读取最近编译、提取 B-Rep 摘要和导出产物地址。
+- `workflow/evaluation.py`：调用模板规则试算接口，不保存草稿。
+- `workflow/stages.py`：调用阶段完成接口，由 API 再次校验通过后更新阶段状态。
+- `guidance/__init__.py`：Agent 指引工具的统一导出入口。
+- `guidance/parameter_help.py`：从当前草稿读取参数契约和变体覆盖，帮助 Agent 补全输入。
+- `guidance/next_actions.py`：根据阶段状态和校验结果给出下一步工具建议，不擅自修改数据。
+- `guidance/explain_error.py`：把结构化错误整理成用户可理解的处理建议。
 
 ### 6.3 MCP 资源层 `ruiware_mcp/resources`
 
@@ -223,7 +233,9 @@ services/template-api
 业务服务 / Repository / 领域层
 ```
 
-当前已经完成 MCP 接口冻结、核心协议拆分和只读工具拆分。`authoring`、`workflow`、`guidance` 与 `resources` 目录已经建立，业务工具将在后续阶段逐步迁移和补充。
+当前已经完成 MCP 接口冻结、核心协议拆分、只读工具拆分，以及编辑提案、CAD 工作流和 Agent 指引工具接入。`resources` 目录仍作为后续工具目录、阶段指南和参数 Schema 资源的扩展位置。
+
+GUI 切换零部件时调用 `/api/v1/workspace/current-draft` 保存 `draftId`；MCP 工具 `ruiware_get_current_draft_status` 读取同一工作区选择，因此 Agent 返回的工程状态与 GUI 当前选中项保持一致。
 
 ## 7. 现有文档
 

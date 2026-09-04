@@ -24,6 +24,7 @@ export function preservePreviousCompileArtifacts(previous: CompileResult | null,
  */
 export function useDraftWorkspace() {
   const initialized = useRef(false);
+  const currentDraftSyncRef = useRef(Promise.resolve());
   const errorTimerRef = useRef<number | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -41,6 +42,8 @@ export function useDraftWorkspace() {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState<ErrorNotice | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ErrorNotice | null>(null);
 
   function showError(errorValue: unknown) {
     setError(toErrorNotice(errorValue));
@@ -62,23 +65,40 @@ export function useDraftWorkspace() {
     const next = STAGES.find((itemStage) => item.stageStatus[itemStage.id] !== "complete");
     setStage(next?.id || "variants");
     if (item.id) {
+      currentDraftSyncRef.current = currentDraftSyncRef.current
+        .catch(() => undefined)
+        .then(() => api.setCurrentDraft(item.id!))
+        .then(() => undefined)
+        .catch(showError);
       void api.latestCompile(item.id).then(setCompile).catch(showError);
       void api.versions(item.id).then(setVersions).catch(showError);
     }
   }
 
   async function loadDrafts(selectId?: string) {
+    setLoading(true);
+    setLoadError(null);
     try {
       const rows = await api.drafts();
+      let currentDraftId: string | null = null;
+      try {
+        currentDraftId = (await api.currentDraft()).draftId;
+      } catch {
+        // 工作区状态接口不可用时，仍然使用草稿列表恢复工作台。
+      }
       setDrafts(rows);
       const selected =
         rows.find((item) => item.id === selectId) ||
+        rows.find((item) => item.id === currentDraftId) ||
         rows[0] ||
         (await api.createBlank("Ω型立柱模板"));
       if (!rows.length) setDrafts([selected]);
       chooseDraft(selected);
     } catch (errorValue) {
-      showError(errorValue);
+      const nextError = toErrorNotice(errorValue);
+      setLoadError(nextError);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -331,6 +351,8 @@ export function useDraftWorkspace() {
   return {
     drafts,
     draft,
+    loading,
+    loadError,
     stage,
     validation,
     compile,
@@ -362,5 +384,6 @@ export function useDraftWorkspace() {
     runCompile,
     publish,
     showError,
+    reload: loadDrafts,
   };
 }

@@ -19,6 +19,7 @@ from .draft import (
     validate_template_stage,
 )
 from .material import create_material_binding, material_sources, resolve_material_binding, search_materials
+from .workspace import get_current_draft, set_current_draft
 from .workflow import (
     compile_preview,
     compile_template_draft,

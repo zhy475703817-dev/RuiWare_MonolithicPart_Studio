@@ -86,6 +86,8 @@ export default function App() {
   const {
     drafts,
     draft,
+    loading,
+    loadError,
     stage,
     validation,
     compile,
@@ -117,12 +119,25 @@ export default function App() {
     runCompile,
     publish,
     showError,
+    reload,
   } = useDraftWorkspace();
   if (!draft)
     return (
       <div className="loading-screen">
-        <LoaderCircle className="spin" />
-        正在载入单体零部件模板平台…
+        {loading ? (
+          <>
+            <LoaderCircle className="spin" />
+            正在载入单体零部件模板平台…
+          </>
+        ) : (
+          <>
+            <p>{loadError?.message || "零部件数据加载失败"}</p>
+            <button className="primary-btn" onClick={() => void reload()}>
+              <RefreshCw size={15} />
+              重新加载
+            </button>
+          </>
+        )}
       </div>
     );
   const stageIndex = STAGES.findIndex((x) => x.id === stage);
