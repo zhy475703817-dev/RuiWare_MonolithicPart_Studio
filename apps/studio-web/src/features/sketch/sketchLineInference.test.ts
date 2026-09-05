@@ -37,6 +37,27 @@ const line = (
   points: [],
 });
 
+const arc = (
+  id: string,
+  sweepDirection: "ccw" | "cw",
+  largeArc = false,
+): SketchEntity => ({
+  id,
+  role: `圆弧 ${id}`,
+  geometryType: "arc",
+  parameterRefs: [],
+  construction: false,
+  start: [10, 0],
+  end: [0, 10],
+  center: [0, 0],
+  radius: 10,
+  startAngle: 0,
+  endAngle: 90,
+  largeArc,
+  sweepDirection,
+  points: [],
+});
+
 describe("二维草图动态几何推断", () => {
   it("calculates preview length and horizontal-axis angle in sketch units", () => {
     expect(linePreviewMetrics({ x: 0, y: 0 }, { x: 3, y: 4 })).toEqual({
@@ -94,6 +115,122 @@ describe("二维草图动态几何推断", () => {
       kind: "perpendicular",
       referenceEntityId: reference.id,
     });
+  });
+
+  it("snaps a line from an arc start to its analytic CCW tangent", () => {
+    const reference = arc("arc.ccw", "ccw");
+    const result = resolveSketchLineInference({
+      anchor: {
+        x: 10,
+        y: 0,
+        snapTarget: {
+          kind: "arcEndpoint",
+          entityId: reference.id,
+          handle: "start",
+          point: [10, 0],
+          createsConstraint: true,
+        },
+      },
+      pointer: { x: 10.5, y: 20 },
+      entities: [reference],
+      worldToViewScale: 1,
+      tolerances: { enterViewPx: 1 },
+    });
+
+    expect(result.inference).toMatchObject({
+      kind: "tangent",
+      referenceEntityId: reference.id,
+      referenceHandle: "start",
+      referenceTangent: [0, 1],
+    });
+    expect(result.point[0]).toBe(10);
+    expect(result.point[1]).toBeCloseTo(20.01, 2);
+  });
+
+  it("supports CW end tangents and a line drawn in reverse direction", () => {
+    const reference = arc("arc.cw.major", "cw", true);
+    const result = resolveSketchLineInference({
+      anchor: {
+        x: 0,
+        y: 10,
+        snapTarget: {
+          kind: "arcEndpoint",
+          entityId: reference.id,
+          handle: "end",
+          point: [0, 10],
+          createsConstraint: true,
+        },
+      },
+      pointer: { x: -20, y: 10.5 },
+      entities: [reference],
+      worldToViewScale: 1,
+      tolerances: { enterViewPx: 1 },
+    });
+
+    expect(result.inference).toMatchObject({
+      kind: "tangent",
+      referenceHandle: "end",
+      referenceTangent: [1, 0],
+    });
+    expect(result.point[0]).toBe(-20.01);
+    expect(result.point[1]).toBe(10);
+  });
+
+  it("accepts a near-tangent direction within the seven-degree tolerance", () => {
+    const reference = arc("arc.tolerance", "ccw");
+    const radians = (6 * Math.PI) / 180;
+    const result = resolveSketchLineInference({
+      anchor: {
+        x: 10,
+        y: 0,
+        snapTarget: {
+          kind: "arcEndpoint",
+          entityId: reference.id,
+          handle: "start",
+          point: [10, 0],
+          createsConstraint: true,
+        },
+      },
+      pointer: {
+        x: 10 + 20 * Math.sin(radians),
+        y: 20 * Math.cos(radians),
+      },
+      entities: [reference],
+      worldToViewScale: 1,
+      tolerances: { enterViewPx: 1 },
+    });
+
+    expect(result.inference?.kind).toBe("tangent");
+    expect(result.inference?.angleErrorDegrees).toBeLessThanOrEqual(7);
+  });
+
+  it("does not latch a direction outside the tangent tolerance", () => {
+    const reference = arc("arc.outside-tolerance", "ccw");
+    const radians = (12 * Math.PI) / 180;
+    const result = resolveSketchLineInference({
+      anchor: {
+        x: 10,
+        y: 0,
+        snapTarget: {
+          kind: "arcEndpoint",
+          entityId: reference.id,
+          handle: "start",
+          point: [10, 0],
+          createsConstraint: true,
+        },
+      },
+      pointer: {
+        x: 10 + 20 * Math.sin(radians),
+        y: 20 * Math.cos(radians),
+      },
+      entities: [reference],
+      worldToViewScale: 1,
+      tolerances: { enterViewPx: 1 },
+    });
+
+    expect(result.inference).toBeNull();
+    expect(result.point[0]).toBeCloseTo(14.16, 2);
+    expect(result.point[1]).toBeCloseTo(19.56, 2);
   });
 
   it("uses view-space thresholds consistently at different zoom scales", () => {
@@ -224,6 +361,37 @@ describe("二维草图动态几何推断", () => {
     expect(constraints.some((item) => item.constraintType === "distance")).toBe(
       false,
     );
+  });
+
+  it("does not create a permanent tangent constraint during drawing inference", () => {
+    const reference = arc("arc.constraint", "ccw");
+    const preview = resolveSketchLineInference({
+      anchor: {
+        x: 10,
+        y: 0,
+        snapTarget: {
+          kind: "arcEndpoint",
+          entityId: reference.id,
+          handle: "start",
+          point: [10, 0],
+          createsConstraint: true,
+        },
+      },
+      pointer: { x: 10, y: 20 },
+      entities: [reference],
+      worldToViewScale: 1,
+    });
+    const created = line("edge.tangent", [10, 0], preview.point);
+    expect(preview.inference?.kind).toBe("tangent");
+    expect(
+      buildLineInferenceConstraint(
+        created.id,
+        preview.inference,
+        [reference, created],
+        [],
+        () => "constraint.tangent",
+      ),
+    ).toEqual([]);
   });
 
   it("keeps dimension labels inside the canvas near an edge", () => {

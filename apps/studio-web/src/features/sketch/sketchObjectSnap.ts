@@ -4,6 +4,7 @@ import {
   isAngleBetweenCcw,
   pointAngleDegrees,
   projectPointOntoCircle,
+  signedArcSweep,
 } from "./sketchArc";
 
 /** Supported object-snap target kinds. Extend this union for future snap modes. */
@@ -17,6 +18,16 @@ export type SketchSnapKind =
   | "tangent";
 
 export type SketchSnapEndpointHandle = "start" | "end";
+
+/** Exact tangent information at one endpoint of a circular sketch arc. */
+export type SketchArcEndpointTangent = {
+  entityId: string;
+  handle: SketchSnapEndpointHandle;
+  point: [number, number];
+  /** Unit tangent oriented in the arc's start-to-end traversal direction. */
+  tangent: [number, number];
+  sweepDirection: "ccw" | "cw";
+};
 
 /** A resolved snap target in sketch world coordinates (mm). */
 export type SketchSnapTarget = {
@@ -99,6 +110,103 @@ const endpointLabel = (handle: SketchSnapEndpointHandle) =>
 
 type SketchEntity = Draft["sketch"]["entities"][number];
 type SketchConstraint = Draft["sketch"]["constraints"][number];
+
+/**
+ * Resolve an arc endpoint tangent analytically from its center/radius and
+ * directed sweep. The endpoint coordinates are used when present so callers
+ * retain the exact topology point instead of a rounded/sample point.
+ */
+export const arcEndpointTangent = (
+  entity: SketchEntity,
+  handle: SketchSnapEndpointHandle,
+): SketchArcEndpointTangent | null => {
+  if (
+    entity.geometryType !== "arc" ||
+    !entity.center ||
+    !Number.isFinite(entity.center[0]) ||
+    !Number.isFinite(entity.center[1])
+  ) {
+    return null;
+  }
+
+  const center: [number, number] = [entity.center[0], entity.center[1]];
+  const rawPoint = entity[handle];
+  const angleValue = handle === "start" ? entity.startAngle : entity.endAngle;
+  const radiusValue = entity.radius;
+  const radius =
+    Number.isFinite(radiusValue) && (radiusValue as number) > 1e-9
+      ? (radiusValue as number)
+      : rawPoint
+        ? Math.hypot(rawPoint[0] - center[0], rawPoint[1] - center[1])
+        : 0;
+  if (!Number.isFinite(radius) || radius < 1e-9) return null;
+
+  let point: [number, number];
+  if (
+    rawPoint &&
+    Number.isFinite(rawPoint[0]) &&
+    Number.isFinite(rawPoint[1])
+  ) {
+    point = [rawPoint[0], rawPoint[1]];
+  } else if (Number.isFinite(angleValue)) {
+    const radians = ((angleValue as number) * Math.PI) / 180;
+    point = [
+      center[0] + radius * Math.cos(radians),
+      center[1] + radius * Math.sin(radians),
+    ];
+  } else {
+    return null;
+  }
+
+  let radialX = point[0] - center[0];
+  let radialY = point[1] - center[1];
+  const radialLength = Math.hypot(radialX, radialY);
+  if (radialLength < 1e-9) {
+    if (!Number.isFinite(angleValue)) return null;
+    const radians = ((angleValue as number) * Math.PI) / 180;
+    radialX = Math.cos(radians);
+    radialY = Math.sin(radians);
+  } else {
+    radialX /= radialLength;
+    radialY /= radialLength;
+  }
+
+  const startAngle =
+    Number.isFinite(entity.startAngle) && entity.startAngle != null
+      ? entity.startAngle
+      : pointAngleDegrees(
+          center,
+          entity.start || point,
+        );
+  const endAngle =
+    Number.isFinite(entity.endAngle) && entity.endAngle != null
+      ? entity.endAngle
+      : pointAngleDegrees(
+          center,
+          entity.end || point,
+        );
+  const largeArc =
+    entity.largeArc ?? ccwSweepDegrees(startAngle, endAngle) > 180;
+  const sweepDirection =
+    entity.sweepDirection ||
+    (signedArcSweep(startAngle, endAngle, largeArc) >= 0 ? "ccw" : "cw");
+  const tangent: [number, number] =
+    sweepDirection === "ccw"
+      ? [Math.abs(radialY) < 1e-12 ? 0 : -radialY, Math.abs(radialX) < 1e-12 ? 0 : radialX]
+      : [Math.abs(radialY) < 1e-12 ? 0 : radialY, Math.abs(radialX) < 1e-12 ? 0 : -radialX];
+  // Avoid leaking signed zero into serialized/test-visible geometry while
+  // preserving the exact analytic direction.
+  tangent[0] = Math.abs(tangent[0]) < 1e-12 ? 0 : tangent[0];
+  tangent[1] = Math.abs(tangent[1]) < 1e-12 ? 0 : tangent[1];
+
+  return {
+    entityId: entity.id,
+    handle,
+    point,
+    tangent,
+    sweepDirection,
+  };
+};
 
 export const isNearestSnapKind = (kind: SketchSnapKind) =>
   kind === "lineNearest" ||

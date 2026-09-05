@@ -117,6 +117,19 @@ export function SketchIntentEditor({
     constraintType: Draft["sketch"]["constraints"][number]["constraintType"],
   ) => {
     if (selectionError(constraintType)) return;
+    if (
+      constraintType === "tangent" &&
+      selected.length === 2 &&
+      draft.sketch.constraints.some(
+        (constraint) =>
+          constraint.constraintType === "tangent" &&
+          constraint.entityRefs.length === 2 &&
+          constraint.entityRefs.includes(selected[0]) &&
+          constraint.entityRefs.includes(selected[1]),
+      )
+    ) {
+      return;
+    }
     if (constraintType === "coincident" && selected.length > 2) {
       addEndToEndConnection(false);
       return;

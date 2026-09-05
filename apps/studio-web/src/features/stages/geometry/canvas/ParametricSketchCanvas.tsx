@@ -97,6 +97,7 @@ import {
   resolveSketchLineInference,
   type SketchLineInference,
 } from "../../../sketch/sketchLineInference";
+import { repairLineArcTangency } from "../../../sketch/sketchTangency";
 import { sweepArcDegrees as sweepPathArcDegrees } from "../../../sketch/sweepPathTopology";
 import {
   alignEntitiesToPrimitives,
@@ -538,32 +539,37 @@ export function ParametricSketchCanvas({
     indicator.setAttribute("visibility", "visible");
     indicator.setAttribute("cx", String(screenPoint.x));
     indicator.setAttribute("cy", String(screenPoint.y));
-    indicator.setAttribute("r", hit.target ? "6" : "4");
+    const tangentInference = inference?.kind === "tangent";
+    indicator.setAttribute("r", hit.target || tangentInference ? "6" : "4");
     indicator.setAttribute(
       "class",
       `snap-indicator ${
-        hit.target
-          ? isEndpointSnapKind(hit.target.kind)
-            ? "active endpoint"
-            : isNearestSnapKind(hit.target.kind)
-            ? "active line-nearest"
-            : isTangentSnapKind(hit.target.kind)
-              ? "active tangent"
-              : "active"
-          : ""
+        tangentInference
+          ? "active tangent"
+          : hit.target
+            ? isEndpointSnapKind(hit.target.kind)
+              ? "active endpoint"
+              : isNearestSnapKind(hit.target.kind)
+                ? "active line-nearest"
+                : isTangentSnapKind(hit.target.kind)
+                  ? "active tangent"
+                  : "active"
+            : ""
       }`.trim(),
     );
-    if (hint && hit.target) {
+    if (hint && (hit.target || tangentInference)) {
       hint.setAttribute("visibility", "visible");
       hint.setAttribute("x", String(screenPoint.x + 10));
       hint.setAttribute("y", String(screenPoint.y - 10));
-      hint.textContent = isEndpointSnapKind(hit.target.kind)
-        ? `端点 · ${hit.target.handle === "start" ? "起点" : "终点"}`
-        : hit.target.kind === "lineNearest"
+      hint.textContent = tangentInference
+        ? `相切 · ${inference?.referenceLabel || "圆弧"}`
+        : isEndpointSnapKind(hit.target!.kind)
+        ? `端点 · ${hit.target!.handle === "start" ? "起点" : "终点"}`
+        : hit.target!.kind === "lineNearest"
           ? "吸附 · 线段"
-          : hit.target.kind === "arcNearest"
+          : hit.target!.kind === "arcNearest"
             ? "吸附 · 圆弧"
-            : hit.target.kind === "circleNearest"
+            : hit.target!.kind === "circleNearest"
               ? "吸附 · 圆周"
               : "已吸附";
     } else {
@@ -634,6 +640,7 @@ export function ParametricSketchCanvas({
           vertical: "V  竖直",
           parallel: "∥  平行",
           perpendicular: "⊥  垂直",
+          tangent: "⌒  相切",
         };
         const badgeText = inference.referenceLabel
           ? `${labels[inference.kind]} · ${inference.referenceLabel}`
@@ -1679,8 +1686,27 @@ export function ParametricSketchCanvas({
   const finishDrag = async () => {
     const active = dragRef.current;
     if (!active) return;
-    const afterEntities =
+    let afterEntities =
       dragEntitiesRef.current || cloneSketchEntities(active.beforeEntities);
+    // A released endpoint may be close to an arc endpoint but still carry a
+    // small directional error from manual dragging.  Repair only the safe,
+    // small-angle case and leave larger/fixed cases untouched for an explicit
+    // user action.  The eventual validateAndCommit call records the complete
+    // repaired result in the same undo snapshot as the drag.
+    if (active.hasMoved) {
+      const tangency = repairLineArcTangency(
+        afterEntities,
+        draft.sketch.constraints,
+        {
+          endpointToleranceMm: endpointSnapToleranceMm(viewMathRef.current.scale),
+          maxAngleDegrees: 8,
+          fullyConstrainedEntityIds: solution?.fullyConstrained
+            ? draft.sketch.entities.map((entity) => entity.id)
+            : undefined,
+        },
+      );
+      if (tangency.repaired) afterEntities = tangency.entities;
+    }
     if (svgRef.current?.hasPointerCapture(active.pointerId)) {
       svgRef.current.releasePointerCapture(active.pointerId);
     }

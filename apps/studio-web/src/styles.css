@@ -4296,6 +4296,14 @@ code {
 }
 .sweep-path-diagnostics div { display: flex; gap: 8px; }
 .sweep-path-diagnostics strong { min-width: 28px; color: #be5a50; }
+.sweep-path-repair-note {
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-left: 3px solid #2b8194;
+  background: #f1f8f9;
+  color: #42636d;
+  font-size: 10px;
+}
 .sweep-path-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .preview-admission-warning { display: block; margin-top: 6px; color: #a45c0a; }
 .sweep-review-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 0; padding: 10px 12px; border: 1px solid #d8e1e5; border-radius: 8px; background: #f8fafb; color: #425963; font-size: 12px; }

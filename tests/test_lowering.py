@@ -1,3 +1,7 @@
+import math
+
+import pytest
+
 from template_core.lowering import lower_to_plan
 from template_core.models import SweepPathSketch, TemplateDraft
 
@@ -111,3 +115,97 @@ def test_sweep_lowering_carries_follow_configuration_and_start_direction() -> No
     assert sweep.arguments["twistMode"] == "none"
     assert sweep.arguments["cornerMode"] == "right"
     assert sweep.arguments["pathPoints"].startswith("125.0:0.0:0.0")
+
+
+def _sweep_draft_with_path(path: dict) -> TemplateDraft:
+    value = TemplateDraft(name="structured sweep path")
+    operation = value.geometryRecipe.operations[0]
+    operation.operator = "solid.sweep"
+    operation.pathSketchId = "path.main"
+    operation.arguments = {"pathPoints": "0:0:0;0:0:1"}
+    operation.argumentExpressions = {}
+    value.sweepPath = SweepPathSketch.model_validate({
+        "id": "path.main",
+        "status": "confirmed",
+        **path,
+    })
+    return value
+
+
+def test_sweep_lowering_emits_exact_segments_and_keeps_sampled_fallback() -> None:
+    value = _sweep_draft_with_path({
+        "plane": "XY",
+        "startEndpointRef": {"geometryId": "line", "endpoint": "start"},
+        "geometry": [
+            {
+                "id": "arc",
+                "geometryType": "arc",
+                "center": [0, 100],
+                "radius": 100,
+                "startAngle": -math.pi / 2,
+                "endAngle": 0,
+                "largeArc": False,
+                "sweepDirection": "ccw",
+                "start": [0, 0],
+                "end": [100, 100],
+            },
+            {
+                "id": "line",
+                "geometryType": "line",
+                "start": [-100, 0],
+                "end": [0, 0],
+            },
+        ],
+    })
+
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+    arguments = next(
+        item.arguments for item in plan.operations if item.operator == "solid.sweep"
+    )
+
+    segments = arguments["pathSegments"]
+    assert [item["geometryType"] for item in segments] == ["line", "arc"]
+    assert segments[0]["end"] == segments[1]["start"] == (0.0, 0.0, 0.0)
+    assert segments[1]["center"] == (0.0, 0.0, 100.0)
+    assert segments[1]["plane"] == "XY"
+    assert segments[1]["mappedPlane"] == "XZ"
+    assert segments[1]["sweepAngle"] == pytest.approx(math.pi / 2)
+    sampled_points = arguments["pathPoints"].split(";")
+    assert len(sampled_points) > len(segments) + 1
+    assert len(arguments["pathSegmentKinds"]) == len(sampled_points) - 1
+    assert len(arguments["pathSegmentTangents"]) == len(sampled_points) - 1
+    assert len(arguments["pathStationTangents"]) == len(sampled_points)
+
+
+def test_sweep_lowering_reverses_arc_parameters_and_endpoint_tangents() -> None:
+    value = _sweep_draft_with_path({
+        "startEndpointRef": {"geometryId": "arc", "endpoint": "end"},
+        "geometry": [{
+            "id": "arc",
+            "geometryType": "arc",
+            "center": [0, 0],
+            "radius": 10,
+            "startAngle": 0,
+            "endAngle": math.pi / 2,
+            "largeArc": False,
+            "sweepDirection": "ccw",
+            "start": [10, 0],
+            "end": [0, 10],
+        }],
+    })
+
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+    arguments = next(
+        item.arguments for item in plan.operations if item.operator == "solid.sweep"
+    )
+    segment = arguments["pathSegments"][0]
+
+    assert segment["start"] == pytest.approx((0.0, 0.0, 10.0))
+    assert segment["end"] == pytest.approx((10.0, 0.0, 0.0))
+    assert segment["startAngle"] == pytest.approx(math.pi / 2)
+    assert segment["endAngle"] == pytest.approx(0.0)
+    assert segment["sweepAngle"] == pytest.approx(-math.pi / 2)
+    assert segment["sweepDirection"] == "cw"
+    assert segment["authoredSweepDirection"] == "ccw"
+    assert arguments["pathStationTangents"][0] == pytest.approx((1.0, 0.0, 0.0))
+    assert arguments["pathStationTangents"][-1] == pytest.approx((0.0, 0.0, -1.0))

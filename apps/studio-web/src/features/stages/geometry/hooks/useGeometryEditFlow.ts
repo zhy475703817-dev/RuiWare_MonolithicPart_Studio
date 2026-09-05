@@ -52,6 +52,7 @@ const WEAK_CONSTRAINT_TYPES = new Set([
   "vertical",
   "parallel",
   "perpendicular",
+  "tangent",
   "equal",
   "fixed",
 ]);
@@ -60,6 +61,7 @@ const WEAK_CONSTRAINT_LABELS: Record<string, string> = {
   vertical: "沿竖直轴",
   parallel: "平行",
   perpendicular: "垂直",
+  tangent: "相切",
   equal: "相等",
   fixed: "固定",
 };
@@ -119,6 +121,22 @@ const softConstraintViolated = (
       if (!current) return false;
       return Math.abs(reference[0] * current[0] + reference[1] * current[1]) > 0.02;
     });
+  }
+  if (kind === "tangent" && refs.length > 1) {
+    const line = refs.find((item) => item.geometryType === "line");
+    const curve = refs.find(
+      (item) => item.geometryType === "arc" || item.geometryType === "circle",
+    );
+    if (!line?.start || !line.end || !curve?.center || curve.radius == null) {
+      return false;
+    }
+    const direction = entityDirection(line);
+    if (!direction) return false;
+    const distanceToCenter = Math.abs(
+      (curve.center[0] - line.start[0]) * direction[1] -
+        (curve.center[1] - line.start[1]) * direction[0],
+    );
+    return Math.abs(distanceToCenter - Math.abs(curve.radius)) > tolerance;
   }
   if (kind === "equal" && refs.length > 1) {
     const measure = (item: Draft["sketch"]["entities"][number]) => {

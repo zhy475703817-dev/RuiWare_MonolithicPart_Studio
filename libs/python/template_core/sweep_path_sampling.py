@@ -1,10 +1,11 @@
-"""Deterministic sampling helpers for parameterized sweep-path geometry.
+"""Deterministic helpers for parameterized sweep-path geometry.
 
-The authored sweep path remains parameterized (line/arc records).  CAD's
-first implementation consumes a polyline, so this module provides a single
-well-defined conversion from those records to points.  It intentionally has
-no OpenCascade dependency and can therefore be used by lowering, validation,
-and tests without introducing a second geometry algorithm.
+The authored sweep path remains parameterized (line/arc records).  Sampling
+is retained as a compatibility and frame-calculation representation, while
+``ordered_path_segments_3d`` exposes the exact ordered geometry needed by a
+CAD kernel.  This module intentionally has no OpenCascade dependency so the
+same direction, angle-unit, and reference-plane rules are shared by lowering,
+validation, and CAD construction.
 """
 
 from __future__ import annotations
@@ -369,15 +370,68 @@ def sample_arc_tangents(geometry: Any, *, forward: bool = True, **kwargs: Any) -
     # complementary direction.  Keeping the tangent aligned with the sampled
     # path prevents a 180° frame flip at such arcs.
     direction = "ccw" if sweep >= 0 else "cw"
-    tangents = [
-        arc_tangent_2d(angles[0] + sweep * index / count, direction)
+    if forward:
+        start_angle = angles[0]
+        traversal_sweep = sweep
+    else:
+        # Use the unwrapped parameter endpoint.  It is geometrically
+        # equivalent to ``endAngle`` and preserves the exact route selected
+        # by largeArc/direction when traversal is reversed.
+        start_angle = angles[0] + sweep
+        traversal_sweep = -sweep
+        direction = "ccw" if traversal_sweep >= 0 else "cw"
+    return [
+        arc_tangent_2d(start_angle + traversal_sweep * index / count, direction)
         for index in range(count)
     ]
-    if not forward:
-        # Reversing traversal reverses the station order and flips tangent
-        # direction, which keeps line/arc joins oriented consistently.
-        tangents = [(-x, -y) for x, y in reversed(tangents)]
-    return tangents
+
+
+def sample_geometry_station_tangents(
+    geometry: Any,
+    *,
+    forward: bool = True,
+    max_angle_degrees: float = DEFAULT_MAX_ANGLE_DEGREES,
+    max_chord_error: float = DEFAULT_MAX_CHORD_ERROR,
+) -> list[Point2]:
+    """Return an analytic outgoing tangent at every sampled station.
+
+    The terminal entry is evaluated at the actual arc endpoint rather than at
+    the start of its final approximation chord.  For a polyline, an interior
+    vertex follows the established outgoing-segment rule and the last station
+    retains the incoming line direction.
+    """
+
+    kind = _value(geometry, "geometryType", "line")
+    if kind == "line":
+        tangents = sample_line_tangents(geometry, forward=forward)
+        if not tangents:
+            return []
+        return [*tangents, tangents[-1]]
+    if kind != "arc":
+        raise ValueError(f"unsupported sweep path geometry: {kind}")
+
+    sampled = sample_arc_points(
+        geometry,
+        forward=True,
+        max_angle_degrees=max_angle_degrees,
+        max_chord_error=max_chord_error,
+    )
+    angles = _geometry_angles(geometry)
+    sweep = geometry_arc_sweep_angle(geometry)
+    if angles is None or sweep is None or abs(sweep) <= ARC_ANGLE_EPSILON:
+        raise ValueError("arc requires valid angles and a non-zero sweep")
+    count = len(sampled) - 1
+    if forward:
+        start_angle = angles[0]
+        traversal_sweep = sweep
+    else:
+        start_angle = angles[0] + sweep
+        traversal_sweep = -sweep
+    direction = "ccw" if traversal_sweep > 0 else "cw"
+    return [
+        arc_tangent_2d(start_angle + traversal_sweep * index / count, direction)
+        for index in range(count + 1)
+    ]
 
 
 def sample_geometry_points(
@@ -452,6 +506,146 @@ def map_points_to_3d(
     return [map_point_to_3d(point, plane, xy_as_xz=xy_as_xz) for point in points]
 
 
+def mapped_path_plane(plane: Plane = "XY", *, xy_as_xz: bool = False) -> Plane:
+    """Return the physical 3-D plane produced by ``map_point_to_3d``."""
+
+    if plane not in {"XY", "XZ", "YZ"}:
+        raise ValueError(f"unsupported sweep path plane: {plane}")
+    return "XZ" if plane == "XY" and xy_as_xz else plane
+
+
+def ordered_path_segments_3d(
+    path: Any,
+    ordered: Sequence[dict[str, Any]] | None = None,
+    *,
+    xy_as_xz: bool = True,
+) -> list[dict[str, Any]]:
+    """Lower graph-ordered path geometry without tessellating circular arcs.
+
+    Every returned line has explicit traversal-oriented ``start``/``end``
+    points.  Every arc additionally retains its parameterized circle data and
+    carries an unambiguous signed ``sweepAngle`` in radians.  ``startAngle``
+    and ``endAngle`` are also radians and swap when graph traversal reverses
+    the authored geometry.  A multi-point line is emitted as one exact line
+    record per consecutive pair so no authored polyline corner is collapsed.
+
+    Joins that differ only by floating-point evaluation noise are made bitwise
+    identical.  Larger gaps are deliberately retained for the CAD worker to
+    reject with a clear connectivity diagnostic instead of hiding malformed
+    geometry behind the path sampling tolerance.
+    """
+
+    if ordered is None:
+        from .sweep_path import validate_sweep_path
+
+        ordered = validate_sweep_path(path).get("ordered", [])
+    authored_plane = str(_value(path, "plane", "XY"))
+    if authored_plane not in {"XY", "XZ", "YZ"}:
+        raise ValueError(f"unsupported sweep path plane: {authored_plane}")
+    plane: Plane = authored_plane  # type: ignore[assignment]
+    physical_plane = mapped_path_plane(plane, xy_as_xz=xy_as_xz)
+    by_id = {
+        str(_value(item, "id", "")): item
+        for item in (_value(path, "geometry", None) or [])
+    }
+    result: list[dict[str, Any]] = []
+
+    def append_segment(record: dict[str, Any]) -> None:
+        if result:
+            previous_end = result[-1]["end"]
+            current_start = record["start"]
+            if math.dist(previous_end, current_start) <= 1e-9:
+                # Reuse the exact tuple object/value from the preceding edge.
+                # This removes sin(pi)-style noise without accepting a real
+                # authored gap that topology merely clusters by tolerance.
+                record["start"] = previous_end
+        result.append(record)
+
+    for order_index, order_item in enumerate(ordered):
+        geometry_id = str(order_item.get("geometryId", ""))
+        geometry = by_id.get(geometry_id)
+        if geometry is None:
+            continue
+        forward = bool(order_item.get("forward", True))
+        geometry_type = str(_value(geometry, "geometryType", "line"))
+        common = {
+            "geometryId": geometry_id,
+            "geometryType": geometry_type,
+            "orderIndex": order_index,
+            "forward": forward,
+            "plane": plane,
+            "mappedPlane": physical_plane,
+        }
+        if geometry_type == "line":
+            line_points = sample_line_points(geometry, forward=forward)
+            for segment_index, (start, end) in enumerate(
+                zip(line_points, line_points[1:])
+            ):
+                append_segment({
+                    **common,
+                    "segmentIndex": segment_index,
+                    "start": map_point_to_3d(start, plane, xy_as_xz=xy_as_xz),
+                    "end": map_point_to_3d(end, plane, xy_as_xz=xy_as_xz),
+                })
+            continue
+        if geometry_type != "arc":
+            raise ValueError(f"unsupported sweep path geometry: {geometry_type}")
+
+        center = _as_point(_value(geometry, "center"))
+        radius = _finite_float(_value(geometry, "radius"))
+        angles = _geometry_angles(geometry)
+        sweep = geometry_arc_sweep_angle(geometry)
+        endpoints = computed_arc_endpoints(geometry)
+        if (
+            center is None
+            or radius is None
+            or radius <= 0
+            or angles is None
+            or sweep is None
+            or abs(sweep) <= ARC_ANGLE_EPSILON
+            or endpoints is None
+        ):
+            raise ValueError(
+                f"arc {geometry_id or '<unknown>'} requires valid circle parameters"
+            )
+        source_start_angle, source_end_angle = angles
+        authored_direction = str(_value(geometry, "sweepDirection", "ccw"))
+        authored_large_arc = bool(_value(geometry, "largeArc", False))
+        source_start, source_end = endpoints
+        if forward:
+            start, end = source_start, source_end
+            start_angle, end_angle = source_start_angle, source_end_angle
+            traversal_sweep = sweep
+        else:
+            start, end = source_end, source_start
+            start_angle, end_angle = source_end_angle, source_start_angle
+            traversal_sweep = -sweep
+        append_segment({
+            **common,
+            "segmentIndex": 0,
+            "start": map_point_to_3d(start, plane, xy_as_xz=xy_as_xz),
+            "end": map_point_to_3d(end, plane, xy_as_xz=xy_as_xz),
+            "center": map_point_to_3d(center, plane, xy_as_xz=xy_as_xz),
+            "radius": radius,
+            "startAngle": start_angle,
+            "endAngle": end_angle,
+            "largeArc": authored_large_arc,
+            "sweepDirection": "ccw" if traversal_sweep > 0 else "cw",
+            "sweepAngle": traversal_sweep,
+            # Preserve the authored parameter values even when graph order
+            # traverses the edge in reverse.  The unprefixed fields above are
+            # traversal-oriented and are therefore directly consumable by CAD.
+            "authoredStartAngle": source_start_angle,
+            "authoredEndAngle": source_end_angle,
+            "authoredLargeArc": authored_large_arc,
+            "authoredSweepDirection": authored_direction,
+        })
+
+    if result and math.dist(result[-1]["end"], result[0]["start"]) <= 1e-9:
+        result[-1]["end"] = result[0]["start"]
+    return result
+
+
 def sample_ordered_path_points(
     path: Any,
     ordered: Sequence[dict[str, Any]] | None = None,
@@ -509,6 +703,7 @@ def sample_ordered_path_data(
     by_id = {str(_value(item, "id", "")): item for item in (_value(path, "geometry", None) or [])}
     points: list[Point2] = []
     segments: list[dict[str, Any]] = []
+    station_tangents: list[Point2 | None] = []
     for order_index, item in enumerate(ordered):
         geometry_id = str(item.get("geometryId", ""))
         geometry = by_id.get(geometry_id)
@@ -527,14 +722,24 @@ def sample_ordered_path_data(
             max_angle_degrees=max_angle_degrees,
             max_chord_error=max_chord_error,
         )
+        sampled_station_tangents = sample_geometry_station_tangents(
+            geometry,
+            forward=bool(item.get("forward", True)),
+            max_angle_degrees=max_angle_degrees,
+            max_chord_error=max_chord_error,
+        )
         if not sampled:
             continue
+        if len(sampled_station_tangents) != len(sampled):
+            raise ValueError("station tangent metadata does not match sampled path")
         if not points:
             points.append(sampled[0])
+            station_tangents.append(sampled_station_tangents[0])
         elif math.hypot(points[-1][0] - sampled[0][0], points[-1][1] - sampled[0][1]) > 0.05:
             # Topology normally rejects this.  Preserve the discontinuity in
             # metadata rather than silently manufacturing a connecting chord.
             points.append(sampled[0])
+            station_tangents.append(sampled_station_tangents[0])
             segments.append({
                 "geometryId": geometry_id,
                 "geometryType": geometry_type,
@@ -543,10 +748,16 @@ def sample_ordered_path_data(
                 "disconnectedJoin": True,
                 "tangent2d": None,
             })
+        else:
+            # At an authored join use the outgoing analytic tangent.  A
+            # line/arc continuity check belongs to CAD construction, where a
+            # mismatch can be surfaced as an operation diagnostic.
+            station_tangents[-1] = sampled_station_tangents[0]
         for sample_index, point in enumerate(sampled[1:]):
             if math.hypot(points[-1][0] - point[0], points[-1][1] - point[1]) <= 1e-12:
                 continue
             points.append(point)
+            station_tangents.append(sampled_station_tangents[sample_index + 1])
             segments.append({
                 "geometryId": geometry_id,
                 "geometryType": geometry_type,
@@ -555,18 +766,8 @@ def sample_ordered_path_data(
                 "disconnectedJoin": False,
                 "tangent2d": sampled_tangents[sample_index] if sample_index < len(sampled_tangents) else None,
             })
-    # Choose the outgoing analytic tangent at each station.  At a smooth
-    # line/arc join the next segment naturally replaces the incoming tangent;
-    # this also provides a stable final tangent for ThruSections.
-    station_tangents: list[Point2 | None] = [None] * len(points)
-    for index, segment in enumerate(segments):
-        tangent = segment.get("tangent2d")
-        if isinstance(tangent, (list, tuple)) and len(tangent) >= 2:
-            value = (float(tangent[0]), float(tangent[1]))
-            if index < len(station_tangents):
-                station_tangents[index] = value
-            if index + 1 < len(station_tangents):
-                station_tangents[index + 1] = value
+    if len(points) > 1 and math.hypot(points[-1][0] - points[0][0], points[-1][1] - points[0][1]) <= 1e-9:
+        points[-1] = points[0]
     corner_kinds: list[str] = ["endpoint"] * len(points)
     for index in range(1, max(1, len(points) - 1)):
         if index >= len(points) - 1 or index >= len(segments):

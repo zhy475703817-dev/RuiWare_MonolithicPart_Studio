@@ -266,7 +266,7 @@ def default_geometry_recipe() -> GeometryRecipe:
         operations=[
             {
                 "id": "body.main",
-                "operator": "sketch.region_extrude",
+                "operator": "profile.open_profile_tube_extrude",
                 "sourceRefs": ["sketch.section.main"],
                 "argumentExpressions": {
                     "length": "length",

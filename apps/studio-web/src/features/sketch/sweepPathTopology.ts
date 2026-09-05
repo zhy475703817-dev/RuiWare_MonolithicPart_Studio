@@ -118,6 +118,76 @@ const arcParameterEndpoints = (
   ];
 };
 
+/**
+ * Return the analytic, directed tangent of a path edge at one of its
+ * parameter endpoints.  This is intentionally independent from
+ * `sampleSweepPathGeometry`: sampled chords are compatibility data and must
+ * never be used to decide whether an exact line/arc join is G1 continuous.
+ */
+const pathEndpointTangent = (
+  geometry: SweepPathGeometry,
+  endpoint: "start" | "end",
+  forward: boolean,
+): [number, number] | null => {
+  const pair = endpoints(geometry);
+  if (!pair) return null;
+  const first = pair[0];
+  const last = pair[1];
+  if (geometry.geometryType === "line") {
+    const from = forward ? first : last;
+    const to = forward ? last : first;
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const length = Math.hypot(dx, dy);
+    return length > 1e-12 ? [dx / length, dy / length] : null;
+  }
+  if (geometry.geometryType !== "arc" || !geometry.center || !finite(geometry.radius) || geometry.radius <= 0) {
+    return null;
+  }
+  const sweep = sweepArcDegrees(geometry);
+  if (sweep == null || Math.abs(sweep) <= ANGLE_EPSILON) return null;
+  const authoredEndpoint = endpoint === "start" ? 0 : 1;
+  const angleValue = authoredEndpoint === 0 ? geometry.startAngle : geometry.endAngle;
+  if (!finite(angleValue)) return null;
+  const sign = sweep >= 0 ? 1 : -1;
+  const radians = (angleValue * Math.PI) / 180;
+  let tangent: [number, number] = [
+    -Math.sin(radians) * sign,
+    Math.cos(radians) * sign,
+  ];
+  // Reversing an edge reverses its traversal direction.  The endpoint handle
+  // is expressed in authored coordinates, while `forward` is path order.
+  if (!forward) tangent = [-tangent[0], -tangent[1]];
+  return tangent;
+};
+
+const pathTangentErrorDegrees = (
+  incoming: [number, number],
+  outgoing: [number, number],
+) => {
+  const dot = Math.max(-1, Math.min(1, incoming[0] * outgoing[0] + incoming[1] * outgoing[1]));
+  return (Math.acos(dot) * 180) / Math.PI;
+};
+
+/** Maximum numerical noise tolerated before reporting a G1 join diagnostic. */
+export const PATH_TANGENCY_EPSILON_DEGREES = 0.25;
+
+export const sweepPathJoinTangency = (
+  incoming: SweepPathGeometry,
+  incomingForward: boolean,
+  outgoing: SweepPathGeometry,
+  outgoingForward: boolean,
+) => {
+  // RightCorner is meaningful only for line-line joins.  A line-arc, arc-line,
+  // or arc-arc join must be truly tangent or be reported to the user.
+  if (incoming.geometryType === "line" && outgoing.geometryType === "line") return null;
+  const incomingTangent = pathEndpointTangent(incoming, incomingForward ? "end" : "start", incomingForward);
+  const outgoingTangent = pathEndpointTangent(outgoing, outgoingForward ? "start" : "end", outgoingForward);
+  if (!incomingTangent || !outgoingTangent) return null;
+  const angleErrorDegrees = pathTangentErrorDegrees(incomingTangent, outgoingTangent);
+  return { angleErrorDegrees, incomingTangent, outgoingTangent };
+};
+
 const endpoints = (geometry: SweepPathGeometry): [Point, Point] | null => {
   if (geometry.geometryType === "arc") {
     const calculated = arcParameterEndpoints(geometry);
@@ -293,6 +363,42 @@ export function validateSweepPathTopology(path: SweepPathSketch): SweepPathTopol
       previous = next;
     }
     if (visited.size !== edges.length) diagnostics.push(diag("SWEEP_PATH_DISCONNECTED", "sweepPath.geometry", "扫掠路径存在未连接的图元。", edges.filter((_edge, index) => !visited.has(index)).map((edge) => edge.geometry.id)));
+  }
+
+  // Validate the directed joins after the topology graph has established path
+  // order.  Endpoint proximity alone is not enough for an exact CAD sweep:
+  // line-arc, arc-line, and arc-arc joins must share the same analytic tangent.
+  // The first/last join is included for closed paths, while line-line joins are
+  // intentionally left to the selected corner transition mode.
+  if (ordered.length >= 2) {
+    const byId = new Map(edges.map((edge) => [edge.geometry.id, edge]));
+    const joins = ordered.slice(0, -1).map((item, index) => [item, ordered[index + 1]] as const);
+    const lastRef = ordered[ordered.length - 1];
+    const firstRef = ordered[0];
+    const lastEdge = byId.get(lastRef.geometryId);
+    const firstEdge = byId.get(firstRef.geometryId);
+    const exitNode = lastEdge ? (lastRef.forward ? lastEdge.endNode : lastEdge.startNode) : null;
+    const entryNode = firstEdge ? (firstRef.forward ? firstEdge.startNode : firstEdge.endNode) : null;
+    const isClosed = ordered.length === edges.length && exitNode != null && exitNode === entryNode;
+    if (isClosed && ordered.length > 1) joins.push([ordered[ordered.length - 1], ordered[0]]);
+    for (const [incomingRef, outgoingRef] of joins) {
+      const incoming = byId.get(incomingRef.geometryId);
+      const outgoing = byId.get(outgoingRef.geometryId);
+      if (!incoming || !outgoing) continue;
+      const result = sweepPathJoinTangency(
+        incoming.geometry,
+        incomingRef.forward,
+        outgoing.geometry,
+        outgoingRef.forward,
+      );
+      if (!result || result.angleErrorDegrees <= PATH_TANGENCY_EPSILON_DEGREES) continue;
+      diagnostics.push(diag(
+        "SWEEP_PATH_TANGENT_DISCONTINUITY",
+        "sweepPath.geometry",
+        `相邻路径段 ${incoming.geometry.id} 与 ${outgoing.geometry.id} 的解析切线不连续（误差 ${result.angleErrorDegrees.toFixed(3)}°）；请执行“修复为相切”后重试。`,
+        [incoming.geometry.id, outgoing.geometry.id],
+      ));
+    }
   }
   for (let left = 0; left < edges.length; left += 1) {
     for (let right = left + 1; right < edges.length; right += 1) {

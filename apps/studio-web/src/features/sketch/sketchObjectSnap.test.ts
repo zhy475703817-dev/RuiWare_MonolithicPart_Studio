@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Draft } from "../../types";
 import {
+  arcEndpointTangent,
   buildLineSnapCoincidentConstraints,
   endpointSnapToleranceMm,
   resolveSketchSnap,
@@ -26,6 +27,27 @@ const line = (
   radius: null,
   startAngle: null,
   endAngle: null,
+  points: [],
+});
+
+const arc = (
+  id: string,
+  sweepDirection: "ccw" | "cw",
+  largeArc = false,
+): SketchEntity => ({
+  id,
+  role: id,
+  geometryType: "arc",
+  parameterRefs: [],
+  construction: false,
+  start: [10, 0],
+  end: [0, 10],
+  center: [0, 0],
+  radius: 10,
+  startAngle: 0,
+  endAngle: 90,
+  largeArc,
+  sweepDirection,
   points: [],
 });
 
@@ -176,6 +198,34 @@ describe("二维草图端点吸附", () => {
     expect(hit.target).toMatchObject({ kind: "arcNearest", entityId: arc.id, createsConstraint: false });
     expect(hit.point[0]).toBeGreaterThan(0);
     expect(hit.point[1]).toBeGreaterThan(0);
+  });
+
+  it("resolves exact CCW tangents at both arc endpoints", () => {
+    const existing = arc("arc.ccw", "ccw");
+    expect(arcEndpointTangent(existing, "start")).toMatchObject({
+      point: [10, 0],
+      tangent: [0, 1],
+      sweepDirection: "ccw",
+    });
+    expect(arcEndpointTangent(existing, "end")).toMatchObject({
+      point: [0, 10],
+      tangent: [-1, 0],
+      sweepDirection: "ccw",
+    });
+  });
+
+  it("resolves exact CW tangents, including major arcs", () => {
+    const existing = arc("arc.cw.major", "cw", true);
+    expect(arcEndpointTangent(existing, "start")).toMatchObject({
+      point: [10, 0],
+      tangent: [0, -1],
+      sweepDirection: "cw",
+    });
+    expect(arcEndpointTangent(existing, "end")).toMatchObject({
+      point: [0, 10],
+      tangent: [1, 0],
+      sweepDirection: "cw",
+    });
   });
 
   it("keeps a stable view-space radius across zoom levels", () => {

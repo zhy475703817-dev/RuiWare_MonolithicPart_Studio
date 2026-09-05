@@ -1,8 +1,10 @@
 import type { Draft } from "../../types";
 import { pointAngleDegrees } from "./sketchArc";
 import {
+  arcEndpointTangent,
   projectPointOntoLineSegment,
   type SketchDrawPoint,
+  type SketchArcEndpointTangent,
   type SketchSnapHit,
 } from "./sketchObjectSnap";
 
@@ -13,7 +15,8 @@ export type SketchLineInferenceKind =
   | "horizontal"
   | "vertical"
   | "parallel"
-  | "perpendicular";
+  | "perpendicular"
+  | "tangent";
 
 export type SketchLineInference = {
   kind: SketchLineInferenceKind;
@@ -25,6 +28,8 @@ export type SketchLineInference = {
   referenceStart: [number, number] | null;
   referenceEnd: [number, number] | null;
   referenceNearestPoint: [number, number] | null;
+  referenceHandle: "start" | "end" | null;
+  referenceTangent: [number, number] | null;
 };
 
 export type SketchLineMetrics = {
@@ -37,6 +42,10 @@ export type SketchLineInferenceTolerances = {
   exitViewPx: number;
   referenceEnterViewPx: number;
   referenceExitViewPx: number;
+  /** Angular tolerance for entering a circular-arc tangent latch. */
+  tangentEnterAngleDegrees: number;
+  /** Slightly wider hysteresis tolerance while a tangent latch is active. */
+  tangentExitAngleDegrees: number;
 };
 
 export const DEFAULT_LINE_INFERENCE_TOLERANCES: SketchLineInferenceTolerances = {
@@ -44,6 +53,8 @@ export const DEFAULT_LINE_INFERENCE_TOLERANCES: SketchLineInferenceTolerances = 
   exitViewPx: 11,
   referenceEnterViewPx: 48,
   referenceExitViewPx: 64,
+  tangentEnterAngleDegrees: 7,
+  tangentExitAngleDegrees: 9,
 };
 
 export const LINE_DIMENSION_HINT_PRESENTATION = {
@@ -164,6 +175,8 @@ const axisInference = (
     referenceStart: null,
     referenceEnd: null,
     referenceNearestPoint: null,
+    referenceHandle: null,
+    referenceTangent: null,
   };
 };
 
@@ -205,7 +218,82 @@ const relationCandidate = (
       referenceStart: [entity.start[0], entity.start[1]],
       referenceEnd: [entity.end[0], entity.end[1]],
       referenceNearestPoint: nearest.point,
+      referenceHandle: null,
+      referenceTangent: null,
     },
+  };
+};
+
+const tangentAngleErrorDegrees = (
+  dx: number,
+  dy: number,
+  tangent: [number, number],
+) => angleErrorDegrees(dx, dy, tangent[0], tangent[1]);
+
+/**
+ * Build a line preview constrained to the analytic tangent at the snapped arc
+ * endpoint. The sign is selected from the pointer direction, so a line drawn
+ * into or out of the arc is treated as the same tangent line.
+ */
+const arcTangentCandidate = (
+  anchor: SketchDrawPoint,
+  pointer: { x: number; y: number },
+  entities: SketchEntity[],
+  scale: number,
+  previous: SketchLineInference | null,
+  tolerances: SketchLineInferenceTolerances,
+): SketchLineInference | null => {
+  const target = anchor.snapTarget;
+  if (!target || target.kind !== "arcEndpoint" || !target.handle) return null;
+  const entity = entities.find((item) => item.id === target.entityId);
+  if (!entity) return null;
+  const resolved: SketchArcEndpointTangent | null = arcEndpointTangent(
+    entity,
+    target.handle,
+  );
+  if (!resolved) return null;
+
+  const dx = pointer.x - anchor.x;
+  const dy = pointer.y - anchor.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-9) return null;
+  const angle = tangentAngleErrorDegrees(dx, dy, resolved.tangent);
+  const angleLimit =
+    previous?.kind === "tangent"
+      ? tolerances.tangentExitAngleDegrees
+      : tolerances.tangentEnterAngleDegrees;
+  if (angle > angleLimit) return null;
+
+  const sign = dx * resolved.tangent[0] + dy * resolved.tangent[1] >= 0 ? 1 : -1;
+  const ux = resolved.tangent[0] * sign;
+  const uy = resolved.tangent[1] * sign;
+  const point = roundSketchPoint([
+    anchor.x + length * ux,
+    anchor.y + length * uy,
+  ]);
+  const guideLength = Math.max(12, Math.min(24, length * 0.75));
+  const referenceStart: [number, number] = [
+    resolved.point[0] - resolved.tangent[0] * guideLength,
+    resolved.point[1] - resolved.tangent[1] * guideLength,
+  ];
+  const referenceEnd: [number, number] = [
+    resolved.point[0] + resolved.tangent[0] * guideLength,
+    resolved.point[1] + resolved.tangent[1] * guideLength,
+  ];
+  const endpointLabel = resolved.handle === "start" ? "起点" : "终点";
+  return {
+    kind: "tangent",
+    point,
+    deviationViewPx:
+      Math.abs(dx * uy - dy * ux) * scale,
+    angleErrorDegrees: angle,
+    referenceEntityId: resolved.entityId,
+    referenceLabel: `${entity.role || entity.id}${endpointLabel}`,
+    referenceStart,
+    referenceEnd,
+    referenceNearestPoint: resolved.point,
+    referenceHandle: resolved.handle,
+    referenceTangent: resolved.tangent,
   };
 };
 
@@ -233,14 +321,28 @@ export function resolveSketchLineInference({
     ...DEFAULT_LINE_INFERENCE_TOLERANCES,
     ...toleranceOverrides,
   };
+  const segmentLengthViewPx =
+    Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) * scale;
+
+  // An arc endpoint carries a real parameterized tangent. Evaluate this
+  // before the generic precise-snap short circuit so a cursor that is also
+  // near another endpoint can still latch the intended line direction. The
+  // tangent candidate itself is only accepted inside the angular tolerance;
+  // otherwise the precise positional snap below remains authoritative.
+  const tangent = arcTangentCandidate(
+    anchor,
+    pointer,
+    entities,
+    scale,
+    previous,
+    tolerances,
+  );
+  if (tangent) return inferenceResult(anchor, tangent.point, tangent);
+
   if (preciseSnap?.target) {
     return inferenceResult(anchor, preciseSnap.point, null);
   }
-  const freePoint = roundSketchPoint(
-    preciseSnap?.point || [pointer.x, pointer.y],
-  );
-  const segmentLengthViewPx =
-    Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) * scale;
+  const freePoint = roundSketchPoint([pointer.x, pointer.y]);
   if (segmentLengthViewPx < 2) {
     return inferenceResult(anchor, freePoint, null);
   }
@@ -362,7 +464,12 @@ export function buildLineInferenceConstraint(
     vertical: "竖直",
     parallel: "平行",
     perpendicular: "垂直",
+    tangent: "相切",
   };
+  // Tangency is an intentional geometric relation only after an explicit
+  // confirmation flow. Drawing inference itself must not create a permanent
+  // tangent constraint.
+  if (inference.kind === "tangent") return [];
   return [
     {
       id: createId(),
