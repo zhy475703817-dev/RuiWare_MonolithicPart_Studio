@@ -24,6 +24,7 @@ type WorkspaceShellProps = {
   dirty: boolean;
   notice: string;
   error: ErrorNotice | null;
+  syncConflict: { localRevision: number; remoteRevision: number } | null;
   onSelectDraft: (draftId: string) => void;
   onSelectStage: (stage: StageName) => void;
   onCreateDraft: () => void;
@@ -31,6 +32,7 @@ type WorkspaceShellProps = {
   onArchiveDraft: () => void;
   onSave: () => void;
   onDismissToast: () => void;
+  onResolveSyncConflict: (action: "reload" | "dismiss") => void;
   sourcePackageUrl: string;
   children: ReactNode;
 };
@@ -45,6 +47,7 @@ export function WorkspaceShell({
   dirty,
   notice,
   error,
+  syncConflict,
   onSelectDraft,
   onSelectStage,
   onCreateDraft,
@@ -52,6 +55,7 @@ export function WorkspaceShell({
   onArchiveDraft,
   onSave,
   onDismissToast,
+  onResolveSyncConflict,
   sourcePackageUrl,
   children,
 }: WorkspaceShellProps) {
@@ -145,6 +149,25 @@ export function WorkspaceShell({
       </aside>
 
       <main className="workspace">
+        {syncConflict && (
+          <div className="sync-conflict" role="alert">
+            <div>
+              <strong>版本冲突</strong>
+              <span>
+                Agent 已修改当前模板（R{syncConflict.remoteRevision}），本地仍在编辑 R
+                {syncConflict.localRevision}。
+              </span>
+            </div>
+            <div className="sync-conflict-actions">
+              <button type="button" onClick={() => onResolveSyncConflict("dismiss")}>
+                暂不处理
+              </button>
+              <button type="button" className="primary" onClick={() => onResolveSyncConflict("reload")}>
+                加载 Agent 版本
+              </button>
+            </div>
+          </div>
+        )}
         {children}
       </main>
 

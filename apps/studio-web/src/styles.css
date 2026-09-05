@@ -355,6 +355,49 @@ code {
   padding: 20px 24px 55px;
   background: #edf0f2;
 }
+.sync-conflict {
+  max-width: 1510px;
+  margin: 0 auto 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2b45f;
+  border-radius: 6px;
+  background: #fff8e8;
+  color: #5b431b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 10px;
+}
+.sync-conflict > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sync-conflict strong {
+  color: #8b5b0a;
+  font-size: 11px;
+}
+.sync-conflict-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.sync-conflict-actions button {
+  border: 1px solid #d8bd86;
+  border-radius: 5px;
+  padding: 6px 9px;
+  background: transparent;
+  color: #72521d;
+  font-size: 9px;
+  font-weight: 700;
+}
+.sync-conflict-actions button.primary {
+  border-color: #c77713;
+  background: #d9821c;
+  color: #fff;
+}
 .stage-heading {
   max-width: 1510px;
   margin: 0 auto 10px;

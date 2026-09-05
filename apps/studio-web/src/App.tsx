@@ -101,11 +101,13 @@ export default function App() {
     busy,
     notice,
     error,
+    syncConflict,
     setStage,
     setMaterials,
     setMaterialSearch,
     setError,
     setNotice,
+    resolveSyncConflict,
     chooseDraft,
     change,
     update,
@@ -157,6 +159,7 @@ export default function App() {
       dirty={dirty}
       notice={notice}
       error={error}
+      syncConflict={syncConflict}
       onSelectDraft={(draftId) => {
         const selected = drafts.find((item) => item.id === draftId);
         if (selected) chooseDraft(selected);
@@ -170,6 +173,7 @@ export default function App() {
         setError(null);
         setNotice("");
       }}
+      onResolveSyncConflict={resolveSyncConflict}
       sourcePackageUrl={api.sourcePackageUrl(draft.id!)}
     >
         <div className="stage-heading">
