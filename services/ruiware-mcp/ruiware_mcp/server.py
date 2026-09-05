@@ -8,7 +8,7 @@ from .api_client import RuiWareApiClient
 from .core.protocol import McpProtocolHandler, parse_error_response
 from .core.responses import tool_result
 from .core.additional_tools import ADDITIONAL_TOOLS
-from .tools.authoring import preview_proposal, solve_sketch, submit_proposal
+from .tools.authoring import apply_parameter_changes, get_parameter_contract, preview_parameter_changes, preview_proposal, solve_sketch, submit_proposal, validate_parameter_values
 from .tools.guidance import explain_error, get_next_actions, get_parameter_help
 from .tools.read import get_attachment, get_current_draft_status, get_draft_context, get_validation_result
 from .tools.workflow import check_brep, compile_draft, complete_stage, evaluate_draft, get_compile_artifacts, get_latest_compile
@@ -68,6 +68,14 @@ class McpApplication:
             return preview_proposal(self.client, arguments)
         if name == "ruiware_submit_proposal":
             return submit_proposal(self.client, arguments)
+        if name == "ruiware_get_parameter_contract":
+            return get_parameter_contract(self.client, arguments)
+        if name == "ruiware_validate_parameter_values":
+            return validate_parameter_values(self.client, arguments)
+        if name == "ruiware_preview_parameter_changes":
+            return preview_parameter_changes(self.client, arguments)
+        if name == "ruiware_apply_parameter_changes":
+            return apply_parameter_changes(self.client, arguments)
         if name == "ruiware_get_validation_result":
             return get_validation_result(self.client, arguments)
         if name == "ruiware_compile_draft":

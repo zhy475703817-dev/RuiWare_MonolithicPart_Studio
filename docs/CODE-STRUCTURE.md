@@ -37,7 +37,7 @@
 ### 2.4 工作流与草稿状态
 
 - `src/features/workflow/stageConfig.ts`：七个阶段的固定顺序和展示配置。
-- `src/features/draft/useDraftWorkspace.ts`：跨阶段状态管理、草稿加载、保存、发布和统一提示。
+- `src/features/draft/useDraftWorkspace.ts`：跨阶段状态管理、草稿加载、保存、发布、统一提示，以及当前草稿远端修订轮询、自动同步和 GUI/Agent 冲突处理。
 
 ### 2.5 语义建模与参数规则
 
@@ -108,6 +108,7 @@
 ### 2.11 `contract` 目录
 
 - `ContractParametersPanel.tsx`：参数契约总面板。
+- `ParameterAssistancePanel.tsx`：批量参数读取、类型/单位/范围校验、修改预览和确认写入。
 - `ContractOverridesPanel.tsx`：契约覆盖项编辑。
 - `ContractSimulationWorkspace.tsx`：契约模拟工作区。
 
@@ -145,9 +146,17 @@
 - `app/services/context.py`：上下文汇总与查询。
 - `app/services/draft.py`：草稿生命周期操作。
 - `app/services/material.py`：材料绑定、解析和查询。
+- `app/services/parameters.py`：参数契约读取、批量值校验、参数修改预览、下游阶段复核和确认写入。
 - `app/services/operations.py`：对外业务操作总入口。
 - `app/services/proposal.py`：提案预览与应用。
 - `app/services/workflow.py`：阶段流转与阶段校验。
+
+参数辅助 REST 接口集中在 `app/main.py`：
+
+- `GET /api/v1/template-drafts/{draftId}/parameters`：批量读取参数契约和变体摘要。
+- `POST /api/v1/template-drafts/{draftId}/parameters/validate`：校验参数类型、单位、范围并运行规则求值。
+- `POST /api/v1/template-drafts/{draftId}/parameters/preview`：基于 `baseRevision` 预览参数变化和下游阶段校验。
+- `POST /api/v1/template-drafts/{draftId}/parameters/apply`：仅在 `confirmed=true` 且修订未变化时写入新修订。
 
 ## 4. 领域层 `libs/python/template_core`
 
@@ -200,6 +209,7 @@
 - `authoring/__init__.py`：编辑和提案工具的统一导出入口。
 - `authoring/sketch.py`：调用草图确定性求解接口，不保存草稿。
 - `authoring/proposals.py`：调用提案预览和提案提交接口；提交操作会产生新修订。
+- `authoring/parameters.py`：调用参数契约读取、批量校验、修改预览和确认写入接口；写入工具要求 `baseRevision` 和显式确认。
 - `workflow/__init__.py`：CAD、规则试算和阶段推进工具的统一导出入口。
 - `workflow/compile.py`：调用 CAD 编译、读取最近编译、提取 B-Rep 摘要和导出产物地址。
 - `workflow/evaluation.py`：调用模板规则试算接口，不保存草稿。
@@ -235,6 +245,8 @@ services/template-api
 
 当前已经完成 MCP 接口冻结、核心协议拆分、只读工具拆分，以及编辑提案、CAD 工作流和 Agent 指引工具接入。`resources` 目录仍作为后续工具目录、阶段指南和参数 Schema 资源的扩展位置。
 
+参数辅助对应四个 MCP 工具：`ruiware_get_parameter_contract`、`ruiware_validate_parameter_values`、`ruiware_preview_parameter_changes` 和 `ruiware_apply_parameter_changes`。前三者不写入模板，最后一个必须携带 `baseRevision` 和 `confirmed=true`，成功后生成新修订并由 GUI 状态同步轮询刷新。
+
 GUI 切换零部件时调用 `/api/v1/workspace/current-draft` 保存 `draftId`；MCP 工具 `ruiware_get_current_draft_status` 读取同一工作区选择，因此 Agent 返回的工程状态与 GUI 当前选中项保持一致。
 
 ### 6.5 Agent 辅助线现状
@@ -246,6 +258,9 @@ GUI 切换零部件时调用 `/api/v1/workspace/current-draft` 保存 `draftId`�
 - 读取 GUI 当前选中的零部件及完整工程状态。
 - 读取指定草稿、附件和阶段校验结果。
 - 查询参数定义、参数范围和变体覆盖关系。
+- 批量读取参数契约，校验类型、单位、范围和规则求值结果。
+- 预览参数修改对草图、特征、契约、审查和发布准入阶段的影响。
+- 在用户确认后写入参数新修订，并触发 GUI 自动同步。
 - 进行草图确定性求解和规则试算，不直接保存结果。
 - 生成工程提案并预览参数、草图和结构差异。
 - 在用户确认后提交提案并生成新修订。
@@ -275,41 +290,41 @@ Repository + 领域模型 + 阶段校验
 新修订 / 编译结果 / GUI 刷新
 ```
 
-### 6.6 Agent 辅助线尚待完善的部分
+### 6.6 已完成的 Agent 辅助闭环
+
+第一阶段“状态同步”和第二阶段“参数辅助”已经落地：
+
+1. Agent/MCP 写入新修订后，GUI 每 3 秒检查当前草稿的最新 `revision`。
+2. 没有本地未保存修改时，GUI 自动替换为远端草稿并提示“已同步 Agent 修改”。
+3. 存在本地修改时，GUI 保留本地编辑内容，显示远端修订号和冲突操作入口。
+4. 参数辅助写入要求 `baseRevision` 和用户确认；服务端拒绝过期修订，避免静默覆盖。
+5. 参数写入后重新执行受影响阶段校验，GUI 将新修订纳入后续审查和编译流程。
+
+### 6.7 Agent 辅助线尚待完善的部分
 
 以下内容是后续完善重点，不改变 GUI 主线的业务入口：
 
-1. **GUI 与 Agent 修改后的状态同步**
-   - Agent 写入新修订后，GUI 自动刷新当前零部件。
-   - GUI 显示“Agent 已修改，请查看变更”的提示。
-   - GUI 和 Agent 同时编辑时显示版本冲突，而不是静默覆盖。
-
-2. **参数辅助操作闭环**
-   - 增加批量读取参数、参数值校验、参数修改预览和确认提交能力。
-   - 让 Agent 能直接完成“把长度改为 2000 mm”这类业务动作，而不必自行拼装底层提案。
-   - 修改后自动重新检查受影响的草图、规则、契约和验证阶段。
-
-3. **草图和材料业务工具**
+1. **草图和材料业务工具**
    - 增加草图图元、约束、闭合关系和尺寸的预览式编辑能力。
    - 增加材料搜索、材料匹配、材料绑定预览和确认提交能力。
    - 材料变化后重新计算壁厚并触发相关几何校验。
 
-4. **面向目标的业务动作编排**
+2. **面向目标的业务动作编排**
    - 在底层工具之上增加“检查当前阶段”“修复当前错误”“准备 CAD 编译”等组合动作。
    - `get_next_actions` 返回可直接执行的工具名和完整参数，而不仅是文字建议。
    - Agent 可以按照阶段依赖自动组织读取、预览、确认、提交和验证流程。
 
-5. **确认、并发和审计机制**
+3. **确认、并发和审计机制**
    - 所有写操作统一经过预览和用户确认。
    - 所有写操作携带 `baseRevision`，统一处理版本冲突和重试。
    - 记录操作来源、修改前后差异、操作者、时间和关联修订。
    - 支持 Agent 修改的撤销和重新读取后重试。
 
-6. **Agent 资源和稳定性测试**
+4. **Agent 资源和稳定性测试**
    - 在 `ruiware_mcp/resources` 中补充阶段指南、参数 Schema 和工具使用说明。
    - 增加 MCP 契约、GUI 刷新、并发修改、参数越界、草图退化和 CAD 失败恢复测试。
 
-因此，当前 MCP 线已经完成“读取 → 分析 → 建议 → 预览 → 确认 → 写入 → 校验”的基础骨架；下一步的核心是补齐“写入后 GUI 自动同步”，形成真正可用的 Agent 参数辅助闭环。
+因此，当前 MCP 线已经完成“读取 → 分析 → 建议 → 预览 → 确认 → 写入 → 校验 → GUI 自动同步”的参数辅助闭环；后续重点转向草图/材料业务工具、目标导向任务编排以及统一审计和稳定性测试。
 
 ## 7. 现有文档
 

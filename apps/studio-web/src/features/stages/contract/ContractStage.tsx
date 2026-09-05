@@ -4,6 +4,7 @@ import { api } from "../../../api";
 import { InterfaceEditor } from "../workflow/interface/InterfaceEditor";
 import { ContractParametersPanel } from "./ContractParametersPanel";
 import { ContractSimulationWorkspace } from "./ContractSimulationWorkspace";
+import { ParameterAssistancePanel } from "./ParameterAssistancePanel";
 import {
   normalizeParameterAliasReferences,
   renameParameterReferences,
@@ -15,12 +16,14 @@ export function ContractStage({
   draft,
   change,
   save,
+  onAdoptSavedDraft,
   dirty,
   showError,
 }: {
   draft: Draft;
   change: (d: Draft) => void;
   save: (d?: Draft | null) => Promise<Draft | null | undefined>;
+  onAdoptSavedDraft: (draft: Draft) => void;
   dirty: boolean;
   showError: (e: unknown) => void;
 }) {
@@ -146,6 +149,7 @@ export function ContractStage({
   }
   return (
     <>
+      <ParameterAssistancePanel draft={draft} onAdoptSavedDraft={onAdoptSavedDraft} showError={showError} />
       <div className="contract-tabs">
         <button
           className={tab === "parameters" ? "active" : ""}

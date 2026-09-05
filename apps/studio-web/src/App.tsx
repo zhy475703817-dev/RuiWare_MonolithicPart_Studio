@@ -110,6 +110,7 @@ export default function App() {
     resolveSyncConflict,
     chooseDraft,
     change,
+    adoptSavedDraft,
     update,
     save,
     check,
@@ -265,6 +266,7 @@ export default function App() {
                 draft={draft}
                 change={change}
                 save={save}
+                onAdoptSavedDraft={adoptSavedDraft}
                 dirty={dirty}
                 showError={showError}
               />

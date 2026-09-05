@@ -426,6 +426,31 @@ export type EvaluationRequest = {
   projectZone?: Record<string, unknown>;
 };
 
+export type ParameterChange = { parameterId: string; value: string | number | boolean; unit?: string };
+export type ParameterContract = {
+  draftId: string;
+  revision: number;
+  parameters: ParameterDefinition[];
+  variants: { id: string; name: string; overrides: Record<string, string | number | boolean>; expected: "valid" | "invalid" }[];
+};
+export type ParameterValidationResult = {
+  draftId: string;
+  revision: number;
+  values: Record<string, string | number | boolean>;
+  changes: ParameterChange[];
+  evaluation: TemplateEvaluation;
+  valid: boolean;
+};
+export type ParameterPreviewResult = {
+  draftId: string;
+  baseRevision: number;
+  changes: ParameterChange[];
+  candidate: Draft;
+  evaluation: TemplateEvaluation;
+  downstreamValidations: Record<StageName, StageValidation>;
+  canAccept: boolean;
+};
+
 export type Draft = {
   schemaVersion: "3.0";
   templateKind: "monolithicPart";

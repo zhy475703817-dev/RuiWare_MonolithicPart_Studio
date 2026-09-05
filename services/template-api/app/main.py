@@ -71,6 +71,10 @@ from .services.operations import (  # noqa: E402
     update_template_attachment as update_template_attachment_service,
     update_template_draft as update_template_draft_service,
     validate_template_stage as validate_template_stage_service,
+    apply_parameter_changes as apply_parameter_changes_service,
+    parameter_contract as parameter_contract_service,
+    preview_parameter_changes as preview_parameter_changes_service,
+    validate_parameter_values as validate_parameter_values_service,
     write_source_package as write_source_package_service,
     get_current_draft as get_current_draft_service,
     set_current_draft as set_current_draft_service,
@@ -122,6 +126,17 @@ class MaterialSearchRequest(BaseModel):
     search: str = Field(default="", max_length=80)
     limit: int = Field(default=100, ge=1, le=500)
     requirement: MaterialRequirement | None = None
+
+
+class ParameterValuesRequest(BaseModel):
+    values: dict[str, Scalar] = Field(default_factory=dict)
+    units: dict[str, str] = Field(default_factory=dict)
+
+
+class ParameterChangesRequest(BaseModel):
+    baseRevision: int
+    changes: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+    confirmed: bool = False
 
 
 class SketchSolveRequest(BaseModel):
@@ -290,6 +305,26 @@ def restore_template_revision(draft_id: str, revision: int):
 @app.get("/api/v1/template-drafts/{draft_id}/stages/{stage}/validate", response_model=StageValidation)
 def validate_template_stage(draft_id: str, stage: StageName):
     return validate_template_stage_service(repository, stage, get_template_draft_service(repository, draft_id))
+
+
+@app.get("/api/v1/template-drafts/{draft_id}/parameters")
+def parameter_contract(draft_id: str):
+    return parameter_contract_service(repository, draft_id)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/validate")
+def validate_parameter_values(draft_id: str, request: ParameterValuesRequest):
+    return validate_parameter_values_service(repository, draft_id, request.values, request.units)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/preview")
+def preview_parameter_changes(draft_id: str, request: ParameterChangesRequest):
+    return preview_parameter_changes_service(repository, draft_id, request.baseRevision, request.changes)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/apply")
+def apply_parameter_changes(draft_id: str, request: ParameterChangesRequest):
+    return apply_parameter_changes_service(repository, draft_id, request.baseRevision, request.changes, request.confirmed)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
