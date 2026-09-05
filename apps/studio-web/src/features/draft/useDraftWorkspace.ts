@@ -232,6 +232,16 @@ export function useDraftWorkspace() {
     if (compile) setCompileStale(true);
   }
 
+  function adoptSavedDraft(saved: Draft) {
+    setDraft(structuredClone(saved));
+    setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+    setDirty(false);
+    setValidation(null);
+    setSyncConflict(null);
+    conflictRevisionRef.current = null;
+    if (compileRef.current) setCompileStale(true);
+  }
+
   function resolveSyncConflict(action: "reload" | "dismiss") {
     if (!syncConflict) return;
     if (action === "reload") applyRemoteDraft(syncConflict.remoteDraft);
@@ -459,6 +469,7 @@ export function useDraftWorkspace() {
     resolveSyncConflict,
     chooseDraft,
     change,
+    adoptSavedDraft,
     update,
     save,
     check,

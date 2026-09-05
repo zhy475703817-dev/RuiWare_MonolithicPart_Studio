@@ -45,6 +45,26 @@ ADDITIONAL_TOOLS = [
         "inputSchema": {"type": "object", "required": ["draftId", "parameterId"], "properties": {"draftId": {"type": "string"}, "parameterId": {"type": "string"}, "variantId": {"type": "string"}}},
     },
     {
+        "name": "ruiware_get_parameter_contract",
+        "description": "批量读取当前模板的参数定义、类型、单位、范围、来源和变体；不改变平台数据。",
+        "inputSchema": {"type": "object", "required": ["draftId"], "properties": {"draftId": {"type": "string"}}},
+    },
+    {
+        "name": "ruiware_validate_parameter_values",
+        "description": "校验一批参数值的类型、单位、范围并运行规则求值；不保存修改。",
+        "inputSchema": {"type": "object", "required": ["draftId", "values"], "properties": {"draftId": {"type": "string"}, "values": {"type": "object"}, "units": {"type": "object"}}},
+    },
+    {
+        "name": "ruiware_preview_parameter_changes",
+        "description": "预览参数修改、求值结果和受影响的下游阶段校验；不保存修改。",
+        "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "changes"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "changes": {"type": "array"}}},
+    },
+    {
+        "name": "ruiware_apply_parameter_changes",
+        "description": "仅在用户确认参数预览后写入参数并生成新修订；要求 baseRevision 和 confirmed=true。",
+        "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "changes", "confirmed"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "changes": {"type": "array"}, "confirmed": {"type": "boolean"}}},
+    },
+    {
         "name": "ruiware_explain_error",
         "description": "把结构化 API 或 CAD 错误转换为 Agent 可直接向用户解释的处理建议；不访问或修改平台数据。",
         "inputSchema": {"type": "object", "required": ["error"], "properties": {"error": {"type": "object"}}},

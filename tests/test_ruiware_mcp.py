@@ -43,6 +43,21 @@ def test_tools_list_and_initialize_are_mcp_compatible():
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in TOOLS}
 
 
+def test_parameter_assistance_tools_use_preview_then_confirmed_apply():
+    app = McpApplication(FakeClient())
+    app.call_tool("ruiware_get_parameter_contract", {"draftId": "draft-1"})
+    assert app.client.calls[-1] == ("GET", "/template-drafts/draft-1/parameters", None)
+    app.call_tool("ruiware_preview_parameter_changes", {
+        "draftId": "draft-1", "baseRevision": 3, "changes": [{"parameterId": "length", "value": 1200}],
+    })
+    assert app.client.calls[-1][0:2] == ("POST", "/template-drafts/draft-1/parameters/preview")
+    app.call_tool("ruiware_apply_parameter_changes", {
+        "draftId": "draft-1", "baseRevision": 3, "changes": [], "confirmed": True,
+    })
+    assert app.client.calls[-1][0:2] == ("POST", "/template-drafts/draft-1/parameters/apply")
+    assert app.client.calls[-1][2]["confirmed"] is True
+
+
 def test_context_attachment_and_validation_tools_are_read_only():
     client = FakeClient()
     app = McpApplication(client)

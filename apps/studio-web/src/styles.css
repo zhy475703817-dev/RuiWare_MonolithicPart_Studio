@@ -398,6 +398,33 @@ code {
   background: #d9821c;
   color: #fff;
 }
+.parameter-assistance-panel {
+  margin-bottom: 12px;
+}
+.parameter-assistance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.parameter-assistance-result {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+.parameter-assistance-result.valid {
+  border: 1px solid #b9ddcb;
+  background: #f1faf5;
+  color: #255d43;
+}
+.parameter-assistance-result.invalid {
+  border: 1px solid #e4b8b4;
+  background: #fff4f2;
+  color: #8f3b35;
+}
 .stage-heading {
   max-width: 1510px;
   margin: 0 auto 10px;
