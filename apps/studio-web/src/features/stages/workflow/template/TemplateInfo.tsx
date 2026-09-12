@@ -52,7 +52,7 @@ export function TemplateInfo({
     const first = draft.geometryRecipe.operations[0];
     const operator =
       prototype.operator === "sketch.centerline_thinwall_extrude"
-        ? "sketch.region_extrude"
+        ? "profile.open_profile_tube_extrude"
         : prototype.operator;
     const defaults = operatorDefaults(operator);
     const operation = first

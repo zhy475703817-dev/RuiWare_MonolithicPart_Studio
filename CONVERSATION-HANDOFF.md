@@ -237,14 +237,14 @@ artifacts/                    STEP、STL、诊断、语义映射等派生成果
 
 当前代码已包含并有测试覆盖的操作符：
 
-- `sketch.region_extrude`；
-- `sketch.centerline_thinwall_extrude`；
+- `profile.open_profile_tube_extrude`（统一参数化草图区域、中心线薄壁和开口型材/管材拉伸）；
 - `sheet.blank_extrude`；
-- `profile.rectangular_tube_extrude`；
 - `solid.revolve`；
 - `solid.sweep`；
 - `solid.loft`；
 - `sheet.bend`。
+
+旧的 `sketch.region_extrude`、`sketch.centerline_thinwall_extrude` 和 `profile.rectangular_tube_extrude` 仅作为历史模板兼容入口保留，新建配方统一使用 `profile.open_profile_tube_extrude`。
 
 `solid.import` 仍属于计划/受控派生能力，AI提案不得把它伪装成已实现操作符。
 

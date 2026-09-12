@@ -18,6 +18,7 @@ def resolve_material_database() -> Path:
     candidates = (
         PLATFORM_ROOT / "ruiware.db",
         PLATFORM_ROOT.parent / "debug" / "debug" / "ruiware.db",
+        PLATFORM_ROOT.parent.parent / "debug" / "debug" / "ruiware.db",
     )
     return next((path.resolve() for path in candidates if path.is_file()), candidates[0].resolve())
 

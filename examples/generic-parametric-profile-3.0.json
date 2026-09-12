@@ -59,7 +59,7 @@
   "geometryRecipe": {
     "constructionMode": "extrude",
     "operations": [
-      {"id":"body.main","operator":"sketch.region_extrude","sourceRefs":["sketch.section.main"],"argumentExpressions":{"length":"length"},"semanticOutputs":["part.body"]}
+      {"id":"body.main","operator":"profile.open_profile_tube_extrude","sourceRefs":["sketch.section.main"],"argumentExpressions":{"length":"length"},"semanticOutputs":["part.body"]}
     ],
     "reviewed": true
   },

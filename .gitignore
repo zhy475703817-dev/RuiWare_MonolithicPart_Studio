@@ -10,6 +10,7 @@ __pycache__/
 .idea/
 .npm-cache/
 .pnpm-store/
+.pnpm-store-local/
 .vite-local/
 .tmp/
 .pytest-tmp/

@@ -31,6 +31,15 @@ def test_registry_api_returns_versioned_independent_dimensions() -> None:
     assert {item["id"] for item in payload["geometryPrototypes"]} >= {"prototype.customRecipe", "prototype.openThinWallProfile"}
 
 
+def test_profile_and_tube_prototypes_share_open_profile_tube_extrude() -> None:
+    prototypes = {
+        item.id: item
+        for item in TEMPLATE_AUTHORING_REGISTRY.geometryPrototypes
+    }
+    assert prototypes["prototype.customRecipe"].operator == "profile.open_profile_tube_extrude"
+    assert prototypes["prototype.closedProfile"].operator == "profile.open_profile_tube_extrude"
+
+
 def test_legacy_identity_fields_are_not_accepted() -> None:
     import pytest
     with pytest.raises(Exception):
