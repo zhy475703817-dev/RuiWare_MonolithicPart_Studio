@@ -14,6 +14,16 @@ from .context import validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
 
 
+_CONSTRAINED_SKETCH_TASKS = {"sketchDrawing", "sketchDesign", "geometryReview"}
+
+
+def _proposal_can_accept(proposal: AIModelProposal, commands: list[Any], solve: dict[str, Any]) -> bool:
+    """Only accept sketch-affecting proposals when the profile is fully constrained."""
+    if not commands or not solve.get("valid"):
+        return False
+    return proposal.taskType not in _CONSTRAINED_SKETCH_TASKS or bool(solve.get("fullyConstrained"))
+
+
 def preview_template_proposal(repository: Repository, draft_id: str, proposal: AIModelProposal, selected_command_ids: list[str] | None = None):
     draft = draft_or_404(repository, draft_id)
     try:
@@ -31,7 +41,7 @@ def preview_template_proposal(repository: Repository, draft_id: str, proposal: A
         "diff": proposal_diff(draft, candidate, commands),
         "solve": solve,
         "validation": validation.model_dump(),
-        "canAccept": bool(commands) and bool(solve.get("valid")),
+        "canAccept": _proposal_can_accept(proposal, commands, solve),
     }
 
 
@@ -55,6 +65,17 @@ def apply_template_proposal(
     solve = solve_semantic_sketch(candidate)
     if not solve.get("valid"):
         raise api_error("PROPOSAL_PREVIEW_FAILED", status_code=422, context={"diagnostics": solve.get("diagnostics", [])})
+    if not _proposal_can_accept(proposal, commands, solve):
+        raise api_error(
+            "PROPOSAL_PREVIEW_FAILED",
+            status_code=422,
+            context={
+                "reason": "草图仍存在自由度，不能接受该 Agent 提案。",
+                "degreesOfFreedom": solve.get("degreesOfFreedom"),
+                "fullyConstrained": solve.get("fullyConstrained"),
+                "diagnostics": solve.get("diagnostics", []),
+            },
+        )
     candidate = sync_sketch_seed_coordinates(candidate, solve)
     audit = {
         "id": proposal.id,

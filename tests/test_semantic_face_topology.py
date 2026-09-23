@@ -242,6 +242,63 @@ def test_u_section_same_normal_edges_resolve_to_distinct_support_faces(
     _assert_orthonormal_support_frame(right)
 
 
+def test_rounded_centerline_maps_line_sources_to_generated_side_faces() -> None:
+    operation = StaticOperation(
+        id="body.rounded",
+        operator="profile.open_profile_tube_extrude",
+        arguments={
+            "length": 100.0,
+            "thickness": 2.0,
+            "profileSketchId": "sketch.rounded",
+            "sketch": {
+                "id": "sketch.rounded",
+                "profileMode": "centerlineThinWall",
+                "plane": "XY",
+                "primitives": [
+                    {
+                        "id": "edge.left",
+                        "type": "line",
+                        "construction": False,
+                        "start": {"x": 20.0, "y": -50.0},
+                        "end": {"x": 20.0, "y": 0.0},
+                    },
+                    {
+                        "id": "bend",
+                        "type": "arc",
+                        "construction": False,
+                        "start": {"x": 20.0, "y": 0.0},
+                        "end": {"x": 0.0, "y": 20.0},
+                        "center": {"x": 0.0, "y": 0.0},
+                        "radius": 20.0,
+                        "startAngle": 0.0,
+                        "endAngle": 90.0,
+                        "largeArc": False,
+                    },
+                    {
+                        "id": "edge.right",
+                        "type": "line",
+                        "construction": False,
+                        "start": {"x": 0.0, "y": 20.0},
+                        "end": {"x": -50.0, "y": 20.0},
+                    },
+                ],
+                "regions": [],
+            },
+        },
+    )
+
+    shape, face_map = build_body_with_face_map(operation)
+
+    for source_id in ("edge.left", "edge.right"):
+        support = resolve_face_support(face_map, SemanticFaceLocator(
+            kind="profileEdge",
+            operationId="body.rounded",
+            profileSketchId="sketch.rounded",
+            sourceEntityId=source_id,
+        ))
+        assert _contains_same_face(shape, support.supportFace)
+
+
 def test_u_section_region_resolves_distinct_start_and_end_caps(
     u_section_operation: StaticOperation,
 ) -> None:

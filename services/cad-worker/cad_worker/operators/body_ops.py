@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
 from OCP.Bnd import Bnd_Box
-from OCP.BRepAdaptor import BRepAdaptor_Surface
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepBuilderAPI import (
@@ -15,13 +15,14 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeWire,
     BRepBuilderAPI_TransitionMode,
 )
-from OCP.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_ThruSections
+from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffset, BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_ThruSections
+from OCP.BRepTools import BRepTools_WireExplorer
 from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
-from OCP.GeomAbs import GeomAbs_Plane
+from OCP.GeomAbs import GeomAbs_Arc, GeomAbs_Line, GeomAbs_Plane
 from OCP.GC import GC_MakeArcOfCircle
 from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED
-from OCP.TopExp import TopExp_Explorer
+from OCP.TopExp import TopExp, TopExp_Explorer
 from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
 from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Vec
 
@@ -277,6 +278,11 @@ def _support_frame(face: TopoDS_Face, domain_shape: TopoDS_Shape | None = None):
         sign * plane_normal.Y(),
         sign * plane_normal.Z(),
     ))
+    dominant = max(range(3), key=lambda index: abs(normal[index]))
+    if abs(normal[dominant]) >= 0.98:
+        snapped = [0.0, 0.0, 0.0]
+        snapped[dominant] = 1.0 if normal[dominant] >= 0 else -1.0
+        normal = tuple(snapped)  # type: ignore[assignment]
     u_direction, v_direction = _canonical_face_axes(normal, surface)
 
     bounds = Bnd_Box()
@@ -317,8 +323,33 @@ def _append_face_support(face_map: FaceMap, support: FaceSupport) -> None:
 
 def _sketch_region_extrude(arguments):
     sketch = arguments["sketch"]
-    face = _material_face(sketch)
+    additive_regions = [region for region in sketch["regions"] if region["operation"] == "add"]
+    subtractive_regions = [region for region in sketch["regions"] if region["operation"] == "subtract"]
     length = float(arguments["length"])
+    # Separate coplanar regions must be fused after extrusion.  Fusing their
+    # planar faces first leaves a compound, which OCC extrudes into multiple
+    # solids even when the regions share an exact boundary.
+    if len(additive_regions) > 1:
+        solids = [
+            BRepPrimAPI_MakePrism(
+                BRepBuilderAPI_MakeFace(_region_wire(sketch, region)).Face(),
+                _normal_vector(sketch.get("plane", "XY"), length),
+            ).Shape()
+            for region in additive_regions
+        ]
+        result = _fuse(*solids)
+        for region in subtractive_regions:
+            tool = BRepPrimAPI_MakePrism(
+                BRepBuilderAPI_MakeFace(_region_wire(sketch, region)).Face(),
+                _normal_vector(sketch.get("plane", "XY"), length),
+            ).Shape()
+            cut = BRepAlgoAPI_Cut(result, tool)
+            cut.Build()
+            if not cut.IsDone():
+                raise RuntimeError(f"Sketch subtractive-region cut failed: {region['id']}")
+            result = cut.Shape()
+        return result
+    face = _material_face(sketch)
     return BRepPrimAPI_MakePrism(face, _normal_vector(sketch.get("plane", "XY"), length)).Shape()
 
 
@@ -563,6 +594,16 @@ def _connected_line_points(primitives) -> list[tuple[float, float]] | None:
 
 
 def _thinwall_outline(points: list[tuple[float, float]], half_thickness: float) -> list[tuple[float, float]] | None:
+    sides = _thinwall_outline_sides(points, half_thickness)
+    if sides is None:
+        return None
+    left, right = sides
+    return left + list(reversed(right))
+
+
+def _thinwall_outline_sides(
+    points: list[tuple[float, float]], half_thickness: float
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
     if len(points) < 2:
         return None
     if math.dist(points[0], points[-1]) <= 1e-7:
@@ -601,7 +642,154 @@ def _thinwall_outline(points: list[tuple[float, float]], half_thickness: float) 
     last_segment = segments[-1]
     left.append((points[-1][0] + last_segment[3][0], points[-1][1] + last_segment[3][1]))
     right.append((points[-1][0] - last_segment[3][0], points[-1][1] - last_segment[3][1]))
-    return left + list(reversed(right))
+    return left, right
+
+
+def _wire_edges(wire: TopoDS_Shape) -> list[TopoDS_Shape]:
+    explorer = BRepTools_WireExplorer(TopoDS.Wire_s(wire))
+    edges: list[TopoDS_Shape] = []
+    while explorer.More():
+        edges.append(explorer.Current())
+        explorer.Next()
+    return edges
+
+
+def _profile_point_2d(point: gp_Pnt, plane: str) -> tuple[float, float]:
+    return {
+        "XY": (point.X(), point.Y()),
+        "XZ": (point.X(), point.Z()),
+        "YZ": (point.Y(), point.Z()),
+    }[plane]
+
+
+def _match_offset_line_sources(
+    primitives: list[dict[str, Any]],
+    offset_edges: list[TopoDS_Shape],
+    plane: str,
+    half_thickness: float,
+) -> dict[str, TopoDS_Shape]:
+    """Match authored straight segments to their parallel offset edges."""
+    line_edges = [
+        edge
+        for edge in offset_edges
+        if BRepAdaptor_Curve(TopoDS.Edge_s(edge)).GetType() == GeomAbs_Line
+    ]
+    matched: dict[str, TopoDS_Shape] = {}
+    for primitive in primitives:
+        if primitive["type"] != "line":
+            continue
+        start, end = primitive["start"], primitive["end"]
+        dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+        source_length = math.hypot(dx, dy)
+        if source_length <= 1e-9:
+            continue
+        tangent = dx / source_length, dy / source_length
+        normal = -tangent[1], tangent[0]
+        candidates: list[tuple[float, TopoDS_Shape]] = []
+        for edge in line_edges:
+            first = _profile_point_2d(_edge_first_point(edge), plane)
+            last = _profile_point_2d(_edge_last_point(edge), plane)
+            edge_dx, edge_dy = last[0] - first[0], last[1] - first[1]
+            edge_length = math.hypot(edge_dx, edge_dy)
+            if edge_length <= 1e-9:
+                continue
+            edge_tangent = edge_dx / edge_length, edge_dy / edge_length
+            parallel_error = abs(tangent[0] * edge_tangent[1] - tangent[1] * edge_tangent[0])
+            if parallel_error > 1e-6:
+                continue
+            relative = first[0] - start["x"], first[1] - start["y"]
+            signed_offset = relative[0] * normal[0] + relative[1] * normal[1]
+            if abs(abs(signed_offset) - half_thickness) > 1e-5:
+                continue
+            projections = [
+                (point[0] - start["x"]) * tangent[0]
+                + (point[1] - start["y"]) * tangent[1]
+                for point in (first, last)
+            ]
+            overlap = max(
+                0.0,
+                min(source_length, max(projections)) - max(0.0, min(projections)),
+            )
+            if overlap <= 1e-6:
+                continue
+            midpoint_error = abs(sum(projections) / 2 - source_length / 2)
+            candidates.append((midpoint_error + abs(edge_length - source_length), edge))
+        if candidates:
+            matched[primitive["id"]] = min(candidates, key=lambda item: item[0])[1]
+    return matched
+
+
+def _rounded_thinwall_profile(arguments: dict[str, Any]):
+    """Offset a line/arc centerline into a real two-sided thin-wall profile."""
+    sketch = arguments["sketch"]
+    primitives = [item for item in sketch["primitives"] if not item.get("construction")]
+    source_wire_builder = BRepBuilderAPI_MakeWire()
+    source_edges: list[TopoDS_Shape] = []
+    for primitive in primitives:
+        edge = _primitive_edge(primitive, sketch.get("plane", "XY"))
+        source_wire_builder.Add(edge)
+        source_edges.append(edge)
+    if not source_wire_builder.IsDone():
+        raise RuntimeError("Rounded thin-wall centerline is disconnected")
+    source_wire = source_wire_builder.Wire()
+    half_thickness = float(arguments["thickness"]) / 2
+    offset_wires: list[TopoDS_Shape] = []
+    offset_sources: list[dict[str, TopoDS_Shape]] = []
+    for distance in (half_thickness, -half_thickness):
+        offset = BRepOffsetAPI_MakeOffset(source_wire, GeomAbs_Arc, True)
+        offset.Perform(distance)
+        offset.Build()
+        if not offset.IsDone():
+            raise RuntimeError("Rounded thin-wall offset construction failed")
+        wire = TopoDS.Wire_s(offset.Shape())
+        offset_wires.append(wire)
+        wire_edges = _wire_edges(wire)
+        offset_sources.append(_match_offset_line_sources(
+            primitives,
+            wire_edges,
+            sketch.get("plane", "XY"),
+            half_thickness,
+        ))
+
+    positive_edges = _wire_edges(offset_wires[0])
+    negative_edges = _wire_edges(offset_wires[1])
+    if not positive_edges or not negative_edges:
+        raise RuntimeError("Rounded thin-wall offset produced no edges")
+    closed_wire_builder = BRepBuilderAPI_MakeWire()
+    for edge in positive_edges:
+        closed_wire_builder.Add(edge)
+    first_negative = TopoDS.Edge_s(negative_edges[0])
+    last_positive = TopoDS.Edge_s(positive_edges[-1])
+    last_negative = TopoDS.Edge_s(negative_edges[-1])
+    closed_wire_builder.Add(BRepBuilderAPI_MakeEdge(
+        _edge_last_point(last_positive), _edge_last_point(last_negative)
+    ).Edge())
+    for edge in reversed(negative_edges):
+        closed_wire_builder.Add(TopoDS.Edge_s(TopoDS.Edge_s(edge).Reversed()))
+    first_positive = TopoDS.Edge_s(positive_edges[0])
+    closed_wire_builder.Add(BRepBuilderAPI_MakeEdge(
+        _edge_first_point(first_negative), _edge_first_point(first_positive)
+    ).Edge())
+    if not closed_wire_builder.IsDone():
+        raise RuntimeError("Rounded thin-wall profile wire construction failed")
+    face = BRepBuilderAPI_MakeFace(closed_wire_builder.Wire(), True).Face()
+    prism = BRepPrimAPI_MakePrism(face, _normal_vector(sketch.get("plane", "XY"), float(arguments["length"])))
+    prism.Build()
+    if not prism.IsDone():
+        raise RuntimeError("Rounded thin-wall extrusion failed")
+    return prism.Shape(), offset_sources[0], positive_edges, closed_wire_builder.Wire(), prism
+
+
+def _edge_first_point(edge: TopoDS_Shape) -> gp_Pnt:
+    vertex = TopExp.FirstVertex_s(TopoDS.Edge_s(edge), True)
+    from OCP.BRep import BRep_Tool
+    return BRep_Tool.Pnt_s(vertex)
+
+
+def _edge_last_point(edge: TopoDS_Shape) -> gp_Pnt:
+    vertex = TopExp.LastVertex_s(TopoDS.Edge_s(edge), True)
+    from OCP.BRep import BRep_Tool
+    return BRep_Tool.Pnt_s(vertex)
 
 
 def _prism_from_2d_outline(outline: list[tuple[float, float]], plane: str, length: float):
@@ -630,6 +818,8 @@ def _centerline_thinwall_extrude(arguments):
     if thickness <= 0 or length <= 0:
         raise RuntimeError("Thin-wall thickness and extrusion length must be positive")
     plane = sketch.get("plane", "XY")
+    if any(primitive["type"] == "arc" for primitive in primitives):
+        return _rounded_thinwall_profile(arguments)[0]
     centerline_points = _connected_line_points(primitives)
     if centerline_points:
         outline = _thinwall_outline(centerline_points, thickness / 2)
@@ -661,6 +851,100 @@ def _centerline_thinwall_extrude(arguments):
         axis = {"XY": gp_Vec(0, 0, length), "XZ": gp_Vec(0, length, 0), "YZ": gp_Vec(length, 0, 0)}[plane]
         solids.append(BRepPrimAPI_MakePrism(face, axis).Shape())
     return _fuse(*solids)
+
+
+def _centerline_thinwall_extrude_with_face_map(
+    arguments: dict[str, Any],
+    operation_id: str,
+    profile_sketch_id: str,
+) -> tuple[TopoDS_Shape, FaceMap]:
+    sketch = arguments["sketch"]
+    primitives = [item for item in sketch["primitives"] if not item.get("construction")]
+    if any(primitive["type"] == "arc" for primitive in primitives):
+        shape, source_edges, _positive_edges, _closed_wire, prism = _rounded_thinwall_profile(arguments)
+        face_map: FaceMap = {}
+        for primitive in primitives:
+            source_edge = source_edges.get(primitive["id"])
+            if source_edge is None or primitive["type"] != "line":
+                continue
+            for generated in prism.Generated(source_edge):
+                for occurrence in _matching_subshapes(shape, generated, TopAbs_FACE):
+                    support_face = TopoDS.Face_s(occurrence)
+                    frame = _support_frame(support_face)
+                    if frame is None:
+                        continue
+                    origin, u_direction, v_direction, normal = frame
+                    _append_face_support(face_map, FaceSupport(
+                        supportFace=support_face,
+                        origin=origin,
+                        uDirection=u_direction,
+                        vDirection=v_direction,
+                        normal=normal,
+                        sourceEntityId=primitive["id"],
+                        operationId=operation_id,
+                        profileSketchId=profile_sketch_id,
+                        kind="profileEdge",
+                    ))
+        return shape, face_map
+    points = _connected_line_points(primitives)
+    if not points:
+        return _centerline_thinwall_extrude(arguments), {}
+
+    thickness, length = float(arguments["thickness"]), float(arguments["length"])
+    sides = _thinwall_outline_sides(points, thickness / 2)
+    if sides is None:
+        return _centerline_thinwall_extrude(arguments), {}
+    left, right = sides
+    outline = left + list(reversed(right))
+    plane = sketch.get("plane", "XY")
+    outline_points = {
+        "XY": [(u, v, 0.0) for u, v in outline],
+        "XZ": [(u, 0.0, v) for u, v in outline],
+        "YZ": [(0.0, u, v) for u, v in outline],
+    }[plane]
+    wire_builder = BRepBuilderAPI_MakeWire()
+    for start, end in zip(outline_points, [*outline_points[1:], outline_points[0]]):
+        wire_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start), gp_Pnt(*end)).Edge())
+    if not wire_builder.IsDone():
+        raise RuntimeError("Thin-wall outline wire construction failed")
+    wire = wire_builder.Wire()
+    face = BRepBuilderAPI_MakeFace(wire, True).Face()
+    prism = BRepPrimAPI_MakePrism(face, _normal_vector(plane, length))
+    prism.Build()
+    if not prism.IsDone():
+        raise RuntimeError("Thin-wall outline extrusion failed")
+    shape = prism.Shape()
+
+    outline_edges: list[TopoDS_Shape] = []
+    explorer = TopExp_Explorer(wire, TopAbs_EDGE)
+    while explorer.More():
+        outline_edges.append(explorer.Current())
+        explorer.Next()
+
+    face_map: FaceMap = {}
+    for index, primitive in enumerate(primitives):
+        if index >= len(outline_edges):
+            break
+        source_edge = outline_edges[index]
+        for generated in prism.Generated(source_edge):
+            for occurrence in _matching_subshapes(shape, generated, TopAbs_FACE):
+                support_face = TopoDS.Face_s(occurrence)
+                frame = _support_frame(support_face)
+                if frame is None:
+                    continue
+                origin, u_direction, v_direction, normal = frame
+                _append_face_support(face_map, FaceSupport(
+                    supportFace=support_face,
+                    origin=origin,
+                    uDirection=u_direction,
+                    vDirection=v_direction,
+                    normal=normal,
+                    sourceEntityId=primitive["id"],
+                    operationId=operation_id,
+                    profileSketchId=profile_sketch_id,
+                    kind="profileEdge",
+                ))
+    return shape, face_map
 
 
 def _body(operation):
@@ -728,6 +1012,10 @@ def build_body_with_face_map(operation) -> tuple[TopoDS_Shape, FaceMap]:
         and sketch
         and sketch.get("profileMode") != "centerlineThinWall"
     ):
+        if sum(1 for region in sketch.get("regions", []) if region.get("operation") == "add") > 1:
+            # Multi-region profiles use the 3-D fusion path above.  No authored
+            # locator in the current profile depends on a generated support map.
+            return _sketch_region_extrude(arguments), {}
         operation_id = str(getattr(operation, "id", "") or arguments.get("operationId", ""))
         profile_sketch_id = str(
             arguments.get("profileSketchId")
@@ -736,6 +1024,23 @@ def build_body_with_face_map(operation) -> tuple[TopoDS_Shape, FaceMap]:
             or "sketch.section.main"
         )
         return _sketch_region_extrude_with_face_map(
+            arguments,
+            operation_id,
+            profile_sketch_id,
+        )
+    if (
+        operation.operator == "profile.open_profile_tube_extrude"
+        and sketch
+        and sketch.get("profileMode") == "centerlineThinWall"
+    ):
+        operation_id = str(getattr(operation, "id", "") or arguments.get("operationId", ""))
+        profile_sketch_id = str(
+            arguments.get("profileSketchId")
+            or sketch.get("id")
+            or getattr(operation, "profileSketchId", "")
+            or "sketch.section.main"
+        )
+        return _centerline_thinwall_extrude_with_face_map(
             arguments,
             operation_id,
             profile_sketch_id,

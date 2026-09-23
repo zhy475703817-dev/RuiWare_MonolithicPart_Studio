@@ -153,8 +153,10 @@ def _primitive_edge(primitive, plane: str = "XY", scale: float = 1.0, offset: fl
         return BRepBuilderAPI_MakeEdge(_map_profile_point(a["x"] * scale, a["y"] * scale, plane, frame, offset), _map_profile_point(b["x"] * scale, b["y"] * scale, plane, frame, offset)).Edge()
     if kind == "arc":
         center, radius = primitive["center"], primitive["radius"]
-        start_angle = math.radians(primitive.get("startAngle") or 0)
-        end_angle = math.radians(primitive.get("endAngle") or 90)
+        start_value = primitive.get("startAngle")
+        end_value = primitive.get("endAngle")
+        start_angle = math.radians(0 if start_value is None else start_value)
+        end_angle = math.radians(90 if end_value is None else end_value)
         ccw = (end_angle - start_angle) % (2 * math.pi)
         if ccw == 0:
             ccw = 2 * math.pi

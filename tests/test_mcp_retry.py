@@ -119,3 +119,20 @@ def test_all_mcp_mutations_get_agent_identity_even_without_guard_fields(monkeypa
     assert seen[0][1]["X-request-id"] == "request-1"
     assert seen[1][1]["X-ruiware-actor"] == "agent"
     assert seen[1][1]["X-ruiware-source"] == "mcp"
+
+
+def test_mcp_get_sends_shared_workspace_header(monkeypatch):
+    seen = []
+
+    def opener(request, timeout):
+        seen.append(dict(request.headers))
+        return _Response({"selected": False})
+
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+    monkeypatch.setenv("RUIWARE_WORKSPACE_ID", "ruiware-main")
+
+    RuiWareApiClient("http://api", sleep_fn=lambda _: None).get(
+        "/workspace/current-draft/engineering-status",
+    )
+
+    assert seen[0]["X-ruiware-workspace"] == "ruiware-main"

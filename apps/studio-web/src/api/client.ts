@@ -21,8 +21,25 @@ import type {
 } from "../types";
 import { ApiError, type ApiErrorPayload } from "./errors";
 
+const WORKSPACE_STORAGE_KEY = "ruiware.workspaceId";
+const DEFAULT_WORKSPACE_ID = "ruiware-main";
+
+function workspaceId(): string {
+  if (typeof localStorage === "undefined") return DEFAULT_WORKSPACE_ID;
+  const existing = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+  if (existing) return existing;
+  localStorage.setItem(WORKSPACE_STORAGE_KEY, DEFAULT_WORKSPACE_ID);
+  return DEFAULT_WORKSPACE_ID;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options);
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options?.headers as Record<string, string> | undefined),
+      "X-RuiWare-Workspace": workspaceId(),
+    },
+  });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ detail: response.statusText }));
     const error = payload.error || payload.detail;

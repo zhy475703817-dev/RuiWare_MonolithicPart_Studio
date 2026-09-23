@@ -6,6 +6,8 @@
 
 ```powershell
 $env:RUIWARE_API_URL = "http://127.0.0.1:8010/api/v1"
+# GUI 与 Agent 需要读取同一个当前零部件时使用相同工作区；默认值就是 ruiware-main
+$env:RUIWARE_WORKSPACE_ID = "ruiware-main"
 python -m ruiware_mcp.server
 ```
 
@@ -18,5 +20,7 @@ python -m ruiware_mcp.server
 当前 MCP 工具的名称、必填参数和读写属性记录在 `ruiware_mcp/core/contracts.py`，用于保证内部重构不破坏已有 Agent 调用。
 
 当 Agent 需要读取 GUI 当前选中的零部件时，调用 `ruiware_get_current_draft_status`。该工具读取模板 API 的工作区选择；没有选择时会明确返回未选择，不会按最近更新时间猜测。
+
+GUI 和 MCP 默认共享工作区 `ruiware-main`。工作区只用于定位当前零部件，不代替身份认证：GUI 仍使用签名 `ruiware_session` Cookie，MCP 仍必须使用 Agent Bearer Token。不同用户的数据仍按用户和工作区隔离；旧的 `RUIWARE_SESSION_ID` 仍可作为兼容回退。
 
 只读工具的实现位于 `ruiware_mcp/tools/read/`，包括草稿上下文、附件和阶段校验；`server.py` 仅保留兼容分发入口。

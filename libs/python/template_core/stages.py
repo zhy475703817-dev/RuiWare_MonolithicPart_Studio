@@ -594,7 +594,10 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
         semantic_faces=draft.geometryRecipe.semanticFaces,
         interfaces=draft.interfaces,
     )
-    rule_ok = not any(item.severity == "error" for item in evaluation.diagnostics)
+    rule_ok = not any(
+        item.severity == "error" and not item.code.startswith("INTERFACE_")
+        for item in evaluation.diagnostics
+    )
     locator_ok, locator_message = _validate_semantic_face_locators(draft)
     locator_cases_ok, locator_cases_message = _validate_semantic_face_locator_cases(draft)
     checks = [
@@ -648,6 +651,30 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         for item in draft.interfaces
         for parameter_id in item.parameterRefs
     }
+    interface_expression_items: list[tuple[str, str]] = []
+    interface_expressions_valid = True
+    for item in draft.interfaces:
+        region = item.region
+        if region is None or region.mode != "rectangle":
+            continue
+        expressions = {
+            "uStartExpression": region.uStartExpression,
+            "vStartExpression": region.vStartExpression,
+            "uSpanExpression": region.uSpanExpression,
+            "vSpanExpression": region.vSpanExpression,
+            "countExpression": region.countExpression,
+            "placement.pitchExpression": region.placement.pitchExpression,
+            "placement.startMarginExpression": region.placement.startMarginExpression,
+            "placement.endMarginExpression": region.placement.endMarginExpression,
+            "placement.maximumPitchExpression": region.placement.maximumPitchExpression,
+        }
+        for name, expression in expressions.items():
+            interface_expression_items.append((f"interfaces.{item.id}.region.{name}", expression))
+            try:
+                interface_parameter_refs |= expression_names(expression) - {region.indexVariable, "count"}
+            except RuleEvaluationError:
+                interface_expressions_valid = False
+    interface_alias_violations, _ = _expression_alias_violations(interface_expression_items, draft)
     interface_geometry_refs = {
         geometry_id
         for item in draft.interfaces
@@ -656,7 +683,7 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
             *( [item.referenceFrame.originRef] if item.referenceFrame.originRef else [] ),
         ]
     }
-    interface_parameters_ok = interface_parameter_refs <= parameter_ids
+    interface_parameters_ok = interface_expressions_valid and interface_parameter_refs <= parameter_ids
     interface_geometry_ok = interface_geometry_refs <= semantic_face_ids
     interface_parameter_ids = interface_parameter_refs & parameter_ids
     interface_rule_sources_ok = all(
@@ -739,15 +766,12 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
             interface_reasons.append(f"接口 {item.id} 未填写名称")
         if item.declarationMode == "staticGeometry" and not item.geometryRefs:
             interface_reasons.append(f"静态接口 {item.id} 未关联语义面")
+        if item.declarationMode == "staticGeometry" and len(item.geometryRefs) > 1:
+            interface_reasons.append(f"静态接口 {item.id} 只能关联一个语义面")
         if item.declarationMode == "featureDerived" and not item.sourceFeatureRuleId:
             interface_reasons.append(f"特征派生接口 {item.id} 未选择来源制造特征规则")
         if item.required and not item.reviewed:
             interface_reasons.append(f"关键接口 {item.id} 尚未完成工程师复核")
-        if item.interfaceType == "locating" and item.locatingType == "planeContact" and item.region and item.region.mode == "rectangle":
-            if item.region.uSpan is None or item.region.vSpan is None:
-                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域缺少 U/V 尺寸")
-            elif item.region.uSpan <= 0 or item.region.vSpan <= 0:
-                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域尺寸必须大于零")
     interfaces_complete = not interface_reasons
 
     evaluation = evaluate_template(
@@ -781,7 +805,8 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="override-keys", label="变体覆盖参数有效", passed=override_keys <= parameter_ids, severity="error", path="variants", message="变体只能覆盖已声明参数。"),
         StageCheck(id="variant-overrides-evaluable", label="有效变体参数可求值", passed=not invalid_variant_overrides, severity="error", path="variants", message=f"以下有效变体的参数覆盖无法通过类型、范围或依赖检查：{', '.join(invalid_variant_overrides) or '无'}。"),
         StageCheck(id="parameter-source-expressions-id-only", label="参数来源表达式仅使用参数ID", passed=not parameter_alias_violations, severity="error", path="parameterDefinitions", message=_alias_violation_message(parameter_alias_violations) or "参数来源表达式仅可使用参数稳定 ID。"),
-        StageCheck(id="interface-parameter-refs", label="接口参数引用有效", passed=interface_parameters_ok, severity="error", path="interfaces", message=f"接口只能引用已声明参数：{', '.join(sorted(interface_parameter_refs - parameter_ids)) or '无缺失参数'}。"),
+        StageCheck(id="interface-parameter-refs", label="接口参数引用有效", passed=interface_parameters_ok, severity="error", path="interfaces", message=(f"接口区域表达式语法无效；" if not interface_expressions_valid else "") + f"接口只能引用已声明参数：{', '.join(sorted(interface_parameter_refs - parameter_ids)) or '无缺失参数'}。"),
+        StageCheck(id="interface-expressions-id-only", label="接口区域表达式仅使用参数ID", passed=not interface_alias_violations, severity="error", path="interfaces", message=_alias_violation_message(interface_alias_violations) or "接口区域表达式仅可使用参数稳定 ID。"),
         StageCheck(id="interface-geometry-refs", label="接口几何引用有效", passed=interface_geometry_ok, severity="error", path="interfaces", message=f"接口只能引用已声明语义面：{', '.join(sorted(interface_geometry_refs - semantic_face_ids)) or '无缺失语义面'}。"),
         StageCheck(id="interface-rule-sources", label="特征派生接口来源有效", passed=interface_rule_sources_ok, severity="error", path="interfaces", message="特征派生接口必须选择已有制造特征规则。"),
         StageCheck(id="interface-completeness", label="零部件接口定义完整且合理", passed=interfaces_complete, severity="error", path="interfaces", message="；".join(interface_reasons) or "接口声明完整，关联基准和复核状态有效。"),

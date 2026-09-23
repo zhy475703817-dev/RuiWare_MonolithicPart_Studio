@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Draft, ParameterDefinition } from "../../../types";
-import { getRuleParameterGroups } from "./ruleParameterVisibility";
+import {
+  getRuleExpressionParameterIssues,
+  getRuleParameterGroups,
+} from "./ruleParameterVisibility";
 
 const parameter = (patch: Partial<ParameterDefinition>): ParameterDefinition => ({
   id: "parameter",
@@ -54,5 +57,41 @@ describe("rule parameter visibility", () => {
       "customPitch",
     ]);
     expect(groups.canCreateParameters).toBe(true);
+  });
+
+  it("reports identifiers used by rules that are not declared parameter IDs", () => {
+    const groups = getRuleExpressionParameterIssues({
+      featureRules: [
+        {
+          id: "holes.main",
+          name: "主孔列",
+          indexVariable: "i",
+          conditionExpression: "length >= 1800 and hasServiceHole",
+          countExpression: "holeCount",
+          argumentExpressions: { z: "unknownOffset + i" },
+          placement: {
+            pitchExpression: "holePitch",
+            startMarginExpression: "0",
+            endMarginExpression: "0",
+            maximumPitchExpression: "maxPitch",
+          },
+          polygonVertices: [],
+        } as unknown as Draft["featureRules"][number],
+      ],
+      parameterDefinitions: [
+        parameter({ id: "length" }),
+        parameter({ id: "holeCount" }),
+        parameter({ id: "holePitch" }),
+        parameter({ id: "maxPitch" }),
+      ],
+    });
+
+    expect(groups).toEqual([
+      {
+        ruleId: "holes.main",
+        ruleName: "主孔列",
+        identifiers: ["hasServiceHole", "unknownOffset"],
+      },
+    ]);
   });
 });

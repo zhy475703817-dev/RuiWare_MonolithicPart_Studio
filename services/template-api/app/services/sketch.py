@@ -68,7 +68,7 @@ def preview_sketch_edit(repository: Repository, draft_id: str, base_revision: in
         "diff": diff,
         "solve": solve,
         "validation": validation.model_dump(),
-        "canAccept": bool(solve.get("valid")),
+        "canAccept": bool(solve.get("valid")) and bool(solve.get("fullyConstrained")),
     }
 
 
@@ -77,6 +77,14 @@ def apply_sketch_edit(repository: Repository, draft_id: str, base_revision: int,
         raise api_error("SKETCH_CONFIRMATION_REQUIRED", status_code=422)
     preview = preview_sketch_edit(repository, draft_id, base_revision, changes)
     if not preview["canAccept"]:
-        raise api_error("SKETCH_PREVIEW_FAILED", status_code=422, context={"solve": preview["solve"], "validation": preview["validation"]})
+        raise api_error(
+            "SKETCH_PREVIEW_FAILED",
+            status_code=422,
+            context={
+                "solve": preview["solve"],
+                "validation": preview["validation"],
+                "reason": "草图仍存在自由度，不能接受该 Agent 草图修改。",
+            },
+        )
     saved = save_draft(repository, TemplateDraft.model_validate(preview["candidate"]), expected_revision=base_revision, reason="sketch-assistance-apply")
     return {"draft": saved.model_dump(), "solve": preview["solve"], "validation": validate_stage_with_context(repository, "baseSketch", saved).model_dump()}

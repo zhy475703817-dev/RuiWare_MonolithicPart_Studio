@@ -137,6 +137,37 @@ def test_stage_validation_reports_missing_prerequisites(tmp_path, monkeypatch) -
     assert payload["validation"]["checks"][0]["id"] == "workflow-prerequisites"
 
 
+def test_later_stage_rejects_stale_completed_geometry(tmp_path, monkeypatch) -> None:
+    repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "unused.db"))
+    monkeypatch.setattr(main, "repository", repository)
+    client = TestClient(main.app)
+
+    draft = TemplateDraft(
+        name="陈旧几何状态测试",
+        code="STALE-GEOMETRY-001",
+        description="用于验证后续阶段不会信任已经失效的几何完成状态。",
+        designIntent="草图被修改后，即使历史状态仍为完成，规则阶段也必须重新验证几何。",
+        owner="模板工程师",
+        manufacturingClassification={"reviewed": True},
+        geometryPrototypeId="prototype.plate",
+        featureRulesReviewed=True,
+        stageStatus={stage: "complete" for stage in ("templateInfo", "material", "baseSketch")},
+    )
+    saved = repository.save_draft(draft)
+    changed = saved.model_copy(deep=True)
+    changed.sketch.constraints = []
+    stale = repository.save_draft(changed, expected_revision=saved.revision, apply_invalidation=False)
+
+    response = client.post(f"/api/v1/template-drafts/{stale.id}/stages/features/complete")
+
+    assert response.status_code == 200
+    validation = response.json()["validation"]
+    prerequisite = next(item for item in validation["checks"] if item["id"] == "workflow-prerequisites")
+    assert prerequisite["passed"] is False
+    assert "几何" in prerequisite["message"]
+    assert response.json()["draft"]["stageStatus"]["features"] != "complete"
+
+
 @pytest.mark.parametrize(
     ("stage", "expected_missing"),
     [

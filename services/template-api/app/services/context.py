@@ -59,16 +59,38 @@ def build_stage_context(repository: Repository, draft: TemplateDraft) -> tuple[l
     return material_samples, latest, expected_hash
 
 
-def _with_workflow_prerequisites(stage: StageName, draft: TemplateDraft, validation: StageValidation) -> StageValidation:
+def _with_workflow_prerequisites(
+    repository: Repository,
+    stage: StageName,
+    draft: TemplateDraft,
+    validation: StageValidation,
+    material_samples: list[dict[str, Any]],
+    latest: CompileResult | None,
+    expected_hash: str | None,
+) -> StageValidation:
     index = STAGE_ORDER.index(stage)
     if index == 0:
         return validation
     required = STAGE_ORDER[:index]
-    missing = [
-        required_stage
-        for required_stage in required
-        if getattr(draft.stageStatus, required_stage) != "complete"
-    ]
+    missing: list[StageName] = []
+    for required_stage in required:
+        if getattr(draft.stageStatus, required_stage) != "complete":
+            missing.append(required_stage)
+            continue
+        # Geometry is the Agent-authored contract that later stages consume.
+        # Recheck it instead of trusting a historical stageStatus flag.
+        if required_stage != "baseSketch":
+            continue
+        prerequisite_validation = validate_stage(
+            required_stage,
+            draft,
+            code_unique=repository.code_is_unique(draft.code, draft.id),
+            material_samples=material_samples,
+            compile_result=latest,
+            expected_hash=expected_hash,
+        )
+        if not prerequisite_validation.complete:
+            missing.append(required_stage)
     check = StageCheck(
         id="workflow-prerequisites",
         label="前置阶段已完成",
@@ -102,4 +124,12 @@ def validate_stage_with_context(repository: Repository, stage: StageName, draft:
         compile_result=latest,
         expected_hash=expected_hash,
     )
-    return _with_workflow_prerequisites(stage, draft, validation)
+    return _with_workflow_prerequisites(
+        repository,
+        stage,
+        draft,
+        validation,
+        material_samples,
+        latest,
+        expected_hash,
+    )

@@ -12,7 +12,11 @@ import {
   nextAvailableParameterId,
   removeRuleDefaultParameters,
 } from "./ruleDefaultParameters";
-import { getRuleParameterGroups } from "./ruleParameterVisibility";
+import {
+  getRuleExpressionParameterIssues,
+  getRuleParameterGroups,
+} from "./ruleParameterVisibility";
+import { createRulePredeclaredParameter } from "./ruleParameterDeclaration";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 
@@ -56,42 +60,11 @@ export function RulesStage({
     pendingParameters,
     canCreateParameters,
   } = getRuleParameterGroups(draft);
+  const expressionParameterIssues = getRuleExpressionParameterIssues(draft);
   const [ruleParameterError, setRuleParameterError] = useState("");
   const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>(defaultNewRuleParameter);
   const setRules = (featureRules: FeatureRule[]) =>
     change({ ...draft, featureRules });
-  const createRuleParameter = (parameter: {
-    id: string;
-    label: string;
-    displayName: string;
-    valueType: "number" | "integer";
-    unit: string;
-    default: number;
-    minimum: number;
-    maximum: number;
-  }) => ({
-    id: parameter.id,
-    label: parameter.label,
-    displayName: parameter.displayName,
-    valueType: parameter.valueType,
-    unit: parameter.unit,
-    default: parameter.valueType === "integer" ? Math.trunc(parameter.default) : parameter.default,
-    minimum: parameter.valueType === "integer" ? Math.trunc(parameter.minimum) : parameter.minimum,
-    maximum: parameter.valueType === "integer" ? Math.trunc(parameter.maximum) : parameter.maximum,
-    allowedValues: [],
-    exposed: true,
-    source: "user" as const,
-    sourceDefinition: {
-      type: "userInput" as const,
-      dependencies: [],
-      lookupTable: {},
-      fallback: parameter.valueType === "integer" ? Math.trunc(parameter.default) : parameter.default,
-    },
-    scope: "partInstance" as const,
-    declaredInRuleStage: true,
-    contractReady: false,
-    description: "规则页预声明，进入契约页后补全来源、作用域与发布要求。",
-  });
   const resetNewRuleParameter = () => {
     setNewRuleParameter(defaultNewRuleParameter());
     setRuleParameterError("");
@@ -126,10 +99,9 @@ export function RulesStage({
       ...draft,
       parameterDefinitions: [
         ...draft.parameterDefinitions,
-        createRuleParameter({
+        createRulePredeclaredParameter({
           id,
           label: newRuleParameter.displayName.trim() || id,
-          displayName: newRuleParameter.displayName.trim() || id,
           valueType: newRuleParameter.valueType,
           unit: newRuleParameter.unit.trim() || "mm",
           default: newRuleParameter.default,
@@ -276,15 +248,20 @@ export function RulesStage({
         n === dimensionIndex ? { ...dimension, ...patch } : dimension,
       ),
     });
-  const addInstanceParameter = (ruleIndex: number, suffix: string, label: string, apply: (id: string) => Partial<FeatureRule>) => {
+  const addInstanceParameter = (
+    ruleIndex: number,
+    suffix: string,
+    label: string,
+    apply: (id: string) => Partial<FeatureRule>,
+    defaultValue = 100,
+  ) => {
     const id = nextAvailableParameterId(draft.parameterDefinitions, suffix);
-    const parameter = createRuleParameter({
+    const parameter = createRulePredeclaredParameter({
       id,
       label,
-      displayName: label,
       valueType: "number",
       unit: "mm",
-      default: 100,
+      default: defaultValue,
       minimum: 0,
       maximum: 10000,
     });
@@ -308,10 +285,9 @@ export function RulesStage({
         [...draft.parameterDefinitions, ...newParameters],
         id,
       );
-      newParameters.push(createRuleParameter({
+      newParameters.push(createRulePredeclaredParameter({
         id: parameterId,
         label,
-        displayName: label,
         valueType: "number",
         unit: "mm",
         default: defaultValue,
@@ -368,6 +344,17 @@ export function RulesStage({
         addRuleParameter={addRuleParameter}
         resetNewRuleParameter={resetNewRuleParameter}
       />
+      {expressionParameterIssues.length > 0 && (
+        <div className="parameter-contract-banner warning rule-expression-warning" role="status">
+          <strong>有规则表达式引用了未声明参数。</strong>
+          <span>
+            {expressionParameterIssues
+              .map((issue) => `${issue.ruleName}：${issue.identifiers.join("、")}`)
+              .join("；")}
+            。请先在规则页预声明，再到契约页补全来源与范围。
+          </span>
+        </div>
+      )}
       {draft.featureRules.length === 0 ? (
         <div className="empty-canvas">
           <GitBranch size={34} />
@@ -490,20 +477,28 @@ export function RulesStage({
                   </div>
                   {rule.placement.mode === "linearArray" || rule.placement.mode === "symmetric" ? (
                     <div className="placement-value-row">
-                      {rule.placement.mode === "linearArray" && <Field label="首项距起始端" hint="从所选语义面的局部 U/V 起始边界量取。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>}
-                      <Field label={rule.placement.mode === "symmetric" ? "相邻间距表达式" : "间距表达式"} hint="填参数 ID（如 holePitch）即可在实例化时输入；也可在参数页把该参数设为公式派生。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.pitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, pitchExpression: e.target.value } })} /></code></Field>
-                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />创建可填写间距参数</button>
+                      {rule.placement.mode === "linearArray" && <>
+                        <Field label="首项距起始端" hint="从所选语义面的局部 U/V 起始边界量取；用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>
+                        <button className="text-btn compact" onClick={() => addInstanceParameter(i, "startMargin", `${rule.name}首项距`, (id) => ({ placement: { ...rule.placement, startMarginExpression: id } }), 0)}><Plus size={13} />预声明首项距</button>
+                      </>}
+                      <Field label={rule.placement.mode === "symmetric" ? "相邻间距表达式" : "间距表达式"} hint="填参数 ID（如 holePitch）即可在实例化时输入；用户自定义参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.pitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, pitchExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />预声明间距</button>
                     </div>
                   ) : rule.placement.mode === "equalSpan" ? (
                     <div className="form-grid two placement-margins">
-                      <Field label="首孔距起始端" hint="从语义面所选 U/V 轴的起始边界开始量取。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>
-                      <Field label="终孔距终止端" hint="系统以“语义面跨度 − 首端距 − 终端距”自动均布。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.endMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, endMarginExpression: e.target.value } })} /></code></Field>
+                      <Field label="首孔距起始端" hint="从语义面所选 U/V 轴的起始边界开始量取；用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "startMargin", `${rule.name}首项距`, (id) => ({ placement: { ...rule.placement, startMarginExpression: id } }), 0)}><Plus size={13} />预声明首项距</button>
+                      <Field label="终孔距终止端" hint="系统以“语义面跨度 − 首端距 − 终端距”自动均布；用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.endMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, endMarginExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "endMargin", `${rule.name}终项距`, (id) => ({ placement: { ...rule.placement, endMarginExpression: id } }), 0)}><Plus size={13} />预声明终项距</button>
                     </div>
                   ) : rule.placement.mode === "maxPitch" ? (
                     <div className="form-grid three placement-margins">
-                      <Field label="首孔距起始端"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>
-                      <Field label="终孔距终止端"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.endMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, endMarginExpression: e.target.value } })} /></code></Field>
-                      <Field label="最大间距表达式"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.maximumPitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, maximumPitchExpression: e.target.value } })} /></code></Field>
+                      <Field label="首孔距起始端" hint="用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "startMargin", `${rule.name}首项距`, (id) => ({ placement: { ...rule.placement, startMarginExpression: id } }), 0)}><Plus size={13} />预声明首项距</button>
+                      <Field label="终孔距终止端" hint="用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.endMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, endMarginExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "endMargin", `${rule.name}终项距`, (id) => ({ placement: { ...rule.placement, endMarginExpression: id } }), 0)}><Plus size={13} />预声明终项距</button>
+                      <Field label="最大间距表达式" hint="用户参数需先在规则页预声明。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.maximumPitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, maximumPitchExpression: e.target.value } })} /></code></Field>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "maximumPitch", `${rule.name}最大间距`, (id) => ({ placement: { ...rule.placement, maximumPitchExpression: id } }), 300)}><Plus size={13} />预声明最大间距</button>
                     </div>
                   ) : <small className="placement-note">单项使用特征局部 U/V；对称阵列以该坐标作为中心。线性阵列的首项从语义面起始边界加首端距开始。</small>}
                 </div>
@@ -523,7 +518,7 @@ export function RulesStage({
                     ))}
                     <div className="contour-actions">
                       <button className="text-btn" onClick={() => edit(i, { profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "新尺寸", parameterId: draft.parameterDefinitions.find((parameter) => parameter.valueType === "number" || parameter.valueType === "integer")?.id || "length" }] })}><Plus size={13} />绑定已有参数</button>
-                      <button className="text-btn" onClick={() => addInstanceParameter(i, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />创建可填写尺寸参数</button>
+                      <button className="text-btn" onClick={() => addInstanceParameter(i, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />预声明尺寸参数</button>
                     </div>
                  </div>
                 )}

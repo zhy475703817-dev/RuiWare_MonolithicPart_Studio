@@ -45,6 +45,31 @@ def test_workspace_current_draft_is_persisted_and_does_not_fallback_to_latest(tm
     assert detailed.json()["stageValidations"]["templateInfo"]["checks"]
 
 
+def test_gui_and_agent_share_current_draft_by_workspace_id(tmp_path, monkeypatch):
+    store = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "materials.db"))
+    monkeypatch.setattr(main, "repository", store)
+    gui = TestClient(main.app)
+    draft = gui.post("/api/v1/template-drafts/blank", json={"name": "MCP测试用"}).json()
+
+    selected = gui.put(
+        "/api/v1/workspace/current-draft",
+        json={"draftId": draft["id"]},
+        headers={"X-RuiWare-Workspace": "ruiware-main"},
+    )
+    agent = TestClient(main.app).get(
+        "/api/v1/workspace/current-draft/engineering-status",
+        headers={
+            "Authorization": "Bearer local-agent-token",
+            "X-RuiWare-Workspace": "ruiware-main",
+        },
+    )
+
+    assert selected.status_code == 200
+    assert agent.status_code == 200
+    assert agent.json()["draftId"] == draft["id"]
+    assert agent.json()["draft"]["name"] == "MCP测试用"
+
+
 def test_current_draft_mcp_tool_reads_shared_selection_only():
     class CurrentDraftClient:
         calls = []

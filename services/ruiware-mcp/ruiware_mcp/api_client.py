@@ -49,11 +49,14 @@ class RuiWareApiClient:
 
     @staticmethod
     def _context_headers(payload: dict[str, Any] | None, headers: dict[str, str] | None) -> dict[str, str]:
-        protected = {"x-ruiware-actor", "x-ruiware-source", "x-ruiware-base-revision", "x-ruiware-confirmed", "x-ruiware-session"}
+        protected = {"x-ruiware-actor", "x-ruiware-source", "x-ruiware-base-revision", "x-ruiware-confirmed", "x-ruiware-session", "x-ruiware-workspace"}
         result = {key: value for key, value in (headers or {}).items() if key.lower() not in protected}
         result["X-RuiWare-Actor"] = "agent"
         result["X-RuiWare-Source"] = "mcp"
         result["Authorization"] = f"Bearer {os.getenv('RUIWARE_AGENT_TOKEN', 'local-agent-token')}"
+        result["X-RuiWare-Workspace"] = os.getenv("RUIWARE_WORKSPACE_ID", "ruiware-main")
+        if os.getenv("RUIWARE_SESSION_ID"):
+            result["X-RuiWare-Session"] = os.environ["RUIWARE_SESSION_ID"]
         if not isinstance(payload, dict):
             return result
         if "baseRevision" in payload:
@@ -62,8 +65,6 @@ class RuiWareApiClient:
             result["X-RuiWare-Confirmed"] = str(payload["confirmed"]).lower()
         if payload.get("sessionId"):
             result["X-RuiWare-Session"] = str(payload["sessionId"])
-        elif os.getenv("RUIWARE_SESSION_ID"):
-            result["X-RuiWare-Session"] = os.environ["RUIWARE_SESSION_ID"]
         return result
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:

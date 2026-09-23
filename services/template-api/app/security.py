@@ -57,7 +57,7 @@ def _valid_session(value: str | None) -> str | None:
     return session_id
 
 
-def _agent_workspace_id(value: str | None) -> str | None:
+def _workspace_id(value: str | None) -> str | None:
     if value and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", value):
         return value
     return None
@@ -74,7 +74,7 @@ def authenticate(request: Request) -> tuple[Principal, bool]:
     if authorization:
         if authorization != f"Bearer {AGENT_TOKEN}":
             raise HTTPException(status_code=401, detail={"code": "AUTHENTICATION_REQUIRED"})
-        session_id = _agent_workspace_id(request.headers.get("X-RuiWare-Session"))
+        session_id = _workspace_id(request.headers.get("X-RuiWare-Session"))
         session_id = session_id or f"agent-{hashlib.sha256(AGENT_TOKEN.encode()).hexdigest()[:16]}"
         return Principal("agent", "mcp", session_id, AGENT_OWNER_ID), False
     if actor_header == "agent" or request.headers.get("X-RuiWare-Source") == "mcp":
@@ -89,7 +89,8 @@ def bind_request(request: Request) -> tuple[Principal, bool, object]:
     principal, created = authenticate(request)
     request.state.principal = principal
     principal_token = _current_principal.set(principal)
-    workspace_token = _current_workspace.set(principal.session_id)
+    workspace_id = _workspace_id(request.headers.get("X-RuiWare-Workspace")) or principal.session_id
+    workspace_token = _current_workspace.set(workspace_id)
     token = _current_owner.set(principal.owner_id)
     return principal, created, (token, workspace_token, principal_token)
 

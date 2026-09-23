@@ -1,0 +1,3597 @@
+{
+  "schemaVersion": "3.0",
+  "templateKind": "monolithicPart",
+  "id": "draft-d92ef690b0a4",
+  "code": "RW-TPL-0004-COPY",
+  "name": "异形开口薄壁冷弯型材-全参数化抽象模板",
+  "description": "用于生成具有异形开口截面、薄壁结构、可参数化孔阵列的冷弯型材。截面尺寸、壁厚、长度、孔特征数量、孔径、孔距和孔位置均由参数驱动。",
+  "designIntent": "固定12段异形开口薄壁截面拓扑，使用稳定参数ID驱动尺寸、角度、材料厚度、拉伸长度与主立壁孔阵列。",
+  "manufacturingClassification": {
+    "originId": "inHouse",
+    "primaryProcessId": "coldRollForming",
+    "secondaryProcessIds": [
+      "surfaceTreatment",
+      "deburring",
+      "cutting"
+    ],
+    "reviewed": true
+  },
+  "geometryPrototypeId": "prototype.openThinWallProfile",
+  "tags": [
+    "立柱"
+  ],
+  "owner": "YY",
+  "organization": "YYY",
+  "unitSystem": "mm-kg-s",
+  "coordinateSystem": "right-handed-z-up",
+  "lifecycleStatus": "draft",
+  "stageStatus": {
+    "templateInfo": "complete",
+    "material": "complete",
+    "baseSketch": "in_progress",
+    "features": "not_started",
+    "variants": "not_started",
+    "review": "not_started",
+    "admission": "not_started"
+  },
+  "attachments": [
+    {
+      "id": "asset-cc7328363484",
+      "filename": "各面名称.png",
+      "mediaType": "image/png",
+      "kind": "referenceImage",
+      "description": "该图片用于说明异形开口薄壁截面的形状和面分布。\n图片没有提供完整尺寸，本次尺寸采用测试假设，不作为生产图纸。",
+      "size": 17511,
+      "sha256": "6566fd1397b0bfdd8f049c99b8d1ff2a114cc9408136949fbdc06e6135c4135d",
+      "url": "/uploads/6566fd1397b0bfdd8f049c99b8d1ff2a114cc9408136949fbdc06e6135c4135d/各面名称.png",
+      "createdAt": "2026-09-16T15:42:56.063844+08:00"
+    }
+  ],
+  "materialRequirements": [
+    {
+      "id": "material.main",
+      "selectionMode": "category",
+      "supplyForm": "openProfile",
+      "familyTags": [],
+      "allowedGrades": [],
+      "standards": [],
+      "surfaces": [],
+      "thickness": {
+        "parameterId": "thickness",
+        "allowedValues": [
+          1.0,
+          1.5,
+          2.0,
+          2.5
+        ],
+        "minimum": 1.0,
+        "maximum": 2.5
+      },
+      "requiredProperties": {},
+      "allowInstanceSubstitution": true,
+      "specificBindingId": null,
+      "reviewed": true
+    }
+  ],
+  "materialValidationSamples": [
+    {
+      "id": "material.minimum",
+      "role": "minimum",
+      "name": "最小边界",
+      "bindingId": "mat-c0f5fb8a055f",
+      "bindingMode": "copy",
+      "materialCode": "C型钢001",
+      "materialName": "6000*30*15*1.0C型钢",
+      "materialThickness": 1.0,
+      "variantId": "minimum",
+      "requiredForAdmission": false,
+      "reviewed": true
+    },
+    {
+      "id": "material.nominal",
+      "role": "nominal",
+      "name": "标称样例",
+      "bindingId": "mat-0c9ade9367e6",
+      "bindingMode": "copy",
+      "materialCode": "C型钢009",
+      "materialName": "6000*75*40*1.5C型钢",
+      "materialThickness": 1.5,
+      "variantId": "nominal",
+      "requiredForAdmission": true,
+      "reviewed": true
+    },
+    {
+      "id": "material.maximum",
+      "role": "maximum",
+      "name": "最大边界",
+      "bindingId": "mat-9f261184eb24",
+      "bindingMode": "copy",
+      "materialCode": "Ω钢012",
+      "materialName": "6000*120*100*2.5Ω钢",
+      "materialThickness": 2.5,
+      "variantId": "maximum",
+      "requiredForAdmission": false,
+      "reviewed": true
+    },
+    {
+      "id": "material.special",
+      "role": "special",
+      "name": "特殊工况",
+      "bindingId": "mat-c849268423c1",
+      "bindingMode": "copy",
+      "materialCode": "Ω钢009",
+      "materialName": "6000*90*70*2.0Ω钢",
+      "materialThickness": 2.0,
+      "variantId": "nominal",
+      "requiredForAdmission": false,
+      "reviewed": true
+    }
+  ],
+  "blank": {
+    "form": "strip",
+    "preparationMode": "sameAsSupply",
+    "preparationProcesses": [
+      "none"
+    ],
+    "manufacturingRoute": "coldRollForming",
+    "lengthExpression": "length",
+    "widthExpression": "sectionWidth",
+    "thicknessExpression": "thickness",
+    "lengthAllowance": 0.0,
+    "widthAllowance": 0.0,
+    "grainDirection": "longitudinal"
+  },
+  "sketch": {
+    "model": "semanticProfile",
+    "acquisitionMethod": "manual",
+    "plane": "XY",
+    "profileMode": "centerlineThinWall",
+    "drivingParameters": [
+      "topLipLength",
+      "topRiseTransitionLength",
+      "topHorizontalLength",
+      "topCornerTransitionLength",
+      "upperVerticalLength",
+      "middleTransitionLength",
+      "lowerVerticalLength",
+      "lowerCornerTransitionLength",
+      "bottomRiseLength",
+      "bottomHorizontalLength",
+      "bottomDropTransitionLength",
+      "bottomLipLength",
+      "topRiseAngle",
+      "topCornerAngle",
+      "middleTransitionAngle",
+      "lowerCornerAngle",
+      "bottomDropAngle",
+      "thickness"
+    ],
+    "entities": [
+      {
+        "id": "polyline.edge.1.mu6q1qw2",
+        "role": "section.edge.01",
+        "geometryType": "line",
+        "parameterRefs": [
+          "topLipLength"
+        ],
+        "construction": true,
+        "start": [
+          -180.59,
+          100.92
+        ],
+        "end": [
+          -120.11,
+          100.92
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.2.mu6q2hh1",
+        "role": "section.edge.02",
+        "geometryType": "line",
+        "parameterRefs": [
+          "topRiseTransitionLength"
+        ],
+        "construction": true,
+        "start": [
+          -120.11000000000001,
+          100.91999999999999
+        ],
+        "end": [
+          -79.16000000000412,
+          162.1300000000027
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.3.mu6q2r2m",
+        "role": "section.edge.03",
+        "geometryType": "line",
+        "parameterRefs": [
+          "topHorizontalLength"
+        ],
+        "construction": true,
+        "start": [
+          -79.16000000000413,
+          162.1300000000027
+        ],
+        "end": [
+          120.53999999999584,
+          162.13000000000267
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.4.mu6q34t2",
+        "role": "section.edge.04",
+        "geometryType": "line",
+        "parameterRefs": [
+          "topCornerTransitionLength"
+        ],
+        "construction": true,
+        "start": [
+          120.53999999999584,
+          162.13000000000267
+        ],
+        "end": [
+          140.04999999997193,
+          140.3199999999813
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.5.mu6q3jtu",
+        "role": "section.edge.05",
+        "geometryType": "line",
+        "parameterRefs": [
+          "upperVerticalLength"
+        ],
+        "construction": true,
+        "start": [
+          140.04999999997193,
+          140.31999999998126
+        ],
+        "end": [
+          140.0499999999719,
+          -20.360000000018736
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.6.mu6q3vmg",
+        "role": "section.edge.06",
+        "geometryType": "line",
+        "parameterRefs": [
+          "middleTransitionLength"
+        ],
+        "construction": true,
+        "start": [
+          140.0499999999719,
+          -20.360000000018744
+        ],
+        "end": [
+          120.53999999997004,
+          -39.8700000000169
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.7.mu6q4kle",
+        "role": "section.edge.07",
+        "geometryType": "line",
+        "parameterRefs": [
+          "lowerVerticalLength"
+        ],
+        "construction": true,
+        "start": [
+          120.53999999997004,
+          -39.87000000001691
+        ],
+        "end": [
+          120.53999999997002,
+          -160.3800000000169
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.8.mu6q4z20",
+        "role": "section.edge.08",
+        "geometryType": "line",
+        "parameterRefs": [
+          "lowerCornerTransitionLength"
+        ],
+        "construction": true,
+        "start": [
+          120.53999999997002,
+          -160.3800000000169
+        ],
+        "end": [
+          140.049999999966,
+          -179.89000000002093
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.9.mu6q5hzp",
+        "role": "section.edge.09",
+        "geometryType": "line",
+        "parameterRefs": [
+          "bottomRiseLength"
+        ],
+        "construction": true,
+        "start": [
+          140.049999999966,
+          -179.89000000002093
+        ],
+        "end": [
+          140.04999999996596,
+          -200.54000000002094
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.10.mu6q5z7l",
+        "role": "section.edge.10",
+        "geometryType": "line",
+        "parameterRefs": [
+          "bottomHorizontalLength"
+        ],
+        "construction": true,
+        "start": [
+          140.04999999996596,
+          -200.54000000002094
+        ],
+        "end": [
+          -80.31000000003405,
+          -200.54000000002094
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.11.mu6q6kmd",
+        "role": "section.edge.11",
+        "geometryType": "line",
+        "parameterRefs": [
+          "bottomDropTransitionLength"
+        ],
+        "construction": true,
+        "start": [
+          -80.31000000003405,
+          -200.54000000002097
+        ],
+        "end": [
+          -120.48000000004399,
+          -140.86000000002767
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "polyline.edge.1.mu6q9ro2",
+        "role": "section.edge.12",
+        "geometryType": "line",
+        "parameterRefs": [
+          "bottomLipLength"
+        ],
+        "construction": true,
+        "start": [
+          -120.48000000004399,
+          -140.86000000002767
+        ],
+        "end": [
+          -176.250000000044,
+          -140.86000000002767
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.1",
+        "role": "section.thinwall.side1.1",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -180.59,
+          101.66999891768309
+        ],
+        "end": [
+          -120.50999676416141,
+          101.66999891751388
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.2",
+        "role": "section.thinwall.side1.2",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -120.50999676416134,
+          101.66999891751381
+        ],
+        "end": [
+          -79.56000323583818,
+          162.8799892424245
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.3",
+        "role": "section.thinwall.side1.3",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -79.56000323583811,
+          162.87998924242422
+        ],
+        "end": [
+          120.87497350669058,
+          162.87998922304888
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.4",
+        "role": "section.thinwall.side1.4",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          120.87497350669045,
+          162.8799892230485
+        ],
+        "end": [
+          140.80001098295037,
+          140.60602369934733
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.5",
+        "role": "section.thinwall.side1.5",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          140.80001098295,
+          140.60602369934722
+        ],
+        "end": [
+          140.8000109710745,
+          -20.669995460729126
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.6",
+        "role": "section.thinwall.side1.6",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          140.8000109710742,
+          -20.66999546072905
+        ],
+        "end": [
+          121.2900018923082,
+          -40.18000453927166
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.7",
+        "role": "section.thinwall.side1.7",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          121.29000189230807,
+          -40.180004539271586
+        ],
+        "end": [
+          121.29000189070618,
+          -160.07000075625774
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.8",
+        "role": "section.thinwall.side1.8",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          121.29000189070611,
+          -160.07000075625777
+        ],
+        "end": [
+          140.80000037813278,
+          -179.57999924374158
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.9",
+        "role": "section.thinwall.side1.9",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          140.80000037813275,
+          -179.57999924374158
+        ],
+        "end": [
+          140.80000037812508,
+          -201.28999999999814
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.10",
+        "role": "section.thinwall.side1.10",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          140.80000037812508,
+          -201.28999999999814
+        ],
+        "end": [
+          -80.70899999999419,
+          -201.28999999999792
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.11",
+        "role": "section.thinwall.side1.11",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -80.70899999999419,
+          -201.28999999999792
+        ],
+        "end": [
+          -120.87900000000582,
+          -141.61000000000197
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.12",
+        "role": "section.thinwall.side1.12",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -120.87900000000582,
+          -141.61000000000197
+        ],
+        "end": [
+          -176.25,
+          -141.61000000000197
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.13",
+        "role": "section.thinwall.cap.end",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -176.25,
+          -141.61000000000197
+        ],
+        "end": [
+          -176.25,
+          -140.11000000000197
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.14",
+        "role": "section.thinwall.side2.12",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -176.25,
+          -140.11000000000197
+        ],
+        "end": [
+          -120.08100000000582,
+          -140.11000000000197
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.15",
+        "role": "section.thinwall.side2.11",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -120.08100000000582,
+          -140.11000000000197
+        ],
+        "end": [
+          -79.91099999999419,
+          -199.78999999999792
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.16",
+        "role": "section.thinwall.side2.10",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -79.91099999999419,
+          -199.78999999999792
+        ],
+        "end": [
+          139.29999962186562,
+          -199.78999999999814
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.17",
+        "role": "section.thinwall.side2.9",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          139.29999962186562,
+          -199.78999999999814
+        ],
+        "end": [
+          139.29999962185946,
+          -180.20000075627556
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.18",
+        "role": "section.thinwall.side2.8",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          139.29999962185943,
+          -180.20000075627559
+        ],
+        "end": [
+          119.78999810926815,
+          -160.68999924372508
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.19",
+        "role": "section.thinwall.side2.7",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          119.78999810926808,
+          -160.68999924372508
+        ],
+        "end": [
+          119.78999810764238,
+          -39.55999546063593
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.20",
+        "role": "section.thinwall.side2.6",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          119.78999810764225,
+          -39.55999546063586
+        ],
+        "end": [
+          139.29998902870187,
+          -20.05000453936345
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.21",
+        "role": "section.thinwall.side2.5",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          139.2999890287016,
+          -20.05000453936338
+        ],
+        "end": [
+          139.29998901720109,
+          140.03397630034064
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.22",
+        "role": "section.thinwall.side2.4",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          139.29998901720074,
+          140.03397630034053
+        ],
+        "end": [
+          120.20502649347547,
+          161.3800107767684
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.23",
+        "role": "section.thinwall.side2.3",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          120.20502649347534,
+          161.38001077676805
+        ],
+        "end": [
+          -78.75999676403706,
+          161.3800107579868
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.24",
+        "role": "section.thinwall.side2.2",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -78.75999676403698,
+          161.38001075798653
+        ],
+        "end": [
+          -119.7100032359635,
+          100.17000108252913
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.25",
+        "role": "section.thinwall.side2.1",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -119.71000323596344,
+          100.17000108252907
+        ],
+        "end": [
+          -180.59,
+          100.17000108235749
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "thinwall.offset.r16.26",
+        "role": "section.thinwall.cap.start",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -180.59,
+          100.17000108235747
+        ],
+        "end": [
+          -180.59,
+          101.66999891768312
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      }
+    ],
+    "constraints": [
+      {
+        "id": "constraint.polyline.1.1.mu6q1qw2",
+        "label": "自动推断 · 水平",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.2.1.mu6q2hh1",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.2.mu6q2hh1",
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.3.1.mu6q2r2n",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.3.mu6q2r2m",
+          "polyline.edge.2.mu6q2hh1"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.3.2.mu6q2r2n",
+        "label": "自动推断 · 水平",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "polyline.edge.3.mu6q2r2m"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.4.1.mu6q34t2",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.4.mu6q34t2",
+          "polyline.edge.3.mu6q2r2m"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.5.1.mu6q3jtu",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.5.mu6q3jtu",
+          "polyline.edge.4.mu6q34t2"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.5.2.mu6q3jtu",
+        "label": "自动推断 · 竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "polyline.edge.5.mu6q3jtu"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.6.1.mu6q3vmg",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.6.mu6q3vmg",
+          "polyline.edge.5.mu6q3jtu"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.7.1.mu6q4kle",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.7.mu6q4kle",
+          "polyline.edge.6.mu6q3vmg"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.7.2.mu6q4kle",
+        "label": "自动推断 · 竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "polyline.edge.7.mu6q4kle"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.8.1.mu6q4z20",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.8.mu6q4z20",
+          "polyline.edge.7.mu6q4kle"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.9.1.mu6q5hzp",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.9.mu6q5hzp",
+          "polyline.edge.8.mu6q4z20"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.9.2.mu6q5hzp",
+        "label": "自动推断 · 竖直",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "polyline.edge.9.mu6q5hzp"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.10.1.mu6q5z7l",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.10.mu6q5z7l",
+          "polyline.edge.9.mu6q5hzp"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.10.2.mu6q5z7l",
+        "label": "自动推断 · 水平",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "polyline.edge.10.mu6q5z7l"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.11.1.mu6q6kmd",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.11.mu6q6kmd",
+          "polyline.edge.10.mu6q5z7l"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.1.1.mu6q9ro2",
+        "label": "自动推断 · 水平",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "polyline.edge.1.mu6q9ro2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.polyline.12.1.mu6q9ro2",
+        "label": "重合 · section.edge起点 ↔ section.edge终点",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "polyline.edge.1.mu6q9ro2",
+          "polyline.edge.11.mu6q6kmd"
+        ],
+        "endpointRefs": [
+          "start",
+          "end"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.1.mu6q1qw2",
+        "label": "轮廓段长度 · polyline.edge.1.mu6q1qw2",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topLipLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.2.mu6q2hh1",
+        "label": "轮廓段长度 · polyline.edge.2.mu6q2hh1",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.2.mu6q2hh1"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topRiseTransitionLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.3.mu6q2r2m",
+        "label": "轮廓段长度 · polyline.edge.3.mu6q2r2m",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.3.mu6q2r2m"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topHorizontalLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.4.mu6q34t2",
+        "label": "轮廓段长度 · polyline.edge.4.mu6q34t2",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.4.mu6q34t2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topCornerTransitionLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.5.mu6q3jtu",
+        "label": "轮廓段长度 · polyline.edge.5.mu6q3jtu",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.5.mu6q3jtu"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "upperVerticalLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.6.mu6q3vmg",
+        "label": "轮廓段长度 · polyline.edge.6.mu6q3vmg",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.6.mu6q3vmg"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "middleTransitionLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.7.mu6q4kle",
+        "label": "轮廓段长度 · polyline.edge.7.mu6q4kle",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.7.mu6q4kle"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "lowerVerticalLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.8.mu6q4z20",
+        "label": "轮廓段长度 · polyline.edge.8.mu6q4z20",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.8.mu6q4z20"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "lowerCornerTransitionLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.9.mu6q5hzp",
+        "label": "轮廓段长度 · polyline.edge.9.mu6q5hzp",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.9.mu6q5hzp"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "bottomRiseLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.10.mu6q5z7l",
+        "label": "轮廓段长度 · polyline.edge.10.mu6q5z7l",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.10.mu6q5z7l"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "bottomHorizontalLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.11.mu6q6kmd",
+        "label": "轮廓段长度 · polyline.edge.11.mu6q6kmd",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.11.mu6q6kmd"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "bottomDropTransitionLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.len.polyline.edge.1.mu6q9ro2",
+        "label": "轮廓段长度 · polyline.edge.1.mu6q9ro2",
+        "constraintType": "distance",
+        "entityRefs": [
+          "polyline.edge.1.mu6q9ro2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "bottomLipLength",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.angle.polyline.edge.2.mu6q2hh1",
+        "label": "轮廓段角度 · polyline.edge.2.mu6q2hh1",
+        "constraintType": "angle",
+        "entityRefs": [
+          "polyline.edge.2.mu6q2hh1"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topRiseAngle",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.angle.polyline.edge.4.mu6q34t2",
+        "label": "轮廓段角度 · polyline.edge.4.mu6q34t2",
+        "constraintType": "angle",
+        "entityRefs": [
+          "polyline.edge.4.mu6q34t2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "topCornerAngle",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.angle.polyline.edge.6.mu6q3vmg",
+        "label": "轮廓段角度 · polyline.edge.6.mu6q3vmg",
+        "constraintType": "angle",
+        "entityRefs": [
+          "polyline.edge.6.mu6q3vmg"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "middleTransitionAngle",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.angle.polyline.edge.8.mu6q4z20",
+        "label": "轮廓段角度 · polyline.edge.8.mu6q4z20",
+        "constraintType": "angle",
+        "entityRefs": [
+          "polyline.edge.8.mu6q4z20"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "lowerCornerAngle",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "dim.angle.polyline.edge.11.mu6q6kmd",
+        "label": "轮廓段角度 · polyline.edge.11.mu6q6kmd",
+        "constraintType": "angle",
+        "entityRefs": [
+          "polyline.edge.11.mu6q6kmd"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": "bottomDropAngle",
+        "value": null,
+        "driverMode": "parameter",
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.profile.anchor",
+        "label": "轮廓基准定位",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.1",
+        "label": "薄壁首尾相连 1",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.1",
+          "thinwall.offset.r16.2"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.2",
+        "label": "薄壁首尾相连 2",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.2",
+          "thinwall.offset.r16.3"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.3",
+        "label": "薄壁首尾相连 3",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.3",
+          "thinwall.offset.r16.4"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.4",
+        "label": "薄壁首尾相连 4",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.4",
+          "thinwall.offset.r16.5"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.5",
+        "label": "薄壁首尾相连 5",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.5",
+          "thinwall.offset.r16.6"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.6",
+        "label": "薄壁首尾相连 6",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.6",
+          "thinwall.offset.r16.7"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.7",
+        "label": "薄壁首尾相连 7",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.7",
+          "thinwall.offset.r16.8"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.8",
+        "label": "薄壁首尾相连 8",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.8",
+          "thinwall.offset.r16.9"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.9",
+        "label": "薄壁首尾相连 9",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.9",
+          "thinwall.offset.r16.10"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.10",
+        "label": "薄壁首尾相连 10",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.10",
+          "thinwall.offset.r16.11"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.11",
+        "label": "薄壁首尾相连 11",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.11",
+          "thinwall.offset.r16.12"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.12",
+        "label": "薄壁首尾相连 12",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.12",
+          "thinwall.offset.r16.13"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.13",
+        "label": "薄壁首尾相连 13",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.13",
+          "thinwall.offset.r16.14"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.14",
+        "label": "薄壁首尾相连 14",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.14",
+          "thinwall.offset.r16.15"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.15",
+        "label": "薄壁首尾相连 15",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.15",
+          "thinwall.offset.r16.16"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.16",
+        "label": "薄壁首尾相连 16",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.16",
+          "thinwall.offset.r16.17"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.17",
+        "label": "薄壁首尾相连 17",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.17",
+          "thinwall.offset.r16.18"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.18",
+        "label": "薄壁首尾相连 18",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.18",
+          "thinwall.offset.r16.19"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.19",
+        "label": "薄壁首尾相连 19",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.19",
+          "thinwall.offset.r16.20"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.20",
+        "label": "薄壁首尾相连 20",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.20",
+          "thinwall.offset.r16.21"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.21",
+        "label": "薄壁首尾相连 21",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.21",
+          "thinwall.offset.r16.22"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.22",
+        "label": "薄壁首尾相连 22",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.22",
+          "thinwall.offset.r16.23"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.23",
+        "label": "薄壁首尾相连 23",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.23",
+          "thinwall.offset.r16.24"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.24",
+        "label": "薄壁首尾相连 24",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.24",
+          "thinwall.offset.r16.25"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.25",
+        "label": "薄壁首尾相连 25",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.25",
+          "thinwall.offset.r16.26"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.26",
+        "label": "薄壁首尾相连 26",
+        "constraintType": "coincident",
+        "entityRefs": [
+          "thinwall.offset.r16.26",
+          "thinwall.offset.r16.1"
+        ],
+        "endpointRefs": [
+          "end",
+          "start"
+        ],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.1",
+        "label": "薄壁平行 侧1-1",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.1",
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.1",
+        "label": "薄壁平行 侧2-1",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.25",
+          "polyline.edge.1.mu6q1qw2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.2",
+        "label": "薄壁平行 侧1-2",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.2",
+          "polyline.edge.2.mu6q2hh1"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.2",
+        "label": "薄壁平行 侧2-2",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.24",
+          "polyline.edge.2.mu6q2hh1"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.3",
+        "label": "薄壁平行 侧1-3",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.3",
+          "polyline.edge.3.mu6q2r2m"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.3",
+        "label": "薄壁平行 侧2-3",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.23",
+          "polyline.edge.3.mu6q2r2m"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.4",
+        "label": "薄壁平行 侧1-4",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.4",
+          "polyline.edge.4.mu6q34t2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.4",
+        "label": "薄壁平行 侧2-4",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.22",
+          "polyline.edge.4.mu6q34t2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.5",
+        "label": "薄壁平行 侧1-5",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.5",
+          "polyline.edge.5.mu6q3jtu"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.5",
+        "label": "薄壁平行 侧2-5",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.21",
+          "polyline.edge.5.mu6q3jtu"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.6",
+        "label": "薄壁平行 侧1-6",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.6",
+          "polyline.edge.6.mu6q3vmg"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.6",
+        "label": "薄壁平行 侧2-6",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.20",
+          "polyline.edge.6.mu6q3vmg"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.7",
+        "label": "薄壁平行 侧1-7",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.7",
+          "polyline.edge.7.mu6q4kle"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.7",
+        "label": "薄壁平行 侧2-7",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.19",
+          "polyline.edge.7.mu6q4kle"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.8",
+        "label": "薄壁平行 侧1-8",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.8",
+          "polyline.edge.8.mu6q4z20"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.8",
+        "label": "薄壁平行 侧2-8",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.18",
+          "polyline.edge.8.mu6q4z20"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.9",
+        "label": "薄壁平行 侧1-9",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.9",
+          "polyline.edge.9.mu6q5hzp"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.9",
+        "label": "薄壁平行 侧2-9",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.17",
+          "polyline.edge.9.mu6q5hzp"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.10",
+        "label": "薄壁平行 侧1-10",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.10",
+          "polyline.edge.10.mu6q5z7l"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.10",
+        "label": "薄壁平行 侧2-10",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.16",
+          "polyline.edge.10.mu6q5z7l"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.11",
+        "label": "薄壁平行 侧1-11",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.11",
+          "polyline.edge.11.mu6q6kmd"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.11",
+        "label": "薄壁平行 侧2-11",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.15",
+          "polyline.edge.11.mu6q6kmd"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p1.12",
+        "label": "薄壁平行 侧1-12",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.12",
+          "polyline.edge.1.mu6q9ro2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.thinwall.r16.p2.12",
+        "label": "薄壁平行 侧2-12",
+        "constraintType": "parallel",
+        "entityRefs": [
+          "thinwall.offset.r16.14",
+          "polyline.edge.1.mu6q9ro2"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      }
+    ],
+    "regions": [
+      {
+        "id": "section.region.thinwall.r16",
+        "boundaryRefs": [
+          "thinwall.offset.r16.1",
+          "thinwall.offset.r16.2",
+          "thinwall.offset.r16.3",
+          "thinwall.offset.r16.4",
+          "thinwall.offset.r16.5",
+          "thinwall.offset.r16.6",
+          "thinwall.offset.r16.7",
+          "thinwall.offset.r16.8",
+          "thinwall.offset.r16.9",
+          "thinwall.offset.r16.10",
+          "thinwall.offset.r16.11",
+          "thinwall.offset.r16.12",
+          "thinwall.offset.r16.13",
+          "thinwall.offset.r16.14",
+          "thinwall.offset.r16.15",
+          "thinwall.offset.r16.16",
+          "thinwall.offset.r16.17",
+          "thinwall.offset.r16.18",
+          "thinwall.offset.r16.19",
+          "thinwall.offset.r16.20",
+          "thinwall.offset.r16.21",
+          "thinwall.offset.r16.22",
+          "thinwall.offset.r16.23",
+          "thinwall.offset.r16.24",
+          "thinwall.offset.r16.25",
+          "thinwall.offset.r16.26"
+        ],
+        "closed": true,
+        "role": "section.materialRegion",
+        "operation": "add"
+      }
+    ],
+    "constraintsReviewed": false,
+    "sourceAttachmentId": null,
+    "sourceProfileId": null,
+    "sourceHash": null,
+    "importUnit": null,
+    "importScale": null,
+    "conversionReviewed": false
+  },
+  "sweepPath": null,
+  "parameterDefinitions": [
+    {
+      "id": "length",
+      "label": "零件长度",
+      "displayName": "零件长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 1000.0,
+      "minimum": 100.0,
+      "maximum": 6000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "sectionWidth",
+      "label": "截面宽度",
+      "displayName": "截面宽度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 220.0,
+      "minimum": 50.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "sectionHeight",
+      "label": "截面高度",
+      "displayName": "截面高度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 360.0,
+      "minimum": 50.0,
+      "maximum": 1500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "thickness",
+      "label": "壁厚",
+      "displayName": "壁厚",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 1.5,
+      "minimum": 1.0,
+      "maximum": 2.5,
+      "allowedValues": [
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "exposed": true,
+      "source": "material",
+      "sourceDefinition": {
+        "type": "materialProperty",
+        "reference": "material.thickness",
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 1.5
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topLipLength",
+      "label": "上左连接段长度",
+      "displayName": "上左连接段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 60.480000000000004,
+      "minimum": 10.0,
+      "maximum": 500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topRiseTransitionLength",
+      "label": "上升斜段长度",
+      "displayName": "上升斜段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 73.64486811720148,
+      "minimum": 10.0,
+      "maximum": 500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topHorizontalLength",
+      "label": "上部水平段长度",
+      "displayName": "上部水平段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 199.7,
+      "minimum": 50.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topCornerTransitionLength",
+      "label": "上部转角段长度",
+      "displayName": "上部转角段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 29.262880924474956,
+      "minimum": 5.0,
+      "maximum": 200.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "upperVerticalLength",
+      "label": "上部立壁长度",
+      "displayName": "上部立壁长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 160.68,
+      "minimum": 50.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "middleTransitionLength",
+      "label": "中部过渡段长度",
+      "displayName": "中部过渡段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 27.59130660189909,
+      "minimum": 5.0,
+      "maximum": 200.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "lowerVerticalLength",
+      "label": "下部立壁长度",
+      "displayName": "下部立壁长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 120.50999999999999,
+      "minimum": 50.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "lowerCornerTransitionLength",
+      "label": "下部转角段长度",
+      "displayName": "下部转角段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 27.59130660189908,
+      "minimum": 5.0,
+      "maximum": 200.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "bottomRiseLength",
+      "label": "下部短立段长度",
+      "displayName": "下部短立段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 20.650000000000006,
+      "minimum": 5.0,
+      "maximum": 200.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "bottomHorizontalLength",
+      "label": "下部水平段长度",
+      "displayName": "下部水平段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 220.36,
+      "minimum": 50.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "bottomDropTransitionLength",
+      "label": "下部下降斜段长度",
+      "displayName": "下部下降斜段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 71.93977550701696,
+      "minimum": 10.0,
+      "maximum": 500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "bottomLipLength",
+      "label": "下左连接段长度",
+      "displayName": "下左连接段长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 55.769999999999996,
+      "minimum": 10.0,
+      "maximum": 500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topRiseAngle",
+      "label": "上升斜段角度",
+      "displayName": "上升斜段角度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "deg",
+      "default": 56.21714761485574,
+      "minimum": 56.21714761485574,
+      "maximum": 56.21714761485574,
+      "allowedValues": [
+        56.21714761485574
+      ],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "topCornerAngle",
+      "label": "上部转角角度",
+      "displayName": "上部转角角度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "deg",
+      "default": -48.185973945218066,
+      "minimum": -48.185973945218066,
+      "maximum": -48.185973945218066,
+      "allowedValues": [
+        -48.185973945218066
+      ],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "middleTransitionAngle",
+      "label": "中部过渡角度",
+      "displayName": "中部过渡角度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "deg",
+      "default": -135.00000000000003,
+      "minimum": -135.00000000000003,
+      "maximum": -135.00000000000003,
+      "allowedValues": [
+        -135.00000000000003
+      ],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "lowerCornerAngle",
+      "label": "下部转角角度",
+      "displayName": "下部转角角度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "deg",
+      "default": -44.999999999999986,
+      "minimum": -44.999999999999986,
+      "maximum": -44.999999999999986,
+      "allowedValues": [
+        -44.999999999999986
+      ],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "bottomDropAngle",
+      "label": "下部下降角度",
+      "displayName": "下部下降角度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "deg",
+      "default": 123.9440952640687,
+      "minimum": 123.9440952640687,
+      "maximum": 123.9440952640687,
+      "allowedValues": [
+        123.9440952640687
+      ],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "holeCount",
+      "label": "孔数量",
+      "displayName": "孔数量",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "integer",
+      "unit": "个",
+      "default": 8,
+      "minimum": 0.0,
+      "maximum": 200.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": "ruleDefault:profile.mainHole:holeCount",
+      "description": ""
+    },
+    {
+      "id": "holeDiameter",
+      "label": "孔径",
+      "displayName": "孔径",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 12.0,
+      "minimum": 1.0,
+      "maximum": 100.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": "ruleDefault:profile.mainHole:holeDiameter",
+      "description": ""
+    },
+    {
+      "id": "holePitch",
+      "label": "孔间距",
+      "displayName": "孔间距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 5.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": "ruleDefault:profile.mainHole:holePitch",
+      "description": ""
+    },
+    {
+      "id": "holeOffsetX",
+      "label": "孔横向位置",
+      "displayName": "孔横向位置",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 80.34,
+      "minimum": 0.0,
+      "maximum": 1000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    },
+    {
+      "id": "holeStartMargin",
+      "label": "起始边距",
+      "displayName": "起始边距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 0.0,
+      "maximum": 2000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    },
+    {
+      "id": "holeEndMargin",
+      "label": "结束边距",
+      "displayName": "结束边距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 0.0,
+      "maximum": 2000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    }
+  ],
+  "variants": [
+    {
+      "id": "nominal",
+      "name": "标称实例",
+      "kind": "standard",
+      "overrides": {},
+      "expected": "valid",
+      "requiredForAdmission": false,
+      "purpose": ""
+    }
+  ],
+  "geometryRecipe": {
+    "id": "geometry.main",
+    "constructionMode": "coldRollForming",
+    "sketches": [
+      "sketch.section.main"
+    ],
+    "paths": [],
+    "operations": [
+      {
+        "id": "body.main",
+        "operator": "profile.open_profile_tube_extrude",
+        "sourceRefs": [
+          "sketch.section.main"
+        ],
+        "arguments": {},
+        "argumentExpressions": {
+          "length": "length",
+          "thickness": "thickness"
+        },
+        "conditionExpression": "True",
+        "semanticOutputs": [
+          "part.body",
+          "part.referenceFrame",
+          "part.endFace.start",
+          "part.endFace.end"
+        ],
+        "pathSketchId": null,
+        "profileSketchId": "sketch.section.main",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right"
+      }
+    ],
+    "semanticFaces": [
+      {
+        "id": "part.profile.edge.01",
+        "label": "面5 · 上部左连接段",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.1.mu6q1qw2",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "topLipLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.02",
+        "label": "面4 · 上升斜段",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.2.mu6q2hh1",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "topRiseTransitionLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.03",
+        "label": "面3 · 上部水平段",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.3.mu6q2r2m",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "topHorizontalLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.04",
+        "label": "面4 · 上部转角段",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.4.mu6q34t2",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "topCornerTransitionLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.05",
+        "label": "面1 · 上部主立壁",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.5.mu6q3jtu",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "upperVerticalLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.06",
+        "label": "面4 · 中部过渡段",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.6.mu6q3vmg",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "middleTransitionLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.07",
+        "label": "面2 · 下部主立壁",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.7.mu6q4kle",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "lowerVerticalLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.08",
+        "label": "面4 · 下部转角段",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.8.mu6q4z20",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "lowerCornerTransitionLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.09",
+        "label": "面5 · 下部短立段",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.9.mu6q5hzp",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "bottomRiseLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.10",
+        "label": "面3 · 下部水平段",
+        "hostFrame": "negativeY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.10.mu6q5z7l",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "bottomHorizontalLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.11",
+        "label": "面4 · 下部下降斜段",
+        "hostFrame": "negativeY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.11.mu6q6kmd",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "bottomDropTransitionLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.profile.edge.12",
+        "label": "面5 · 下部左连接段",
+        "hostFrame": "negativeY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "polyline.edge.1.mu6q9ro2",
+          "capSide": null
+        },
+        "uStartExpression": "0",
+        "uSpanExpression": "bottomLipLength",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.endFace.start",
+        "label": "起始端面",
+        "hostFrame": "negativeZ",
+        "sourceOperationId": "body.main",
+        "locator": null,
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "-sectionHeight / 2",
+        "vSpanExpression": "sectionHeight"
+      },
+      {
+        "id": "part.endFace.end",
+        "label": "终止端面",
+        "hostFrame": "positiveZ",
+        "sourceOperationId": "body.main",
+        "locator": null,
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "-sectionHeight / 2",
+        "vSpanExpression": "sectionHeight"
+      }
+    ],
+    "reviewed": true
+  },
+  "featureRules": [
+    {
+      "id": "profile.mainHole",
+      "name": "主立壁均布圆孔",
+      "featureType": "circularHole",
+      "enabled": true,
+      "conditionExpression": "True",
+      "countExpression": "holeCount",
+      "indexVariable": "i",
+      "arguments": {},
+      "argumentExpressions": {
+        "x": "holeOffsetX",
+        "diameter": "holeDiameter"
+      },
+      "faceBindings": [
+        {
+          "semanticFaceId": "part.profile.edge.05"
+        }
+      ],
+      "profileDimensions": [],
+      "placement": {
+        "mode": "linearArray",
+        "axis": "v",
+        "pitchExpression": "holePitch",
+        "startMarginExpression": "holeStartMargin",
+        "endMarginExpression": "holeEndMargin",
+        "maximumPitchExpression": "holePitch"
+      },
+      "polygonVertices": [],
+      "maximumCount": 200,
+      "semanticGroup": "profile.mainHole",
+      "description": "在第5段竖直主立壁沿零件长度方向生成参数化圆孔阵列。"
+    }
+  ],
+  "featureRulesReviewed": true,
+  "interfaces": [],
+  "evidence": [],
+  "aiProposals": [],
+  "admission": {
+    "changeNote": "创建异形开口薄壁冷弯型材模板。\n采用中心线薄壁拉伸生成基础实体。\n型材长度、截面尺寸和壁厚支持参数化。\n当前截面圆角使用直线段近似。\n本版本不包含制造孔槽规则。",
+    "reviewer": "yy",
+    "releaseChannel": "pilot"
+  },
+  "revision": 17,
+  "createdAt": "2026-09-21T17:51:43.341217+08:00",
+  "updatedAt": "2026-09-21T20:33:36.131398+08:00"
+}

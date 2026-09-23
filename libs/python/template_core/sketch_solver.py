@@ -240,6 +240,13 @@ def _constraint_residuals(
                 initial = _geometry(original, item)
                 # A line is anchored by its midpoint so dimensional constraints may still change its length.
                 add(constraint.id, geometry["center"][0] - initial["center"][0], geometry["center"][1] - initial["center"][1])
+                if item.entity.geometryType == "arc":
+                    add(
+                        constraint.id,
+                        geometry["radius"] - initial["radius"],
+                        geometry["startAngle"] - initial["startAngle"],
+                        geometry["endAngle"] - initial["endAngle"],
+                    )
                 if item.entity.geometryType == "point":
                     continue
         elif kind == "pointOn" and len(geometries) >= 2:
@@ -422,7 +429,7 @@ def _case(draft: TemplateDraft, case: str, overrides: dict[str, float] | None) -
     region_results: list[dict[str, Any]] = []
     use_centerline_path = draft.sketch.profileMode == "centerlineThinWall" and not draft.sketch.regions
     if use_centerline_path:
-        paths = [item for item in draft.sketch.entities if not item.construction and item.geometryType == "line"]
+        paths = [item for item in draft.sketch.entities if not item.construction and item.geometryType in {"line", "arc"}]
         thickness = float(parameters.get("thickness", 0))
         continuous = bool(paths)
         length = 0.0
@@ -433,9 +440,9 @@ def _case(draft: TemplateDraft, case: str, overrides: dict[str, float] | None) -
                 continuous = False
             previous_end = geometry["end"]
             length += _distance(geometry["start"], geometry["end"])
-        unsupported = [item.id for item in draft.sketch.entities if not item.construction and item.geometryType != "line"]
+        unsupported = [item.id for item in draft.sketch.entities if not item.construction and item.geometryType not in {"line", "arc"}]
         if unsupported:
-            diagnostics.append({"severity": "error", "code": "THINWALL_CENTERLINE_TYPE_UNSUPPORTED", "path": "sketch.entities", "message": f"当前中心线薄壁算子仅支持直线段：{'、'.join(unsupported)}。圆角需由后续折弯半径版本生成。"})
+            diagnostics.append({"severity": "error", "code": "THINWALL_CENTERLINE_TYPE_UNSUPPORTED", "path": "sketch.entities", "message": f"当前中心线薄壁算子仅支持直线和圆弧段：{'、'.join(unsupported)}。"})
         if not continuous:
             diagnostics.append({"severity": "error", "code": "THINWALL_CENTERLINE_DISCONNECTED", "path": "sketch.entities", "message": "中心线薄壁路径必须按图元顺序首尾连续。"})
         if thickness <= TOLERANCE:
