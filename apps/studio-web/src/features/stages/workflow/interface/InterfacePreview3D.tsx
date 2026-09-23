@@ -7,17 +7,15 @@ import type { CompileResult, Draft, ResolvedFeature, TemplateEvaluation } from "
 
 const COLORS = ["#dc3f55", "#2478d0", "#15966b", "#9a52d0", "#d27a16", "#008d9e"];
 
-function FaceOverlay({ hostFrame, color, min, max, region }: { hostFrame: string; color: string; min: [number, number, number]; max: [number, number, number]; region?: { mode: "fullFace" | "rectangle"; uStart: number; vStart: number; uSpan?: number | null; vSpan?: number | null } | null }) {
+function FaceOverlay({ hostFrame, color, min, max, center, region }: { hostFrame: string; color: string; min: [number, number, number]; max: [number, number, number]; center: [number, number, number]; region?: { mode: "rectangle"; uStart: number; vStart: number; uSpan: number; vSpan: number } | null }) {
   const offset = 0.8;
   const material = <meshBasicMaterial color={color} transparent opacity={0} depthWrite={false} side={2} />;
   const fullU = hostFrame === "negativeX" || hostFrame === "positiveX" ? max[1] - min[1] : max[0] - min[0];
   const fullV = hostFrame === "negativeZ" || hostFrame === "positiveZ" ? max[1] - min[1] : max[2] - min[2];
-  const u0 = region?.mode === "rectangle" ? region.uStart : 0;
-  const v0 = region?.mode === "rectangle" ? region.vStart : 0;
-  const uSpan = region?.mode === "rectangle" && region.uSpan ? region.uSpan : fullU;
-  const vSpan = region?.mode === "rectangle" && region.vSpan ? region.vSpan : fullV;
-  const uCenter = (hostFrame === "negativeX" || hostFrame === "positiveX" ? min[1] : min[0]) + u0 + uSpan / 2;
-  const vCenter = (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? min[1] : min[2]) + v0 + vSpan / 2;
+  const uSpan = region?.uSpan || fullU;
+  const vSpan = region?.vSpan || fullV;
+  const uCenter = region ? region.uStart - (hostFrame === "negativeX" || hostFrame === "positiveX" ? center[1] : center[0]) : (hostFrame === "negativeX" || hostFrame === "positiveX" ? min[1] : min[0]) + uSpan / 2;
+  const vCenter = region ? region.vStart - (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? center[1] : center[2]) : (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? min[1] : min[2]) + vSpan / 2;
   if (hostFrame === "negativeY" || hostFrame === "positiveY") {
     const y = (hostFrame === "negativeY" ? min[1] : max[1]) + (hostFrame === "negativeY" ? -offset : offset);
     return <mesh position={[uCenter, y, vCenter]} rotation={[Math.PI / 2, 0, 0]} scale={[uSpan, vSpan, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
@@ -33,14 +31,13 @@ function FaceOverlay({ hostFrame, color, min, max, region }: { hostFrame: string
   return null;
 }
 
-function InterfaceOverlays({ draft, min, max }: { draft: Draft; min: [number, number, number]; max: [number, number, number] }) {
+function InterfaceOverlays({ draft, evaluation, min, max, center }: { draft: Draft; evaluation: TemplateEvaluation | null; min: [number, number, number]; max: [number, number, number]; center: [number, number, number] }) {
   const byId = new Map(draft.geometryRecipe.semanticFaces.map((face) => [face.id, face]));
-  return <>{draft.interfaces.map((item, index) => {
+  return <>{(evaluation?.resolvedInterfaces || []).map((item) => {
     if (item.declarationMode === "featureDerived") return null;
-    const rule = item.sourceFeatureRuleId ? draft.featureRules.find((candidate) => candidate.id === item.sourceFeatureRuleId) : undefined;
-    const faceIds = item.geometryRefs.length ? item.geometryRefs : rule?.faceBindings.map((binding) => binding.semanticFaceId) || [];
-    const color = COLORS[index % COLORS.length];
-    return faceIds.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} min={min} max={max} region={item.region} /> : null; });
+    const colorIndex = draft.interfaces.findIndex((candidate) => candidate.id === item.sourceInterfaceId);
+    const color = COLORS[(colorIndex < 0 ? 0 : colorIndex) % COLORS.length];
+    return item.geometryRefs.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} min={min} max={max} center={center} region={item.region} /> : null; });
   })}</>;
 }
 
@@ -83,7 +80,7 @@ function PreviewScene({ url, draft, evaluation }: { url: string; draft: Draft; e
   const featureInterfaces = (evaluation?.resolvedInterfaces || []).filter((item) => item.sourceFeatureId && interfaceIds.has(item.sourceInterfaceId));
   const localMin: [number, number, number] = [min ? min.x - center[0] : -width / 2, min ? min.y - center[1] : -height / 2, min ? min.z - center[2] : -length / 2];
   const localMax: [number, number, number] = [max ? max.x - center[0] : width / 2, max ? max.y - center[1] : height / 2, max ? max.z - center[2] : length / 2];
-  return <group><mesh geometry={geometry} position={[-center[0], -center[1], -center[2]]} castShadow receiveShadow><meshStandardMaterial color="#9ca8b3" roughness={0.38} metalness={0.28} /></mesh><InterfaceOverlays draft={draft} min={localMin} max={localMax} />{featureInterfaces.map((item, index) => { const feature = evaluation?.features.find((candidate) => candidate.id === item.sourceFeatureId); return feature ? <FeatureOutline key={item.id} feature={feature} color={COLORS[draft.interfaces.findIndex((candidate) => candidate.id === item.sourceInterfaceId) % COLORS.length] || COLORS[index % COLORS.length]} width={width} height={height} length={length} center={center} /> : null; })}</group>;
+  return <group><mesh geometry={geometry} position={[-center[0], -center[1], -center[2]]} castShadow receiveShadow><meshStandardMaterial color="#9ca8b3" roughness={0.38} metalness={0.28} /></mesh><InterfaceOverlays draft={draft} evaluation={evaluation} min={localMin} max={localMax} center={center} />{featureInterfaces.map((item, index) => { const feature = evaluation?.features.find((candidate) => candidate.id === item.sourceFeatureId); return feature ? <FeatureOutline key={item.id} feature={feature} color={COLORS[draft.interfaces.findIndex((candidate) => candidate.id === item.sourceInterfaceId) % COLORS.length] || COLORS[index % COLORS.length]} width={width} height={height} length={length} center={center} /> : null; })}</group>;
 }
 
 export function InterfacePreview3D({ draft, result, evaluation, busy, error, onRefresh }: { draft: Draft; result: CompileResult | null; evaluation: TemplateEvaluation | null; busy: boolean; error: string; onRefresh: () => void }) {

@@ -293,16 +293,50 @@ class InterfaceReferenceFrame(BaseModel):
 
 class InterfaceRegion(BaseModel):
     mode: Literal["fullFace", "rectangle"] = "fullFace"
-    uStart: float = 0.0
-    vStart: float = 0.0
-    uSpan: float | None = Field(default=None, gt=0)
-    vSpan: float | None = Field(default=None, gt=0)
+    uStartExpression: str = "0"
+    vStartExpression: str = "0"
+    uSpanExpression: str = "100"
+    vSpanExpression: str = "100"
+    countExpression: str = "1"
+    indexVariable: str = "i"
+    placement: FeaturePlacement = Field(default_factory=FeaturePlacement)
+    maximumCount: int = Field(default=2_000, ge=1, le=20_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_numeric_coordinates(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        for old_name, expression_name in (
+            ("uStart", "uStartExpression"),
+            ("vStart", "vStartExpression"),
+            ("uSpan", "uSpanExpression"),
+            ("vSpan", "vSpanExpression"),
+        ):
+            old_value = migrated.pop(old_name, None)
+            if expression_name not in migrated and old_value is not None:
+                migrated[expression_name] = str(old_value)
+        return migrated
 
     @model_validator(mode="after")
     def validate_rectangle(self) -> "InterfaceRegion":
-        if self.mode == "rectangle" and (self.uSpan is None or self.vSpan is None):
-            raise ValueError("矩形接口区域必须填写 U/V 尺寸")
+        if self.mode == "rectangle":
+            expressions = (
+                self.uStartExpression, self.vStartExpression,
+                self.uSpanExpression, self.vSpanExpression,
+            )
+            if any(not expression.strip() for expression in expressions):
+                raise ValueError("矩形接口区域必须填写 U/V 起点和尺寸表达式")
         return self
+
+
+class ResolvedInterfaceRegion(BaseModel):
+    mode: Literal["rectangle"] = "rectangle"
+    uStart: float
+    vStart: float
+    uSpan: float = Field(gt=0)
+    vSpan: float = Field(gt=0)
 
 
 class PartInterface(BaseModel):
@@ -393,7 +427,7 @@ class ResolvedInterface(BaseModel):
     interfaceType: Literal["locating", "connecting", "supporting", "adjustable", "processDatum", "other"]
     geometryRefs: list[str] = Field(default_factory=list)
     parameterRefs: list[str] = Field(default_factory=list)
-    region: InterfaceRegion | None = None
+    region: ResolvedInterfaceRegion | None = None
     sourceFeatureRuleId: str | None = None
     sourceFeatureId: str | None = None
 

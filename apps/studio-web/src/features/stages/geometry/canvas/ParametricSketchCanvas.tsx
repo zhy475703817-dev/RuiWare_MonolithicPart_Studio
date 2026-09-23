@@ -375,6 +375,22 @@ export function ParametricSketchCanvas({
     : pendingConflict
       ? conflictPrimitives || basePrimitives
     : settlePrimitives || basePrimitives;
+  // A shared edge closes adjacent CAD regions but is not part of the visible
+  // outer contour. Remove it from the 2D authoring layer entirely.
+  const sharedAddBoundaryIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const region of draft.sketch.regions) {
+      if (region.operation !== "add") continue;
+      for (const entityId of new Set(region.boundaryRefs)) {
+        counts.set(entityId, (counts.get(entityId) || 0) + 1);
+      }
+    }
+    return new Set(
+      [...counts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([entityId]) => entityId),
+    );
+  }, [draft.sketch.regions]);
   const updateConnectionPreview = (candidate: EndpointConnectionCandidate | null) => {
     const previous = connectionPreviewRef.current;
     const changed = previous?.sourceEntityId !== candidate?.sourceEntityId
@@ -2329,6 +2345,8 @@ export function ParametricSketchCanvas({
   };
   const drawPrimitive = (primitive: (typeof primitives)[number]) => {
     const active = selected.includes(primitive.id);
+    const sharedBoundary = sharedAddBoundaryIds.has(primitive.id);
+    if (sharedBoundary) return null;
     if (primitive.type === "point" && primitive.start) {
       const p = screen(primitive.start);
       return (

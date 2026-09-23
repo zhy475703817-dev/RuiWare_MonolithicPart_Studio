@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from .metamodel import (
     EvaluationDiagnostic,
+    InterfaceRegion,
     SemanticFaceDefinition,
     SemanticFaceLocator,
     FeatureRule,
@@ -16,6 +17,7 @@ from .metamodel import (
     PartInterface,
     ResolvedFeature,
     ResolvedInterface,
+    ResolvedInterfaceRegion,
     Scalar,
     TemplateEvaluation,
 )
@@ -460,6 +462,113 @@ def _validate_polygon(vertices: list[tuple[float, float]]) -> None:
                 raise RuleEvaluationError("polygon edges must not self-intersect or overlap")
 
 
+def _interface_number(expression: str, context: Mapping[str, Any], label: str) -> float:
+    value = evaluate_expression(expression, context)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise RuleEvaluationError(f"{label} expression must return a finite number")
+    return float(value)
+
+
+def _resolve_interface_regions(
+    region: InterfaceRegion | None,
+    face: SemanticFaceDefinition | None,
+    context: Mapping[str, Any],
+) -> list[ResolvedInterfaceRegion | None]:
+    if region is None or region.mode == "fullFace":
+        return [None]
+
+    placement = region.placement
+    if placement.mode == "single":
+        count = 1
+    elif placement.mode == "maxPitch":
+        count = 0
+    else:
+        raw_count = evaluate_expression(region.countExpression, context)
+        if isinstance(raw_count, bool) or not isinstance(raw_count, (int, float)) or int(raw_count) != raw_count:
+            raise RuleEvaluationError("interface region count expression must return an integer")
+        count = int(raw_count)
+    if count < 0 or count > region.maximumCount:
+        raise RuleEvaluationError(f"resolved interface region count {count} is outside 0..{region.maximumCount}")
+
+    face_bounds: tuple[float, float, float, float] | None = None
+    if face is not None:
+        face_bounds = (
+            _interface_number(face.uStartExpression, context, "semantic-face U start"),
+            _interface_number(face.uSpanExpression, context, "semantic-face U span"),
+            _interface_number(face.vStartExpression, context, "semantic-face V start"),
+            _interface_number(face.vSpanExpression, context, "semantic-face V span"),
+        )
+        if face_bounds[1] <= 0 or face_bounds[3] <= 0:
+            raise RuleEvaluationError("semantic-face U/V spans must be greater than zero")
+
+    automatic = placement.mode in {"linearArray", "equalSpan", "maxPitch"}
+    axis_start = 0.0
+    travel = 0.0
+    if automatic:
+        if face_bounds is None:
+            raise RuleEvaluationError("automatic interface region placement requires a semantic face")
+        start_margin = _interface_number(placement.startMarginExpression, context, "placement start margin")
+        end_margin = _interface_number(placement.endMarginExpression, context, "placement end margin")
+        if start_margin < 0 or end_margin < 0:
+            raise RuleEvaluationError("interface region placement margins must be non-negative")
+        probe_context = {**context, region.indexVariable: 0, "count": max(1, count)}
+        axis_span_expression = region.uSpanExpression if placement.axis == "u" else region.vSpanExpression
+        item_span = _interface_number(axis_span_expression, probe_context, "interface region span")
+        if item_span <= 0:
+            raise RuleEvaluationError("interface region U/V spans must be greater than zero")
+        face_start = face_bounds[0] if placement.axis == "u" else face_bounds[2]
+        face_span = face_bounds[1] if placement.axis == "u" else face_bounds[3]
+        axis_start = face_start + start_margin + item_span / 2
+        travel = face_span - start_margin - end_margin - item_span
+        if travel < -1e-8:
+            raise RuleEvaluationError("interface region and placement margins exceed the semantic-face span")
+        travel = max(0.0, travel)
+        if placement.mode == "maxPitch":
+            maximum_pitch = _interface_number(placement.maximumPitchExpression, context, "maximum pitch")
+            if maximum_pitch <= 0:
+                raise RuleEvaluationError("maximum-pitch placement requires a positive maximum pitch")
+            count = max(1, math.ceil(travel / maximum_pitch) + 1)
+            if count > region.maximumCount:
+                raise RuleEvaluationError(f"resolved interface region count {count} exceeds {region.maximumCount}")
+
+    resolved: list[ResolvedInterfaceRegion] = []
+    for index in range(count):
+        item_context = {**context, region.indexVariable: index, "count": count}
+        u_start = _interface_number(region.uStartExpression, item_context, "interface region U midpoint")
+        v_start = _interface_number(region.vStartExpression, item_context, "interface region V midpoint")
+        u_span = _interface_number(region.uSpanExpression, item_context, "interface region U span")
+        v_span = _interface_number(region.vSpanExpression, item_context, "interface region V span")
+        if u_span <= 0 or v_span <= 0:
+            raise RuleEvaluationError("interface region U/V spans must be greater than zero")
+        if placement.mode in {"linearArray", "symmetric"}:
+            pitch = _interface_number(placement.pitchExpression, item_context, "placement pitch")
+            offset = index * pitch if placement.mode == "linearArray" else (index - (count - 1) / 2) * pitch
+        elif placement.mode in {"equalSpan", "maxPitch"}:
+            offset = 0.0 if count <= 1 else index * travel / (count - 1)
+        else:
+            offset = 0.0
+        if automatic:
+            if placement.axis == "u":
+                u_start = axis_start + offset
+            else:
+                v_start = axis_start + offset
+        elif placement.mode == "symmetric":
+            if placement.axis == "u":
+                u_start += offset
+            else:
+                v_start += offset
+        if face_bounds is not None:
+            face_u_start, face_u_span, face_v_start, face_v_span = face_bounds
+            if u_start - u_span / 2 < face_u_start - 1e-8 or u_start + u_span / 2 > face_u_start + face_u_span + 1e-8:
+                raise RuleEvaluationError("interface region exceeds the semantic-face U bounds")
+            if v_start - v_span / 2 < face_v_start - 1e-8 or v_start + v_span / 2 > face_v_start + face_v_span + 1e-8:
+                raise RuleEvaluationError("interface region exceeds the semantic-face V bounds")
+        resolved.append(ResolvedInterfaceRegion(
+            uStart=u_start, vStart=v_start, uSpan=u_span, vSpan=v_span,
+        ))
+    return resolved
+
+
 def evaluate_template(
     definitions: list[ParameterDefinition],
     rules: list[FeatureRule],
@@ -470,10 +579,13 @@ def evaluate_template(
 ) -> TemplateEvaluation:
     values, order, diagnostics = resolve_parameters(definitions, overrides, external_context)
     features: list[ResolvedFeature] = []
+    evaluation_context = {**dict(external_context or {}), **values}
     if not any(item.severity == "error" for item in diagnostics):
-        features, feature_diagnostics = resolve_feature_rules(rules, {**dict(external_context or {}), **values}, semantic_faces)
+        features, feature_diagnostics = resolve_feature_rules(rules, evaluation_context, semantic_faces)
         diagnostics.extend(feature_diagnostics)
-    resolved_interfaces, interface_diagnostics = resolve_part_interfaces(interfaces or [], rules, features)
+    resolved_interfaces, interface_diagnostics = resolve_part_interfaces(
+        interfaces or [], rules, features, evaluation_context, semantic_faces,
+    )
     diagnostics.extend(interface_diagnostics)
     return TemplateEvaluation(
         values=values,
@@ -488,24 +600,53 @@ def resolve_part_interfaces(
     interfaces: list[PartInterface],
     rules: list[FeatureRule],
     features: list[ResolvedFeature],
+    context: Mapping[str, Any] | None = None,
+    semantic_faces: list[SemanticFaceDefinition] | None = None,
 ) -> tuple[list[ResolvedInterface], list[EvaluationDiagnostic]]:
     """Expand a feature-derived declaration into one stable occurrence per resolved feature."""
 
     resolved: list[ResolvedInterface] = []
     diagnostics: list[EvaluationDiagnostic] = []
     rule_ids = {rule.id for rule in rules}
+    faces = {item.id: item for item in (semantic_faces or _DEFAULT_SEMANTIC_FACES)}
+    evaluation_context = dict(context or {})
 
     for interface in interfaces:
         if interface.declarationMode == "staticGeometry":
-            resolved.append(ResolvedInterface(
-                id=interface.id,
-                sourceInterfaceId=interface.id,
-                declarationMode="staticGeometry",
-                interfaceType=interface.interfaceType,
-                geometryRefs=interface.geometryRefs,
-                parameterRefs=interface.parameterRefs,
-                region=interface.region,
-            ))
+            try:
+                if interface.region is not None and interface.region.mode == "rectangle":
+                    occurrences: list[tuple[str | None, ResolvedInterfaceRegion | None]] = []
+                    for face_id in interface.geometryRefs or [None]:
+                        occurrences.extend(
+                            (face_id, item)
+                            for item in _resolve_interface_regions(interface.region, faces.get(face_id), evaluation_context)
+                        )
+                    for occurrence_index, (face_id, region) in enumerate(occurrences, start=1):
+                        resolved.append(ResolvedInterface(
+                            id=interface.id if len(occurrences) == 1 else f"{interface.id}.region.{occurrence_index:03d}",
+                            sourceInterfaceId=interface.id,
+                            declarationMode="staticGeometry",
+                            interfaceType=interface.interfaceType,
+                            geometryRefs=[face_id] if face_id else interface.geometryRefs,
+                            parameterRefs=interface.parameterRefs,
+                            region=region,
+                        ))
+                else:
+                    resolved.append(ResolvedInterface(
+                        id=interface.id,
+                        sourceInterfaceId=interface.id,
+                        declarationMode="staticGeometry",
+                        interfaceType=interface.interfaceType,
+                        geometryRefs=interface.geometryRefs,
+                        parameterRefs=interface.parameterRefs,
+                    ))
+            except RuleEvaluationError as error:
+                diagnostics.append(EvaluationDiagnostic(
+                    severity="error",
+                    code="INTERFACE_REGION_EVALUATION_FAILED",
+                    path=f"interfaces.{interface.id}.region",
+                    message=str(error),
+                ))
             continue
 
         rule_id = interface.sourceFeatureRuleId
@@ -520,17 +661,29 @@ def resolve_part_interfaces(
 
         for feature in (item for item in features if item.sourceRuleId == rule_id):
             suffix = feature.id.removeprefix(f"{rule_id}.")
-            resolved.append(ResolvedInterface(
-                id=f"{interface.id}.{suffix}",
-                sourceInterfaceId=interface.id,
-                declarationMode="featureDerived",
-                interfaceType=interface.interfaceType,
-                geometryRefs=[feature.semanticFaceId],
-                parameterRefs=interface.parameterRefs,
-                region=interface.region,
-                sourceFeatureRuleId=rule_id,
-                sourceFeatureId=feature.id,
-            ))
+            try:
+                regions = _resolve_interface_regions(
+                    interface.region, faces.get(feature.semanticFaceId), evaluation_context,
+                )
+                for region_index, region in enumerate(regions, start=1):
+                    resolved.append(ResolvedInterface(
+                        id=f"{interface.id}.{suffix}" + (f".region.{region_index:03d}" if len(regions) > 1 else ""),
+                        sourceInterfaceId=interface.id,
+                        declarationMode="featureDerived",
+                        interfaceType=interface.interfaceType,
+                        geometryRefs=[feature.semanticFaceId],
+                        parameterRefs=interface.parameterRefs,
+                        region=region,
+                        sourceFeatureRuleId=rule_id,
+                        sourceFeatureId=feature.id,
+                    ))
+            except RuleEvaluationError as error:
+                diagnostics.append(EvaluationDiagnostic(
+                    severity="error",
+                    code="INTERFACE_REGION_EVALUATION_FAILED",
+                    path=f"interfaces.{interface.id}.region",
+                    message=str(error),
+                ))
 
     seen: set[str] = set()
     for item in resolved:

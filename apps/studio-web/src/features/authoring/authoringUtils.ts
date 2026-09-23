@@ -364,6 +364,24 @@ export const normalizeParameterAliasReferences = (
       ),
     })),
   })),
+  interfaces: draft.interfaces.map((item) => ({
+    ...item,
+    region: item.region ? {
+      ...item.region,
+      uStartExpression: replaceExpressionAliasesWithParameterId(item.region.uStartExpression, aliases, parameterId),
+      vStartExpression: replaceExpressionAliasesWithParameterId(item.region.vStartExpression, aliases, parameterId),
+      uSpanExpression: replaceExpressionAliasesWithParameterId(item.region.uSpanExpression, aliases, parameterId),
+      vSpanExpression: replaceExpressionAliasesWithParameterId(item.region.vSpanExpression, aliases, parameterId),
+      countExpression: replaceExpressionAliasesWithParameterId(item.region.countExpression, aliases, parameterId),
+      placement: {
+        ...item.region.placement,
+        pitchExpression: replaceExpressionAliasesWithParameterId(item.region.placement.pitchExpression, aliases, parameterId),
+        startMarginExpression: replaceExpressionAliasesWithParameterId(item.region.placement.startMarginExpression, aliases, parameterId),
+        endMarginExpression: replaceExpressionAliasesWithParameterId(item.region.placement.endMarginExpression, aliases, parameterId),
+        maximumPitchExpression: replaceExpressionAliasesWithParameterId(item.region.placement.maximumPitchExpression, aliases, parameterId),
+      },
+    } : item.region,
+  })),
 });
 
 export const renameParameterReferences = (
@@ -548,6 +566,21 @@ export const renameParameterReferences = (
     parameterRefs: item.parameterRefs.map((id) =>
       id === previousId ? nextId : id,
     ),
+    region: item.region ? {
+      ...item.region,
+      uStartExpression: replaceExpressionParameter(item.region.uStartExpression, previousId, nextId) || "0",
+      vStartExpression: replaceExpressionParameter(item.region.vStartExpression, previousId, nextId) || "0",
+      uSpanExpression: replaceExpressionParameter(item.region.uSpanExpression, previousId, nextId) || "1",
+      vSpanExpression: replaceExpressionParameter(item.region.vSpanExpression, previousId, nextId) || "1",
+      countExpression: replaceExpressionParameter(item.region.countExpression, previousId, nextId) || "1",
+      placement: {
+        ...item.region.placement,
+        pitchExpression: replaceExpressionParameter(item.region.placement.pitchExpression, previousId, nextId) || "0",
+        startMarginExpression: replaceExpressionParameter(item.region.placement.startMarginExpression, previousId, nextId) || "0",
+        endMarginExpression: replaceExpressionParameter(item.region.placement.endMarginExpression, previousId, nextId) || "0",
+        maximumPitchExpression: replaceExpressionParameter(item.region.placement.maximumPitchExpression, previousId, nextId) || "1",
+      },
+    } : item.region,
   })),
   variants: draft.variants.map((variant) => ({
     ...variant,

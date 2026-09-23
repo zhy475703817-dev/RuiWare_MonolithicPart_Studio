@@ -323,8 +323,33 @@ def _append_face_support(face_map: FaceMap, support: FaceSupport) -> None:
 
 def _sketch_region_extrude(arguments):
     sketch = arguments["sketch"]
-    face = _material_face(sketch)
+    additive_regions = [region for region in sketch["regions"] if region["operation"] == "add"]
+    subtractive_regions = [region for region in sketch["regions"] if region["operation"] == "subtract"]
     length = float(arguments["length"])
+    # Separate coplanar regions must be fused after extrusion.  Fusing their
+    # planar faces first leaves a compound, which OCC extrudes into multiple
+    # solids even when the regions share an exact boundary.
+    if len(additive_regions) > 1:
+        solids = [
+            BRepPrimAPI_MakePrism(
+                BRepBuilderAPI_MakeFace(_region_wire(sketch, region)).Face(),
+                _normal_vector(sketch.get("plane", "XY"), length),
+            ).Shape()
+            for region in additive_regions
+        ]
+        result = _fuse(*solids)
+        for region in subtractive_regions:
+            tool = BRepPrimAPI_MakePrism(
+                BRepBuilderAPI_MakeFace(_region_wire(sketch, region)).Face(),
+                _normal_vector(sketch.get("plane", "XY"), length),
+            ).Shape()
+            cut = BRepAlgoAPI_Cut(result, tool)
+            cut.Build()
+            if not cut.IsDone():
+                raise RuntimeError(f"Sketch subtractive-region cut failed: {region['id']}")
+            result = cut.Shape()
+        return result
+    face = _material_face(sketch)
     return BRepPrimAPI_MakePrism(face, _normal_vector(sketch.get("plane", "XY"), length)).Shape()
 
 
@@ -987,6 +1012,10 @@ def build_body_with_face_map(operation) -> tuple[TopoDS_Shape, FaceMap]:
         and sketch
         and sketch.get("profileMode") != "centerlineThinWall"
     ):
+        if sum(1 for region in sketch.get("regions", []) if region.get("operation") == "add") > 1:
+            # Multi-region profiles use the 3-D fusion path above.  No authored
+            # locator in the current profile depends on a generated support map.
+            return _sketch_region_extrude(arguments), {}
         operation_id = str(getattr(operation, "id", "") or arguments.get("operationId", ""))
         profile_sketch_id = str(
             arguments.get("profileSketchId")
