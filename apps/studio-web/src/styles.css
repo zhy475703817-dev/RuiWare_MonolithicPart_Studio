@@ -2430,6 +2430,116 @@ code {
   font-size: 8px;
   text-decoration: none;
 }
+.reconstruction-guide-panel .panel-title {
+  align-items: center;
+}
+.reconstruction-guide-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.reconstruction-guide-content {
+  max-height: 430px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #e5e9ec;
+  border-radius: 6px;
+  background: #f8fafb;
+  color: #35424c;
+  font-size: 9px;
+  line-height: 1.65;
+}
+.reconstruction-guide-content h1,
+.reconstruction-guide-content h2,
+.reconstruction-guide-content h3,
+.reconstruction-guide-content h4 {
+  color: #263b46;
+  line-height: 1.35;
+}
+.reconstruction-guide-content h1 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+.reconstruction-guide-content h2 {
+  margin: 18px 0 7px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #dfe7ea;
+  font-size: 13px;
+}
+.reconstruction-guide-content h3 {
+  margin: 13px 0 4px;
+  font-size: 10px;
+}
+.reconstruction-guide-content h4 {
+  margin: 9px 0 3px;
+  font-size: 9px;
+}
+.reconstruction-guide-content p {
+  margin: 7px 0;
+}
+.reconstruction-guide-content ol,
+.reconstruction-guide-content ul {
+  margin: 7px 0;
+  padding-left: 21px;
+}
+.reconstruction-guide-content li {
+  margin: 3px 0;
+}
+.reconstruction-guide-content code {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #eaf0f2;
+  color: #7c4d16;
+  font-size: 8px;
+}
+.reconstruction-guide-note {
+  margin: 8px 0;
+  padding: 7px 9px;
+  border-left: 3px solid #7aaf9e;
+  background: #edf7f3;
+  color: #42665a;
+}
+.reconstruction-guide-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0 12px;
+}
+.reconstruction-guide-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8px;
+}
+.reconstruction-guide-content th,
+.reconstruction-guide-content td {
+  padding: 5px 6px;
+  border: 1px solid #dfe7ea;
+  text-align: left;
+  vertical-align: top;
+}
+.reconstruction-guide-content th {
+  background: #eef3f5;
+  color: #435862;
+  font-weight: 800;
+}
+.reconstruction-guide-content td {
+  background: #fff;
+}
+.reconstruction-guide-error {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #f0d3d1;
+  border-radius: 6px;
+  background: #fff7f6;
+  color: #9a4b48;
+  font-size: 8px;
+  line-height: 1.5;
+}
+.reconstruction-guide-error strong {
+  font-size: 9px;
+}
 .toast {
   position: fixed;
   right: 18px;

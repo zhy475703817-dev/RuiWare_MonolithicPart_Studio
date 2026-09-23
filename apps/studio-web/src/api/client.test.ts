@@ -26,4 +26,16 @@ describe("API workspace context", () => {
       "X-RuiWare-Workspace": "ruiware-main",
     });
   });
+
+  it("reads the reconstruction guide as Markdown text", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "# C型冷弯立柱",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.reconstructionGuide("draft-1")).resolves.toBe("# C型冷弯立柱");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/template-drafts/draft-1/reconstruction-guide");
+  });
 });

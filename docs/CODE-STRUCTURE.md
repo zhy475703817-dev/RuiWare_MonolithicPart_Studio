@@ -272,6 +272,8 @@ GUI 收到 draft.changed
 ### 3.15 发布阶段 `src/features/stages/review/admission`
 
 - `AdmissionStage.tsx`：最终准入、发布说明、版本发布和历史版本展示。
+- `ReconstructionGuidePanel.tsx`：读取当前修订的模板重建说明书，提供加载、错误提示、结构化预览和 Markdown 下载；不参与发布准入判断。
+- `MarkdownGuidePreview.tsx`：将说明书 Markdown 转换为标题、段落、提示、步骤和表格，面向工程人员阅读；不改变下载的原始 Markdown 内容。
 
 ## 4. 模板 API `services/template-api`
 
@@ -305,6 +307,7 @@ GUI 收到 draft.changed
 - `proposal.py`：提案应用过程中的草图坐标同步等辅助逻辑。
 - `orchestration.py`：目标任务计划与执行；组合阶段完成、参数/草图/材料修复、CAD 编译和发布检查。
 - `compile.py`：CAD Worker 进程调用、编译产物处理和 `.rwpart` 源包生成。
+- `reconstruction_document.py`：从待发布修订生成 UTF-8 Markdown 模板重建说明书；正文按零件用途、参数、材料、草图、几何、规则、复现流程和错误排查组织，技术附录保留参数原始定义、稳定 ID、表达式和阶段校验定位信息。
 - `workflow.py`：CAD 编译、编译预览、规则试算、发布版本和发布准入流程。
 - `write_context.py`：解析经过认证的 GUI/Agent 写入上下文，并对 Agent 强制检查 `baseRevision` 和 `confirmed`。
 
@@ -323,9 +326,19 @@ GUI 收到 draft.changed
 /evaluate                            参数和规则试算
 /proposals                           结构化提案预览和应用
 /publish                             发布
+/reconstruction-guide                读取当前修订的模板重建说明书
 /rollback                            回滚为新修订
 /audit-logs                          操作审计
 ```
+
+发布说明书接口为只读操作：
+
+```text
+GET /api/v1/template-drafts/{draft_id}/reconstruction-guide
+→ text/markdown; charset=utf-8
+```
+
+说明书从当前草稿修订实时生成，不创建新修订。正文面向工程人员阅读，技术附录面向机器复现和精确排错；发布页将 Markdown 解析为结构化内容后预览，下载仍保留完整原文。真正发布时，说明书由同一个冻结修订再次生成并写入 `.rwpart`，因此不会出现“页面看到的文档”和“最终包内文档”来自不同修订的问题。
 
 ## 5. 领域内核 `libs/python/template_core`
 
@@ -528,6 +541,11 @@ Template API
 - `artifacts/<inputHash>/`：STEP、STL、计划、诊断和语义映射。
 - `artifacts/packages/`：发布或下载使用的 `.rwpart` 源包。
 
+`.rwpart` 源包除原有 JSON、CAD 产物和附件外，还包含：
+
+- `template-reconstruction-guide.md`：面向人工复现和问题定位的详细模板说明书。
+- `manifest.json.reconstructionGuide`：说明书文件名和 SHA-256，用于确认包内文档未被替换或损坏。
+
 ## 10. 跨模块契约 `packages/contracts`
 
 - `template-draft.schema.json`：模板草稿 JSON Schema。
@@ -669,3 +687,4 @@ STEP / STL / diagnostics / semantic-map
 - 补充共享工作区、身份分离、双重修订检查和统一错误结构。
 - 补充 `draft_events`、`draft_access`、`operation_audit` 等当前数据库表职责。
 - 补充 `sweep_path*`、语义面、CAD 算子分类、MCP 创建/回滚/审计工具和当前测试分布。
+- 增加模板重建说明书生成器、发布页预览/下载面板、只读说明书 API，以及 `.rwpart` 内说明书和校验摘要的结构说明。

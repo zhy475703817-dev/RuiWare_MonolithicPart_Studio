@@ -18,14 +18,30 @@ from ._common import draft_or_404, ensure_draft_revision, save_draft
 from .compile import run_cad_worker as run_cad_worker_service, write_source_package as write_source_package_service
 from .context import nominal_material_context, validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
+from .reconstruction_document import build_reconstruction_guide
 
 
 def write_source_package(repository: Repository, draft: TemplateDraft, artifact_root: Path = ARTIFACT_ROOT, attachment_root: Path = ATTACHMENT_ROOT) -> Path:
     return write_source_package_service(draft, repository, artifact_root, attachment_root)
 
 
-def download_source_package(repository: Repository, draft_id: str) -> Path:
-    return write_source_package(repository, draft_or_404(repository, draft_id))
+def download_source_package(
+    repository: Repository,
+    draft_id: str,
+    artifact_root: Path = ARTIFACT_ROOT,
+    attachment_root: Path = ATTACHMENT_ROOT,
+) -> Path:
+    return write_source_package(
+        repository,
+        draft_or_404(repository, draft_id),
+        artifact_root,
+        attachment_root,
+    )
+
+
+def get_reconstruction_guide(repository: Repository, draft_id: str) -> str:
+    """读取当前草稿修订对应的 Markdown 重建说明书，不创建新修订。"""
+    return build_reconstruction_guide(repository, draft_or_404(repository, draft_id))
 
 
 def compile_template_draft(

@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,7 @@ from .services.operations import (  # noqa: E402
     create_template_draft as create_template_draft_service,
     duplicate_template_draft as duplicate_template_draft_service,
     download_source_package as download_source_package_service,
+    get_reconstruction_guide as get_reconstruction_guide_service,
     evaluate_template_draft as evaluate_template_draft_service,
     get_template_draft as get_template_draft_service,
     latest_compile_run as latest_compile_run_service,
@@ -585,6 +586,7 @@ async def upload_template_attachment(
         content_type=request.headers.get("content-type", "application/octet-stream"),
         body=content,
         kind=kind,
+        attachment_root=ATTACHMENT_ROOT,
     )
 
 
@@ -604,8 +606,17 @@ def _write_source_package(draft: TemplateDraft) -> Path:
 
 @app.get("/api/v1/template-drafts/{draft_id}/source-package")
 def download_source_package(draft_id: str):
-    target = download_source_package_service(repository, draft_id)
+    target = download_source_package_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT)
     return FileResponse(target, media_type="application/octet-stream", filename=target.name)
+
+
+@app.get("/api/v1/template-drafts/{draft_id}/reconstruction-guide", response_class=PlainTextResponse)
+def get_reconstruction_guide(draft_id: str):
+    return PlainTextResponse(
+        get_reconstruction_guide_service(repository, draft_id),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": "inline"},
+    )
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import subprocess
 import sys
 import uuid
@@ -15,6 +16,7 @@ from template_core.material import effective_thickness_domain
 from template_core.registries import TEMPLATE_AUTHORING_REGISTRY
 from template_core.sketch_solver import solve_semantic_sketch
 
+from .reconstruction_document import build_reconstruction_guide
 
 LIB_ROOT = PLATFORM_ROOT / "libs" / "python"
 WORKER_ROOT = PLATFORM_ROOT / "services" / "cad-worker"
@@ -33,8 +35,16 @@ def write_source_package(
     package_directory.mkdir(parents=True, exist_ok=True)
     target = package_directory / f"{draft.code or draft.id}-r{draft.revision}.rwpart"
     latest = repository.latest_compile(draft.id) if draft.id else None
+    guide = build_reconstruction_guide(repository, draft)
+    guide_bytes = guide.encode("utf-8")
     documents = {
-        "manifest.json": draft.model_dump(exclude={"parameterDefinitions", "variants", "sketch", "sweepPath", "blank", "admission", "materialRequirements", "materialValidationSamples", "geometryRecipe", "featureRules", "interfaces", "evidence", "aiProposals"}),
+        "manifest.json": {
+            **draft.model_dump(exclude={"parameterDefinitions", "variants", "sketch", "sweepPath", "blank", "admission", "materialRequirements", "materialValidationSamples", "geometryRecipe", "featureRules", "interfaces", "evidence", "aiProposals"}),
+            "reconstructionGuide": {
+                "filename": "template-reconstruction-guide.md",
+                "sha256": hashlib.sha256(guide_bytes).hexdigest(),
+            },
+        },
         "classification.json": {"templateKind": draft.templateKind, "manufacturing": draft.manufacturingClassification.model_dump(), "geometryPrototypeId": draft.geometryPrototypeId, "registryVersion": TEMPLATE_AUTHORING_REGISTRY.version},
         "evidence.json": {"items": [item.model_dump() for item in draft.evidence], "aiProposals": [item.model_dump() for item in draft.aiProposals]},
         "material-requirements.json": {"requirements": [item.model_dump() for item in draft.materialRequirements], "effectiveThicknessDomains": {item.id: effective_thickness_domain(item) for item in draft.materialRequirements}, "blank": draft.blank.model_dump()},
@@ -54,6 +64,7 @@ def write_source_package(
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in documents.items():
             archive.writestr(name, json.dumps(content, ensure_ascii=False, indent=2))
+        archive.writestr("template-reconstruction-guide.md", guide_bytes)
         for item in draft.attachments:
             source = attachment_root / item.sha256 / item.filename
             if source.exists():

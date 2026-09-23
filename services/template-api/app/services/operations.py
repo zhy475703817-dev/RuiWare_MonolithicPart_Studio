@@ -30,6 +30,7 @@ from .workflow import (
     compile_preview,
     compile_template_draft,
     download_source_package,
+    get_reconstruction_guide,
     evaluate_template_draft,
     latest_compile_run,
     list_published_versions,
