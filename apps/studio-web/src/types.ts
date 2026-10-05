@@ -364,6 +364,14 @@ export type GeometryRecipe = {
   semanticFaces: SemanticFaceDefinition[];
   reviewed: boolean;
 };
+export type FeaturePlacement = {
+  mode: "single" | "linearArray" | "equalSpan" | "maxPitch" | "symmetric";
+  axis: "u" | "v";
+  pitchExpression: string;
+  startMarginExpression: string;
+  endMarginExpression: string;
+  maximumPitchExpression: string;
+};
 export type FeatureRule = {
   id: string;
   name: string;
@@ -376,18 +384,22 @@ export type FeatureRule = {
   argumentExpressions: Record<string, string>;
   faceBindings: { semanticFaceId: string }[];
   profileDimensions: { id: string; label: string; parameterId: string }[];
-  placement: {
-    mode: "single" | "linearArray" | "equalSpan" | "maxPitch" | "symmetric";
-    axis: "u" | "v";
-    pitchExpression: string;
-    startMarginExpression: string;
-    endMarginExpression: string;
-    maximumPitchExpression: string;
-  };
+  placement: FeaturePlacement;
   polygonVertices: { uExpression: string; vExpression: string }[];
   maximumCount: number;
   semanticGroup?: string | null;
   description: string;
+};
+export type InterfaceRegion = {
+  mode: "fullFace" | "rectangle";
+  uStartExpression: string;
+  vStartExpression: string;
+  uSpanExpression: string;
+  vSpanExpression: string;
+  countExpression: string;
+  indexVariable: string;
+  placement: FeaturePlacement;
+  maximumCount: number;
 };
 export type PartInterface = {
   id: string;
@@ -399,7 +411,7 @@ export type PartInterface = {
   role?: "primary" | "secondary" | "tertiary" | null;
   geometryRefs: string[];
   referenceFrame: { originRef?: string | null; axis: "x" | "y" | "z" | "-x" | "-y" | "-z" };
-  region?: { mode: "fullFace" | "rectangle"; uStart: number; vStart: number; uSpan?: number | null; vSpan?: number | null } | null;
+  region?: InterfaceRegion | null;
   parameterRefs: string[];
   compatibilityTags: string[];
   description: string;
@@ -435,7 +447,7 @@ export type ResolvedInterface = {
   interfaceType: PartInterface["interfaceType"];
   geometryRefs: string[];
   parameterRefs: string[];
-  region?: PartInterface["region"];
+  region?: { mode: "rectangle"; uStart: number; vStart: number; uSpan: number; vSpan: number } | null;
   sourceFeatureRuleId?: string | null;
   sourceFeatureId?: string | null;
 };
