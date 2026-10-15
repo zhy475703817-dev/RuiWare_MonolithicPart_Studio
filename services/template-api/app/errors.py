@@ -65,12 +65,6 @@ ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
     "DRAFT_ACCESS_FORBIDDEN": ("当前会话无权访问该草稿。", "请切换到已授权的工作区或联系草稿负责人。"),
     "PUBLISH_ALREADY_PUBLISHED": ("当前修订已发布。", "请先修改模板并重新完成受影响阶段。"),
     "PUBLISH_VALIDATION_FAILED": ("发布准入校验未通过。", "请处理校验项后重新发布。"),
-    "REMOTE_STORAGE_NOT_CONFIGURED": ("共享模板存储尚未配置。", "请配置 MinIO 连接信息后重试。"),
-    "REMOTE_STORAGE_UNAVAILABLE": ("共享模板暂时不可用。", "请检查 Tailscale 连接和 MinIO 服务后重试。"),
-    "REMOTE_STORAGE_INTEGRITY_ERROR": ("共享模板校验失败。", "请删除异常缓存并重新下载该模板。"),
-    "REMOTE_TEMPLATE_NOT_FOUND": ("共享模板不存在。", "请刷新共享模板列表后重试。"),
-    "PUBLIC_API_NOT_CONFIGURED": ("对外模板接口尚未配置。", "请在 API 服务环境变量中配置 RUIWARE_PUBLIC_API_KEY。"),
-    "PUBLIC_API_KEY_INVALID": ("对外模板接口密钥无效。", "请使用平台管理员发放的 API Key 后重试。"),
     "REQUEST_INVALID": ("请求数据格式不正确。", "请检查输入字段后重试。"),
     "UNEXPECTED_ERROR": ("服务处理请求时发生未知错误。", "请记录错误码和追踪号后联系维护人员。"),
 }
@@ -80,7 +74,6 @@ RETRYABLE_ERROR_CODES = {
     "MATERIAL_LIBRARY_UNAVAILABLE",
     "COMPILE_RECORD_MISSING",
     "UNEXPECTED_ERROR",
-    "REMOTE_STORAGE_UNAVAILABLE",
 }
 
 

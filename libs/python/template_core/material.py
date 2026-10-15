@@ -20,7 +20,7 @@ MATERIAL_COLUMNS = (
 SUPPLY_FORM_ALIASES = {
     "coil": ("卷", "带钢", "coil", "strip steel"), "sheet": ("板", "sheet", "plate"),
     "openProfile": ("开口", "型材", "profile", "c型钢", "ω钢", "角钢", "槽钢", "工字钢", "扁钢"),
-    "closedProfile": ("闭口", "closed profile"),
+    "closedProfile": ("闭口", "闭口梁", "抱焊梁", "closed profile"),
     "tube": ("管", "tube", "pipe"), "bar": ("棒", "bar"), "wire": ("线", "wire"),
     "engineeringPlastic": ("塑料", "塑胶", "plastic"),
     "standardPart": ("标准件", "五金", "紧固件", "standard", "hardware"),
@@ -146,7 +146,7 @@ class RuiWareMaterialLibrary:
         connection.row_factory = sqlite3.Row
         return connection
 
-    def list(self, search: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def list(self, search: str = "", limit: int | None = 100) -> list[dict[str, Any]]:
         where = ""
         parameters: list[Any] = []
         terms = [term for term in re.split(r"[\s,，;；/|]+", search.strip()) if term]
@@ -155,8 +155,10 @@ class RuiWareMaterialLibrary:
             where = "WHERE " + " AND ".join(f"({column_clause})" for _ in terms)
             for term in terms:
                 parameters.extend([f"%{term}%"] * len(SEARCHABLE_COLUMNS))
-        parameters.append(max(1, min(limit, 500)))
-        query = f"SELECT {','.join(MATERIAL_COLUMNS)} FROM materials {where} ORDER BY type, code LIMIT ?"
+        query = f"SELECT {','.join(MATERIAL_COLUMNS)} FROM materials {where} ORDER BY type, code"
+        if limit is not None:
+            parameters.append(max(1, min(limit, 500)))
+            query += " LIMIT ?"
         with self._connect() as connection:
             rows = connection.execute(query, parameters).fetchall()
         return [self._normalize(dict(row)) for row in rows]
