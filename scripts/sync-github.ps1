@@ -38,7 +38,7 @@ $paths = @('apps/studio-web/src', 'apps/studio-web/public', 'apps/studio-web/pac
     'libs/python', 'packages/contracts', 'services', 'tests', 'scripts', 'docs', 'examples',
     'deliverables', 'README.md', 'AGENTS.md', '.gitignore', '.gitattributes', '.editorconfig',
     'pyproject.toml', 'package.json', 'package-lock.json', 'bun.lock', 'start-dev.ps1',
-    'start-dev.bat', 'sync-github.bat') | Where-Object { Test-Path -LiteralPath $_ }
+    'start-dev.bat', 'sync-github.bat', 'watch-sync-github.bat') | Where-Object { Test-Path -LiteralPath $_ }
 $paths += @(':(exclude)**/*.egg-info/**', ':(exclude)**/__pycache__/**',
     ':(exclude)**/*.pyc', ':(exclude)**/*.log', ':(exclude)**/*.tsbuildinfo')
 if ($Preview) {
