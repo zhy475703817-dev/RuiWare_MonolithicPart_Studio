@@ -509,6 +509,44 @@ def test_sheet_bend_compiles_single_continuous_solid(tmp_path) -> None:
     assert result.metrics.volume == pytest.approx(300 * 80 * 2, rel=0.02)
 
 
+def test_sheet_bend_placement_moves_exported_solid_without_changing_volume(tmp_path) -> None:
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_Reader
+
+    arguments = {
+        "length": 200,
+        "width": 20,
+        "thickness": 3,
+        "bendPosition": 100,
+        "bendAngleDegrees": 90,
+        "insideRadius": 3,
+        "kFactor": 0.42,
+    }
+    baseline = _compile_operator(tmp_path / "baseline", "sheet.bend", arguments)
+    result = _compile_operator(tmp_path / "placed", "sheet.bend", {
+        **arguments, "translateX": 40, "translateY": -10, "translateZ": 3,
+    })
+    assert baseline.success, baseline.diagnostics
+    assert result.success, result.diagnostics
+    assert result.metrics is not None and result.metrics.solidCount == 1
+    assert result.metrics.volume == pytest.approx(200 * 20 * 3, rel=0.02)
+    assert result.metrics.volume == pytest.approx(baseline.metrics.volume, abs=1e-6)
+
+    def exported_center(root, compiled):
+        reader = STEPControl_Reader()
+        assert reader.ReadFile(str(root / compiled.inputHash[:16] / "model.step")) == IFSelect_RetDone
+        assert reader.TransferRoots() > 0
+        props = GProp_GProps()
+        BRepGProp.VolumeProperties_s(reader.OneShape(), props)
+        return props.CentreOfMass().Coord()
+
+    before = exported_center(tmp_path / "baseline", baseline)
+    after = exported_center(tmp_path / "placed", result)
+    assert tuple(b - a for a, b in zip(before, after)) == pytest.approx((40, -10, 3), abs=1e-6)
+
+
 def test_constraint_contract_rejects_wrong_selection_count_and_type() -> None:
     value = TemplateDraft(name="invalid constraint selection")
     value.sketch.constraints.append(

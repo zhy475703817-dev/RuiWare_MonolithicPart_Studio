@@ -18,7 +18,7 @@
 
 ## 启动
 
-Windows 用户可以直接双击项目根目录下的 `start-dev.bat`，脚本会后台启动 API 和前端，并自动打开工作台。
+Windows 用户可以直接双击项目根目录下的 `start-dev.bat`，脚本会验证 Python 运行时和依赖，再后台启动 API 和前端并自动打开工作台。启动器优先使用项目 `.venv`；如果其中的 Python 因原安装目录变化而失效，会尝试当前 PATH 中的 Python 或当前用户 Codex 附带的 Python 3.12，并加载项目现有依赖，不会自动覆盖或重建 `.venv`。
 
 ```powershell
 cd G:\2026年科研\货架项目开发\RuiWare\template-engineering-platform

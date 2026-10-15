@@ -31,16 +31,21 @@ def search_materials(
     draft_id: str | None = None,
     requirement: MaterialRequirement | None = None,
 ):
-    try:
-        rows = material_library.list(search=search, limit=limit)
-    except (sqlite3.Error, OSError) as error:
-        raise api_error("MATERIAL_LIBRARY_UNAVAILABLE", status_code=503, message=str(error), context={"reason": str(error)}) from error
-    if requirement is None and not draft_id:
-        return rows
     if requirement is None and draft_id:
         draft = draft_or_404(repository, draft_id)
         requirement = draft.materialRequirements[0] if draft.materialRequirements else None
-    return [
+    try:
+        # Requirement matching must happen before the result limit is applied.
+        # Otherwise a compatible material after the first page is invisible to
+        # the material stage. Keep the API response bounded after ordering
+        # compatible records first, while retaining incompatible records for
+        # the UI's diagnostic filter.
+        rows = material_library.list(search=search, limit=None if requirement else limit)
+    except (sqlite3.Error, OSError) as error:
+        raise api_error("MATERIAL_LIBRARY_UNAVAILABLE", status_code=503, message=str(error), context={"reason": str(error)}) from error
+    if requirement is None:
+        return rows
+    annotated = [
         {
             **row,
             "requirementMatch": {
@@ -50,6 +55,10 @@ def search_materials(
         }
         for row in rows
     ]
+    compatible = [row for row in annotated if row["requirementMatch"]["compatible"]]
+    incompatible = [row for row in annotated if not row["requirementMatch"]["compatible"]]
+    result_limit = max(1, min(limit, 500))
+    return [*compatible[:result_limit], *incompatible[: max(0, result_limit - len(compatible))]]
 
 
 def create_material_binding(repository: Repository, source_record_id: str, mode: Literal["reference", "copy"]):
