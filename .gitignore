@@ -32,3 +32,4 @@ CONVERSATION-HANDOFF.md
 data/pytest-*/
 *.db-wal
 *.db-shm
+sync-github.log

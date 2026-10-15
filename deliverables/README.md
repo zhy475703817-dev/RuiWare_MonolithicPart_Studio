@@ -8,6 +8,8 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-github.ps1
 ```
 
+如需自己修改后自动上传，双击根目录 `watch-sync-github.bat` 启动监听。它默认每 15 秒检查一次，检测到修改后等待 30 秒没有新变化，再执行完整校验、提交和推送。监听进程可关闭最小化窗口；日志在根目录 `sync-github.log`，该日志不会上传。
+
 只预览：加 `-Preview`。脚本先核对当前数据库中的八个构件修订与已有模板包是否一致；缺包时停止，请先在 RuiWare 重新导出模板包。不会上传陈旧修订冒充最新成果。
 
 代码和成果只提交到 `en888-jpg`，不修改 `master`。运行时数据库、材料库、缓存、日志、备份及对话记录不上传。GitHub 仓库是公开的，因此被提交的代码和构件包可被公众下载。同步不等于工程设计复核或正式发布。

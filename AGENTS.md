@@ -6,4 +6,4 @@
 - After finishing a requested implementation, inspect the diff for secrets/unrelated changes, run relevant checks, then run `scripts/sync-github.ps1` to export/checksum component packages, commit and push. Do not upload incomplete or failed changes automatically. Report any push failure honestly.
 - If unrelated edits are present, review and obtain direction before including them in a later automatic synchronization.
 - Never commit credentials, material/platform databases, runtime environments, caches, logs, local backups or private conversation history.
-- Do not add a background file watcher that publishes individual saves. Synchronization occurs after a verified work batch, or when the user explicitly runs `sync-github.bat`.
+- Automatic synchronization is available through `watch-sync-github.bat`: it waits for a quiet period, validates the eight packages, then commits and pushes. Do not upload databases, credentials, caches or logs.
