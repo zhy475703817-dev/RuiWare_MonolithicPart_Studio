@@ -2,14 +2,18 @@ from pathlib import Path
 
 from template_core.models import PublishedVersion
 
-from app.services.remote_storage import sync_published_package
+from app.services.remote_storage import _deduplicate_templates, sync_published_package
 
 
 class FakeStorage:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, templates=None):
         self.result = result
         self.error = error
+        self.templates = templates or []
         self.calls = []
+
+    def list_templates(self):
+        return self.templates
 
     def upload_package(self, package_path: Path, publication: PublishedVersion, metadata: dict):
         self.calls.append((package_path, publication, metadata))
@@ -63,3 +67,48 @@ def test_remote_sync_failure_does_not_raise(tmp_path):
 
     assert result["status"] == "failed"
     assert result["errorCode"] == "REMOTE_STORAGE_UNAVAILABLE"
+
+
+def test_remote_sync_skips_existing_publication_identity(tmp_path):
+    package = tmp_path / "template.rwpart"
+    package.write_bytes(b"package")
+    storage = FakeStorage(
+        templates=[
+            {
+                "publicationId": "existing-publication",
+                "code": "TPL-001",
+                "version": 2,
+                "sourceRevision": 8,
+            }
+        ],
+        result={"objectKey": "publishers/JJM/publication-1/template.rwpart"},
+    )
+
+    result = sync_published_package(storage, package, _publication())
+
+    assert result["status"] == "duplicate"
+    assert result["duplicateOf"] == "existing-publication"
+    assert storage.calls == []
+
+
+def test_shared_template_listing_keeps_latest_duplicate_identity():
+    templates = _deduplicate_templates(
+        [
+            {
+                "publicationId": "older",
+                "code": "TPL-001",
+                "version": 1,
+                "sourceRevision": 13,
+                "createdAt": "2026-10-15T12:00:00Z",
+            },
+            {
+                "publicationId": "newer",
+                "code": "TPL-001",
+                "version": 1,
+                "sourceRevision": 13,
+                "createdAt": "2026-10-15T12:01:00Z",
+            },
+        ]
+    )
+
+    assert [item["publicationId"] for item in templates] == ["newer"]
