@@ -3,66 +3,66 @@
     {
       "code": "RW-BOX-WELDED-BEAM-001",
       "name": "标准化抱焊梁模板",
-      "revision": 21,
+      "revision": 23,
       "file": "RW-BOX-WELDED-BEAM-001.rwpart",
-      "bytes": 22206,
-      "sha256": "8ff56d50975667f4fc0604b9001cf5ade7cd38ea6a00bd2bba1490d35ccba969"
+      "bytes": 22308,
+      "sha256": "0be2f09805e51c07c34035d2c1fd4f7a2e99ee976e8aa7deaa1bf8d5d6b99975"
     },
     {
       "code": "RW-COLUMN-CLAW-001",
       "name": "立柱挂爪模板",
-      "revision": 27,
+      "revision": 29,
       "file": "RW-COLUMN-CLAW-001.rwpart",
-      "bytes": 26613,
-      "sha256": "f030840601577218af71e96878a19ffe809558590a21b4785b1c6e92492bdddc"
+      "bytes": 26726,
+      "sha256": "95d68e7d5cb12a9b21f9cb59ff4e3e023da49fce873551a9fe0e9f31c0414357"
     },
     {
       "code": "RW-CROSS-BEAM-001",
       "name": "标准化跨梁模板",
-      "revision": 21,
+      "revision": 23,
       "file": "RW-CROSS-BEAM-001.rwpart",
-      "bytes": 22542,
-      "sha256": "4b3e498bf88c090d82039c4ee726eca752cb8877df5f8e69055fe4a98e27c739"
+      "bytes": 22649,
+      "sha256": "55c251041696e0b1bd817a66f3669c54d5b89edaff4f475e363aa8f75fbf0782"
     },
     {
       "code": "RW-CROSS-BEAM-HOOK-001",
       "name": "标准化跨梁挂钩模板",
-      "revision": 21,
+      "revision": 23,
       "file": "RW-CROSS-BEAM-HOOK-001.rwpart",
-      "bytes": 20578,
-      "sha256": "6bc0823f16ded58dd91f1829b211077edb84e6047ecfde9d21e84b9f25cf0a73"
+      "bytes": 20688,
+      "sha256": "76147ab66211fee5bd3e9a60e7069bdb33ee7f0b4ff193ef702a39e3fd008d7b"
     },
     {
       "code": "RW-LINK-ROD-001",
       "name": "标准化单连接杆模板",
-      "revision": 34,
+      "revision": 36,
       "file": "RW-LINK-ROD-001.rwpart",
-      "bytes": 22027,
-      "sha256": "71a3e7f596e3b073b3d3427fd36280fe7f62b84dcbe363d204b77c068ff0298e"
+      "bytes": 22139,
+      "sha256": "0e389933404c08178a2e7e5f9b4b1cd579c5509f1b75efdc6fde0f4c254ce23c"
     },
     {
       "code": "RW-LINK-ROD-002",
       "name": "中连接杆模板",
-      "revision": 23,
+      "revision": 25,
       "file": "RW-LINK-ROD-002.rwpart",
-      "bytes": 22144,
-      "sha256": "b072f882e92b0615cf02ea20b717fda7b48b66f3df4da5ba68e279c4dd9a1238"
+      "bytes": 22253,
+      "sha256": "3d82be7101f2bdd0a51f94489be6f73371aac72532bf6e782eb6f5565182cd35"
     },
     {
       "code": "RW-MID-CROSS-BEAM-001",
       "name": "标准化中横梁模板",
-      "revision": 22,
+      "revision": 24,
       "file": "RW-MID-CROSS-BEAM-001.rwpart",
-      "bytes": 22498,
-      "sha256": "9632984f8a4300477e0968cb92242a436358cc555159547707e86aa67a180cca"
+      "bytes": 22610,
+      "sha256": "c293a67b53fc4f3fe15000c7ea451119acd24423dcadb7d0dc87a200ff79160e"
     },
     {
       "code": "RW-TPL-0001",
       "name": "Ω型立柱模板",
-      "revision": 21,
+      "revision": 23,
       "file": "RW-TPL-0001.rwpart",
-      "bytes": 23745,
-      "sha256": "773a8cc243e277d44d0e6e2fd4f21578a624a4e4afb5eae3dbfed28a064cd4f7"
+      "bytes": 23849,
+      "sha256": "96543feae21ff66a3abdac49397618d640ba361ca86d4da8157115abb33c34cb"
     }
   ]
 }

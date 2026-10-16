@@ -30,25 +30,40 @@ def export():
             selected[code] = draft
     if set(selected) != CODES:
         raise RuntimeError(f"Missing components: {sorted(CODES - set(selected))}")
-    # Validate every package before copying anything. Never silently upload stale revisions.
+    # Export the latest successfully published package. A draft may have a newer
+    # unsaved/unpublished revision than its latest published package.
     prepared = []
     for code, draft in sorted(selected.items()):
-        source = ROOT / "artifacts/packages" / f"{code}-r{draft['revision']}.rwpart"
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+            row = connection.execute(
+                """
+                SELECT source_package_url, source_revision
+                FROM template_versions
+                WHERE template_id = ?
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                (draft["id"],),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError(f"Missing published version: {code}")
+        package_url, source_revision = row
+        source = ROOT / package_url.lstrip("/").replace("/", "\\")
         with zipfile.ZipFile(source) as archive:
             if archive.testzip():
                 raise RuntimeError(f"Corrupt package: {source.name}")
             manifest = json.loads(archive.read("manifest.json"))
-            if manifest.get("code") != code or manifest.get("revision") != draft["revision"]:
+            if manifest.get("code") != code or manifest.get("revision") != source_revision:
                 raise RuntimeError(f"Package revision mismatch: {source.name}")
-        prepared.append((code, draft, source))
+        prepared.append((code, draft, source, source_revision))
     output = ROOT / "deliverables/components"
     output.mkdir(parents=True, exist_ok=True)
     index = []
-    for code, draft, source in prepared:
+    for code, draft, source, source_revision in prepared:
         target = output / f"{code}.rwpart"
         if not target.exists() or source.read_bytes() != target.read_bytes():
             shutil.copyfile(source, target)
-        index.append({"code": code, "name": draft["name"], "revision": draft["revision"],
+        index.append({"code": code, "name": draft["name"], "revision": source_revision,
                       "file": target.name, "bytes": target.stat().st_size,
                       "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
     (output / "manifest.json").write_text(
