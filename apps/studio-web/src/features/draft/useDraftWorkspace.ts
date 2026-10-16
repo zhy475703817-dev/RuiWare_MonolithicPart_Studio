@@ -580,9 +580,11 @@ export function useDraftWorkspace() {
       setVersions(await api.versions(saved.id));
       const remoteNotice = result.remoteSync.status === "uploaded"
         ? "，已同步到共享模板库"
-        : result.remoteSync.status === "failed"
-          ? "，但共享模板同步失败，本地版本仍已保存"
-          : "，共享模板同步未配置";
+        : result.remoteSync.status === "duplicate"
+          ? "，共享模板库已有相同版本，未重复上传"
+          : result.remoteSync.status === "failed"
+            ? "，但共享模板同步失败，本地版本仍已保存"
+            : "，共享模板同步未配置";
       setNotice(`V${result.version.version} 已发布并冻结${remoteNotice}`);
     } catch (errorValue) {
       await showRevisionConflict(errorValue, saved.id);

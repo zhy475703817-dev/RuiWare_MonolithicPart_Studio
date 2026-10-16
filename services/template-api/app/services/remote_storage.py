@@ -23,6 +23,25 @@ class RemoteStorageIntegrityError(RuntimeError):
     pass
 
 
+def _publication_identity(metadata: dict[str, Any]) -> tuple[Any, ...]:
+    values = (metadata.get("code"), metadata.get("version"), metadata.get("sourceRevision"))
+    if any(value is None for value in values):
+        return ("publicationId", metadata.get("publicationId"))
+    return values
+
+
+def _deduplicate_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for template in sorted(templates, key=lambda value: value.get("createdAt", ""), reverse=True):
+        identity = _publication_identity(template)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(template)
+    return unique
+
+
 def _object_key(prefix: str, publication_id: str, filename: str) -> str:
     if not publication_id or "/" in publication_id or "\\" in publication_id:
         raise ValueError("invalid publication id")
@@ -66,7 +85,7 @@ class MinioTemplateStorage:
             finally:
                 response.close()
                 response.release_conn()
-        return sorted(templates, key=lambda value: value.get("createdAt", ""), reverse=True)
+        return _deduplicate_templates(templates)
 
     def download_package(self, publication_id: str) -> tuple[bytes, dict[str, Any]]:
         metadata = next((item for item in self.list_templates() if item.get("publicationId") == publication_id), None)
@@ -124,6 +143,12 @@ def sync_published_package(
         "size": package_path.stat().st_size,
     }
     try:
+        existing = next(
+            (item for item in storage.list_templates() if _publication_identity(item) == _publication_identity(metadata)),
+            None,
+        )
+        if existing is not None:
+            return {"status": "duplicate", "duplicateOf": existing.get("publicationId"), **metadata}
         remote = storage.upload_package(package_path, publication, metadata)
     except Exception:
         return {"status": "failed", "errorCode": "REMOTE_STORAGE_UNAVAILABLE", **metadata}
