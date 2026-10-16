@@ -92,6 +92,7 @@ from .services.operations import (  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
 from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
 from .event_stream import stream_draft_events  # noqa: E402
+from .services.remote_storage import RemoteStorageIntegrityError, build_remote_storage  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -124,6 +125,7 @@ class PublishResult(BaseModel):
     draft: TemplateDraft
     version: PublishedVersion
     validation: StageValidation
+    remoteSync: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProposalPreviewRequest(BaseModel):
@@ -379,6 +381,8 @@ def health() -> dict[str, object]:
         "materialDatabase": str(MATERIAL_DATABASE),
         "materialDatabaseAvailable": MATERIAL_DATABASE.exists(),
         "cadWorker": "process-isolated-opencascade",
+        "workspaceRoot": str(PLATFORM_ROOT),
+        "sharedTemplatesAvailable": build_remote_storage() is not None,
     }
 
 
@@ -653,6 +657,38 @@ def list_published_versions(draft_id: str):
     return list_published_versions_service(repository, draft_id)
 
 
+@app.get("/api/v1/shared-templates")
+def list_shared_templates():
+    storage = build_remote_storage()
+    if storage is None:
+        raise api_error("REMOTE_STORAGE_NOT_CONFIGURED", status_code=503, retryable=False)
+    try:
+        return storage.list_templates()
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503) from exc
+
+
+@app.get("/api/v1/shared-templates/{publication_id}/download")
+def download_shared_template(publication_id: str):
+    storage = build_remote_storage()
+    if storage is None:
+        raise api_error("REMOTE_STORAGE_NOT_CONFIGURED", status_code=503, retryable=False)
+    try:
+        content, metadata = storage.download_package(publication_id)
+    except KeyError as exc:
+        raise api_error("REMOTE_TEMPLATE_NOT_FOUND", status_code=404) from exc
+    except RemoteStorageIntegrityError as exc:
+        raise api_error("REMOTE_STORAGE_INTEGRITY_ERROR", status_code=502) from exc
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503) from exc
+    from urllib.parse import quote
+    filename = quote(f"{metadata.get('code', publication_id)}-V{metadata.get('version', 'unknown')}.rwpart", safe="")
+    return StreamingResponse(iter([content]), media_type="application/octet-stream", headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+        "X-RuiWare-SHA256": str(metadata.get("sha256", "")),
+    })
+
+
 @app.post("/api/v1/template-drafts/{draft_id}/proposals/preview")
 def preview_proposal(draft_id: str, request: ProposalPreviewRequest):
     return preview_template_proposal_service(repository, draft_id, request.proposal, request.selectedCommandIds)
@@ -669,5 +705,5 @@ def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: 
 def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
     expected_revision = context.base_revision
-    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
-    return PublishResult(draft=released, version=version, validation=validation)
+    released, version, validation, remote_sync = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
+    return PublishResult(draft=released, version=version, validation=validation, remoteSync=remote_sync)

@@ -19,6 +19,7 @@ from .compile import run_cad_worker as run_cad_worker_service, write_source_pack
 from .context import nominal_material_context, validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
 from .reconstruction_document import build_reconstruction_guide
+from .remote_storage import RemoteTemplateStorage, build_remote_storage, sync_published_package
 
 
 def write_source_package(repository: Repository, draft: TemplateDraft, artifact_root: Path = ARTIFACT_ROOT, attachment_root: Path = ATTACHMENT_ROOT) -> Path:
@@ -128,6 +129,7 @@ def publish_template(
     artifact_root: Path = ARTIFACT_ROOT,
     attachment_root: Path = ATTACHMENT_ROOT,
     expected_revision: int | None = None,
+    remote_storage: RemoteTemplateStorage | None = None,
 ):
     draft = draft_or_404(repository, draft_id)
     ensure_draft_revision(draft, expected_revision)
@@ -148,4 +150,9 @@ def publish_template(
     )
     package = write_source_package_service(released, repository, artifact_root, attachment_root)
     version = repository.publish(released, latest, f"/artifacts/packages/{package.name}")
-    return released, version, validation
+    remote_sync = sync_published_package(
+        remote_storage if remote_storage is not None else build_remote_storage(),
+        package,
+        version,
+    )
+    return released, version, validation, remote_sync

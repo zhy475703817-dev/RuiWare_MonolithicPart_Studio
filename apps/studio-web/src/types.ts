@@ -698,4 +698,24 @@ export type PublishResult = {
   draft: Draft;
   version: PublishedVersion;
   validation: StageValidation;
+  remoteSync: {
+    status: "uploaded" | "failed" | "disabled";
+    publicationId?: string;
+    objectKey?: string;
+    sha256?: string;
+    errorCode?: string;
+    reason?: string;
+  };
+};
+export type SharedTemplate = {
+  publicationId: string;
+  templateId: string;
+  version: number;
+  sourceRevision: number;
+  code: string;
+  name: string;
+  createdAt: string;
+  sha256: string;
+  size: number;
+  objectKey: string;
 };

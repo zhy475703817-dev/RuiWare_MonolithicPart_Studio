@@ -36,7 +36,7 @@ function Test-PythonCandidate {
     if ($candidatePythonPath) { $env:PYTHONPATH = $candidatePythonPath }
     else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
     try {
-        $null = & $Candidate.Path -c "import fastapi, uvicorn, pydantic, OCP; import sys; sys.path.insert(0, r'$ProjectRoot\services\template-api'); import app.main" 2>$null
+        $null = & $Candidate.Path -c "import fastapi, uvicorn, pydantic, OCP, minio; import sys; sys.path.insert(0, r'$ProjectRoot\services\template-api'); import app.main" 2>$null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
@@ -49,7 +49,7 @@ function Test-PythonCandidate {
 $OriginalPythonPath = $env:PYTHONPATH
 $SelectedPython = $PythonCandidates | Where-Object { Test-PythonCandidate $_ } | Select-Object -First 1
 if (-not $SelectedPython) {
-    throw 'No usable Python runtime found. Restore Python 3.12 or install the project dependencies with the steps in README.md.'
+    throw 'No usable Python runtime found (MinIO is required). Install project dependencies with python -m pip install -e .[test] using Python 3.12.'
 }
 $PythonExecutable = $SelectedPython.Path
 $env:PYTHONPATH = Get-PythonPathForCandidate $SelectedPython.UseProjectPackages
@@ -157,6 +157,17 @@ if (-not (Test-LocalPort $WebPort)) {
 
 Wait-HttpReady "http://127.0.0.1:$ApiPort/docs"
 Wait-HttpReady "http://127.0.0.1:$WebPort/"
+
+$activeHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/health"
+if (-not $activeHealth.workspaceRoot) {
+    throw 'An older API is already running on this port. Restart the RuiWare API to load the current code.'
+}
+if ([IO.Path]::GetFullPath($activeHealth.workspaceRoot) -ne [IO.Path]::GetFullPath($ProjectRoot)) {
+    Write-Warning "Port $ApiPort is serving another workspace: $($activeHealth.workspaceRoot). No data was copied. Use that workspace or choose different API/Web ports."
+}
+if (-not $activeHealth.sharedTemplatesAvailable) {
+    Write-Warning 'Shared templates are unavailable. Check the MinIO dependency and RUIWARE_MINIO_* environment configuration.'
+}
 
 Write-Host "Template API: http://127.0.0.1:$ApiPort"
 Write-Host "Template Studio: http://127.0.0.1:$WebPort"

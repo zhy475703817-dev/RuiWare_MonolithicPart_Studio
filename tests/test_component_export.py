@@ -20,7 +20,9 @@ def exporter(tmp_path):
     with sqlite3.connect(tmp_path / "data/platform.db") as db:
         db.execute("CREATE TABLE template_drafts (payload_json TEXT, archived_at TEXT)")
         db.execute("INSERT INTO template_drafts VALUES (?,NULL)",
-                   (json.dumps({"code": "TEST-001", "revision": 2, "name": "test"}),))
+                   (json.dumps({"id": "draft-test", "code": "TEST-001", "revision": 3, "name": "test"}),))
+        db.execute("CREATE TABLE template_versions (template_id TEXT, version INTEGER, source_package_url TEXT, source_revision INTEGER)")
+        db.execute("INSERT INTO template_versions VALUES ('draft-test',1,'/artifacts/packages/TEST-001-r2.rwpart',2)")
     source = tmp_path / "artifacts/packages/TEST-001-r2.rwpart"
     with zipfile.ZipFile(source, "w") as archive:
         archive.writestr("manifest.json", json.dumps({"code": "TEST-001", "revision": 2}))

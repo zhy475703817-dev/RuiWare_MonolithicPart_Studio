@@ -1,4 +1,4 @@
-param([string]$Message = 'Sync local code and component deliverables', [switch]$Preview)
+param([string]$Message = 'Sync local code and component deliverables', [switch]$Preview, [string[]]$IncludePaths = @())
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
@@ -13,7 +13,15 @@ if (Test-Path -LiteralPath (Join-Path $gitRuntime 'mingw64\bin')) {
     $env:PATH = (Join-Path $gitRuntime 'mingw64\bin') + ';' + $env:PATH
 }
 function Invoke-Git {
-    & git @args
+    # Git progress and CRLF notices use stderr even on success. Windows
+    # PowerShell otherwise treats these native notices as terminating errors.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git @args 2>&1 | ForEach-Object { "$_" }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     if ($LASTEXITCODE -ne 0) { throw "Git failed: $($args -join ' ')" }
 }
 if ((Invoke-Git symbolic-ref --short HEAD) -ne 'en888-jpg') { throw 'Only en888-jpg may be synchronized.' }
@@ -39,6 +47,14 @@ $paths = @('apps/studio-web/src', 'apps/studio-web/public', 'apps/studio-web/pac
     'deliverables', 'README.md', 'AGENTS.md', '.gitignore', '.gitattributes', '.editorconfig',
     'pyproject.toml', 'package.json', 'package-lock.json', 'bun.lock', 'start-dev.ps1',
     'start-dev.bat', 'sync-github.bat', 'watch-sync-github.bat') | Where-Object { Test-Path -LiteralPath $_ }
+if ($IncludePaths.Count) {
+    foreach ($path in $IncludePaths) {
+        if ([IO.Path]::IsPathRooted($path) -or $path -match '(^|[\\/])\.\.([\\/]|$)|[:*?]' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "IncludePaths must contain existing repository files: $path"
+        }
+    }
+    $paths = $IncludePaths
+}
 $paths += @(':(exclude)**/*.egg-info/**', ':(exclude)**/__pycache__/**',
     ':(exclude)**/*.pyc', ':(exclude)**/*.log', ':(exclude)**/*.tsbuildinfo')
 if ($Preview) {

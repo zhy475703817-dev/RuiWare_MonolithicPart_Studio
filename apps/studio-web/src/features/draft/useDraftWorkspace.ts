@@ -595,7 +595,12 @@ export function useDraftWorkspace() {
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setVersions(await api.versions(saved.id));
-      setNotice(`V${result.version.version} 已发布并冻结`);
+      const remoteNotice = result.remoteSync.status === "uploaded"
+        ? "，已同步到共享模板库"
+        : result.remoteSync.status === "failed"
+          ? "，但共享模板同步失败，本地版本仍已保存"
+          : "，共享模板同步未配置";
+      setNotice(`V${result.version.version} 已发布并冻结${remoteNotice}`);
     } catch (errorValue) {
       await showRevisionConflict(errorValue, saved.id);
     } finally {

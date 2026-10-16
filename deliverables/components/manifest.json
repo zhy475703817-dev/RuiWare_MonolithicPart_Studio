@@ -3,10 +3,10 @@
     {
       "code": "RW-BOX-WELDED-BEAM-001",
       "name": "标准化抱焊梁模板",
-      "revision": 23,
+      "revision": 27,
       "file": "RW-BOX-WELDED-BEAM-001.rwpart",
-      "bytes": 22308,
-      "sha256": "0be2f09805e51c07c34035d2c1fd4f7a2e99ee976e8aa7deaa1bf8d5d6b99975"
+      "bytes": 22310,
+      "sha256": "910b4bdc658869dc3557fd595dea137eca837ebcc8bc0ba50b3e8636f5027acb"
     },
     {
       "code": "RW-COLUMN-CLAW-001",
