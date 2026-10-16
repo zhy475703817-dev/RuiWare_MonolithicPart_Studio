@@ -46,8 +46,8 @@ function Wait-HttpReady {
 
 if (-not $MaterialDatabase) {
     $materialCandidates = @(
-        (Join-Path $ProjectRoot 'ruiware.db'),
-        (Join-Path (Split-Path -Parent $ProjectRoot) 'debug\debug\ruiware.db')
+        (Join-Path (Split-Path -Parent (Split-Path -Parent $ProjectRoot)) 'debug\debug\ruiware.db'),
+        (Join-Path $ProjectRoot 'ruiware.db')
     )
     $MaterialDatabase = $materialCandidates |
         Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
