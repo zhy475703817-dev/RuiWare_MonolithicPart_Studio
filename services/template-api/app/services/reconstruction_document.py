@@ -250,7 +250,9 @@ def _build_technical_appendix(
     lines.extend(["", "### 技术附录 E：变体、接口、材料和发布状态", ""])
     lines.extend(_table(["变体 ID", "名称", "参数覆盖"], [[item.id, item.name, _json(item.overrides)] for item in draft.variants]))
     lines.extend(["", "#### 接口", ""])
-    lines.extend(_table(["接口 ID", "名称", "类型", "参数/来源"], [[item.id, item.name, item.interfaceType, _json(item.model_dump(mode="json"))] for item in draft.interfaces]))
+    from .reconstruction_interfaces import build_interface_reference_lines
+
+    lines.extend(build_interface_reference_lines(draft, _table))
     lines.extend(["", "#### 材料、毛坯和阶段状态", ""])
     lines.append(f"材料要求：`{_json([item.model_dump(mode='json') for item in draft.materialRequirements])}`")
     lines.append(f"毛坯：`{_json(draft.blank.model_dump(mode='json'))}`")
@@ -364,7 +366,9 @@ def _render_reconstruction_guide(
         lines.extend(_table(["变体名称", "覆盖参数"], [[item.name or "未命名变体", ", ".join(parameter_labels.get(name, "参数") for name in item.overrides) or "无"] for item in draft.variants]))
     else:
         lines.append("当前模板没有额外变体，仅使用基准规格。")
-    lines.extend(["", f"当前定义 {len(draft.interfaces)} 个对外接口。接口用于让其他模板或实例引用本零件的参数、几何面或规则结果。", ""])
+    from .reconstruction_interfaces import build_interface_guide_lines
+
+    lines.extend(build_interface_guide_lines(draft, _table))
 
     _section(lines, "9. 完整复现流程")
     lines.extend(["1. 创建模板，填写名称、用途、设计意图、制造方式和材料要求。", "2. 按第 3 节建立参数，并保持参数的单位、范围和默认值一致。", "3. 按第 5 节建立草图，添加尺寸和几何约束，确认三个工况自由度为 0。", "4. 按第 6 节配置基础几何，确认生成实体和语义面。", "5. 按第 7 节建立加工规则，确认规则的触发条件、参数和作用区域。", "6. 建立变体和接口，执行规则求值和 CAD 编译。", "7. 按下一节处理所有失败检查项，完成验证后填写复核人和版本说明。", ""])

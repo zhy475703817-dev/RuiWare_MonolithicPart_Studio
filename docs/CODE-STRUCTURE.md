@@ -688,3 +688,23 @@ STEP / STL / diagnostics / semantic-map
 - 补充 `draft_events`、`draft_access`、`operation_audit` 等当前数据库表职责。
 - 补充 `sweep_path*`、语义面、CAD 算子分类、MCP 创建/回滚/审计工具和当前测试分布。
 - 增加模板重建说明书生成器、发布页预览/下载面板、只读说明书 API，以及 `.rwpart` 内说明书和校验摘要的结构说明。
+## 共享模板 MinIO
+
+- `services/template-api/app/config.py`：读取每台电脑本地的 MinIO 连接配置，不保存密钥。
+- `services/template-api/app/services/remote_storage.py`：MinIO 适配器，负责发布包上传、共享模板列表、下载和 SHA-256 完整性校验。
+- `services/template-api/app/services/workflow.py`：本地发布完成后调用远程同步；远程失败不会回滚本地发布。
+- `services/template-api/app/main.py`：提供共享模板列表、下载接口，并在发布响应中返回 `remoteSync` 状态。
+- `apps/studio-web/src/features/stages/review/admission/SharedTemplatesPanel.tsx`：发布页中的共享模板列表和下载入口。
+- `tests/test_remote_template_storage.py`、`tests/test_shared_templates_api.py`：验证远程同步降级、上传状态、共享列表、下载校验失败等行为。
+
+远程对象按 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录 `metadata.json` 存储。MinIO 凭据只通过本地环境变量配置，不提交 Git。
+
+## 对外模板只读 API
+
+- `services/template-api/app/security.py`：通过 `RUIWARE_PUBLIC_API_KEY` 验证外部平台请求，不复用成员 MinIO 密钥。
+- `services/template-api/app/main.py`：提供 `/api/public/v1/templates` 列表、单个模板元数据和 `.rwpart` 下载接口；响应会隐藏 MinIO 对象路径。
+- `services/template-api/app/errors.py`：提供公开接口未配置和 API Key 无效的稳定错误码。
+- `start-dev.ps1`：通过 `RUIWARE_API_HOST` 配置 API 监听地址，默认仍为本机地址，避免开发环境意外暴露。
+- `tests/test_public_templates_api.py`：验证 API Key、元数据脱敏、下载和未配置错误。
+
+公开接口只读，不允许外部平台修改、发布或删除模板。正式部署时由 HTTPS 反向代理暴露 API，MinIO 的 `9000/9001` 端口保持私有。
