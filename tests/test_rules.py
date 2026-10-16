@@ -351,6 +351,165 @@ def test_interface_parameter_and_geometry_refs_are_checked() -> None:
     assert not next(item for item in result.checks if item.id == "interface-geometry-refs").passed
 
 
+def test_contract_rejects_multiple_interface_geometry_references() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "多面接口",
+        "interfaces": [{
+            "id": "interface.multiFace",
+            "name": "多面接口",
+            "geometryRefs": ["part.face.front", "part.face.back"],
+        }],
+    })
+
+    result = validate_stage("variants", draft)
+    check = next(item for item in result.checks if item.id == "interface-completeness")
+    assert not check.passed
+    assert "只能关联一个语义面" in check.message
+
+
+def test_interface_rectangle_expressions_and_linear_placement_are_resolved() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口矩形阵列",
+        "interfaces": [{
+            "id": "interface.contact",
+            "name": "贴合区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "max(-sectionWidth / 2, -30)",
+                "vStartExpression": "0",
+                "uSpanExpression": "sectionWidth / 4",
+                "vSpanExpression": "100",
+                "countExpression": "3",
+                "placement": {
+                    "mode": "linearArray",
+                    "axis": "v",
+                    "pitchExpression": "200",
+                    "startMarginExpression": "50",
+                },
+            },
+        }],
+    })
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        [],
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+
+    assert evaluation.success, evaluation.diagnostics
+    assert [item.region.vStart for item in evaluation.resolvedInterfaces if item.region] == [100, 300, 500]
+    assert all(item.region and item.region.uStart == -30 for item in evaluation.resolvedInterfaces)
+    assert all(item.region and item.region.uSpan == 25 for item in evaluation.resolvedInterfaces)
+
+
+def test_interface_rectangle_u_start_is_the_region_midpoint() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口 U 中点",
+        "interfaces": [{
+            "id": "interface.center",
+            "name": "中心区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "0",
+                "vStartExpression": "100",
+                "uSpanExpression": "40",
+                "vSpanExpression": "20",
+            },
+        }],
+    })
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        [],
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+
+    assert evaluation.success, evaluation.diagnostics
+    region = evaluation.resolvedInterfaces[0].region
+    assert region is not None
+    assert region.uStart == 0
+    assert region.uStart - region.uSpan / 2 == -20
+    assert region.uStart + region.uSpan / 2 == 20
+
+
+def test_interface_rectangle_v_start_is_the_region_midpoint() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口 V 中点",
+        "interfaces": [{
+            "id": "interface.centerV",
+            "name": "中心区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "0",
+                "vStartExpression": "100",
+                "uSpanExpression": "40",
+                "vSpanExpression": "20",
+            },
+        }],
+    })
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        [],
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+
+    assert evaluation.success, evaluation.diagnostics
+    region = evaluation.resolvedInterfaces[0].region
+    assert region is not None
+    assert region.vStart == 100
+    assert region.vStart - region.vSpan / 2 == 90
+    assert region.vStart + region.vSpan / 2 == 110
+
+
+def test_legacy_numeric_interface_rectangle_is_migrated_to_expressions() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "旧接口区域",
+        "interfaces": [{
+            "id": "interface.legacy",
+            "name": "旧区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {"mode": "rectangle", "uStart": -20, "vStart": 10, "uSpan": 40, "vSpan": 50},
+        }],
+    })
+
+    region = draft.interfaces[0].region
+    assert region is not None
+    assert (region.uStartExpression, region.vStartExpression) == ("-20", "10")
+    assert (region.uSpanExpression, region.vSpanExpression) == ("40", "50")
+
+
+def test_interface_region_expression_references_are_contract_checked() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口区域缺参",
+        "interfaces": [{
+            "id": "interface.badRegion",
+            "name": "缺参区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "unknownOffset",
+                "vStartExpression": "0",
+                "uSpanExpression": "20",
+                "vSpanExpression": "20",
+            },
+        }],
+    })
+
+    result = validate_stage("variants", draft)
+    check = next(item for item in result.checks if item.id == "interface-parameter-refs")
+    assert not check.passed
+    assert "unknownOffset" in check.message
+    feature_check = next(item for item in validate_stage("features", draft).checks if item.id == "feature-rules")
+    assert feature_check.passed
+
+
 def test_contract_checks_interface_completeness_and_parameter_consistency() -> None:
     draft = TemplateDraft.model_validate({
         "name": "契约合理性检查",

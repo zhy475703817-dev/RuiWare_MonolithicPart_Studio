@@ -19,6 +19,116 @@ type InterfaceEditorProps = {
   save?: (draft?: Draft | null) => Promise<Draft | null | undefined>;
 };
 
+const defaultPlacement = (): NonNullable<PartInterface["region"]>["placement"] => ({
+  mode: "single",
+  axis: "v",
+  pitchExpression: "100",
+  startMarginExpression: "0",
+  endMarginExpression: "0",
+  maximumPitchExpression: "300",
+});
+
+const centeredRegionExpressions = (
+  face?: Draft["geometryRecipe"]["semanticFaces"][number],
+) => ({
+  uStartExpression: face
+    ? `(${face.uStartExpression}) + (${face.uSpanExpression}) / 2`
+    : "0",
+  vStartExpression: face
+    ? `(${face.vStartExpression}) + (${face.vSpanExpression}) / 2`
+    : "0",
+  uSpanExpression: face ? `(${face.uSpanExpression}) / 2` : "100",
+  vSpanExpression: face ? `(${face.vSpanExpression}) / 2` : "100",
+});
+
+function InterfaceRegionEditor({
+  item,
+  face,
+  onChange,
+}: {
+  item: PartInterface;
+  face?: Draft["geometryRecipe"]["semanticFaces"][number];
+  onChange: (region: NonNullable<PartInterface["region"]>) => void;
+}) {
+  const defaultExpressions = centeredRegionExpressions(face);
+  const region = item.region || {
+    mode: "fullFace" as const,
+    ...defaultExpressions,
+    countExpression: "1",
+    indexVariable: "i",
+    placement: defaultPlacement(),
+    maximumCount: 2000,
+  };
+  const setRegion = (patch: Partial<typeof region>) => onChange({ ...region, ...patch });
+  const setPlacement = (patch: Partial<typeof region.placement>) =>
+    setRegion({ placement: { ...region.placement, ...patch } });
+  const expressionInput = (value: string, update: (value: string) => void) => (
+    <code className="code-input"><input list="interface-parameter-options" value={value} onChange={(event) => update(event.target.value)} /></code>
+  );
+  return (
+    <div className="interface-region-editor">
+      <strong>区域</strong>
+      <small>矩形区域使用语义面局部 U/V 表达式，可引用参数和 min、max、round、clamp 等函数。</small>
+      <div className="form-grid four">
+        <Field label="区域方式">
+          <select value={region.mode} onChange={(event) => {
+            const mode = event.target.value as "fullFace" | "rectangle";
+            setRegion(mode === "rectangle" && region.mode !== "rectangle" ? {
+              mode,
+              ...defaultExpressions,
+            } : { mode });
+          }}>
+            <option value="fullFace">整个几何面</option>
+            <option value="rectangle">矩形区域</option>
+          </select>
+        </Field>
+        {region.mode === "rectangle" && <>
+          <Field label="U 中点表达式">{expressionInput(region.uStartExpression, (value) => setRegion({ uStartExpression: value }))}</Field>
+          <Field label="V 中点表达式">{expressionInput(region.vStartExpression, (value) => setRegion({ vStartExpression: value }))}</Field>
+          <Field label="U 尺寸表达式">{expressionInput(region.uSpanExpression, (value) => setRegion({ uSpanExpression: value }))}</Field>
+          <Field label="V 尺寸表达式">{expressionInput(region.vSpanExpression, (value) => setRegion({ vSpanExpression: value }))}</Field>
+        </>}
+      </div>
+      {region.mode === "rectangle" && <div className="interface-region-placement">
+        <strong>布置规则</strong>
+        <small>规则语义与制造特征一致；U/V 方向均以矩形中点为定位点，并保证矩形不超出语义面。</small>
+        <div className="form-grid three">
+          <Field label="布置方式">
+            <select value={region.placement.mode} onChange={(event) => setPlacement({ mode: event.target.value as typeof region.placement.mode })}>
+              <option value="single">单项</option>
+              <option value="linearArray">线性阵列</option>
+              <option value="equalSpan">两端均布</option>
+              <option value="maxPitch">最大间距</option>
+              <option value="symmetric">对称阵列</option>
+            </select>
+          </Field>
+          <Field label="布置轴">
+            <select value={region.placement.axis} onChange={(event) => setPlacement({ axis: event.target.value as "u" | "v" })}>
+              <option value="u">U</option><option value="v">V</option>
+            </select>
+          </Field>
+          <Field label={region.placement.mode === "maxPitch" ? "数量" : "数量表达式"}>
+            <code className="code-input"><input list="interface-parameter-options" disabled={region.placement.mode === "single" || region.placement.mode === "maxPitch"} value={region.placement.mode === "single" ? "1" : region.placement.mode === "maxPitch" ? "自动计算" : region.countExpression} onChange={(event) => setRegion({ countExpression: event.target.value })} /></code>
+          </Field>
+        </div>
+        {(region.placement.mode === "linearArray" || region.placement.mode === "symmetric") && <div className="form-grid two placement-margins">
+          {region.placement.mode === "linearArray" && <Field label="首项距起始端">{expressionInput(region.placement.startMarginExpression, (value) => setPlacement({ startMarginExpression: value }))}</Field>}
+          <Field label="相邻间距表达式">{expressionInput(region.placement.pitchExpression, (value) => setPlacement({ pitchExpression: value }))}</Field>
+        </div>}
+        {region.placement.mode === "equalSpan" && <div className="form-grid two placement-margins">
+          <Field label="首项距起始端">{expressionInput(region.placement.startMarginExpression, (value) => setPlacement({ startMarginExpression: value }))}</Field>
+          <Field label="末项距终止端">{expressionInput(region.placement.endMarginExpression, (value) => setPlacement({ endMarginExpression: value }))}</Field>
+        </div>}
+        {region.placement.mode === "maxPitch" && <div className="form-grid three placement-margins">
+          <Field label="首项距起始端">{expressionInput(region.placement.startMarginExpression, (value) => setPlacement({ startMarginExpression: value }))}</Field>
+          <Field label="末项距终止端">{expressionInput(region.placement.endMarginExpression, (value) => setPlacement({ endMarginExpression: value }))}</Field>
+          <Field label="最大间距表达式">{expressionInput(region.placement.maximumPitchExpression, (value) => setPlacement({ maximumPitchExpression: value }))}</Field>
+        </div>}
+      </div>}
+    </div>
+  );
+}
+
 export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
   const [preview, setPreview] = useState<CompileResult | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -93,6 +203,9 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
           </button>
         }
       />
+      <datalist id="interface-parameter-options">
+        {draft.parameterDefinitions.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.label}</option>)}
+      </datalist>
       {draft.interfaces.length === 0 ? (
         <div className="empty-note tall">当前模板尚未声明装配接口</div>
       ) : (
@@ -248,7 +361,13 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
                           <option value="tertiary">第三定位</option>
                         </select>
                       </Field>
-                      {item.locatingType === "planeContact" && <div className="interface-region-editor"><strong>区域</strong><small>截取该几何面中用作接口的部分，区域坐标使用语义面的 U/V。</small><div className="form-grid four"><Field label="区域方式"><select value={item.region?.mode || "fullFace"} onChange={(event) => edit(index, { region: { mode: event.target.value as "fullFace" | "rectangle", uStart: item.region?.uStart || 0, vStart: item.region?.vStart || 0, uSpan: item.region?.uSpan ?? null, vSpan: item.region?.vSpan ?? null } })}><option value="fullFace">整个几何面</option><option value="rectangle">矩形区域</option></select></Field>{item.region?.mode === "rectangle" && <><Field label="U 起点"><input type="number" value={item.region.uStart} onChange={(event) => edit(index, { region: { ...item.region!, uStart: Number(event.target.value) } })} /></Field><Field label="V 起点"><input type="number" value={item.region.vStart} onChange={(event) => edit(index, { region: { ...item.region!, vStart: Number(event.target.value) } })} /></Field><Field label="U/V 尺寸"><div className="region-size-fields"><input type="number" min="0.001" placeholder="U" value={item.region.uSpan ?? ""} onChange={(event) => edit(index, { region: { ...item.region!, uSpan: Number(event.target.value) || null } })} /><input type="number" min="0.001" placeholder="V" value={item.region.vSpan ?? ""} onChange={(event) => edit(index, { region: { ...item.region!, uSpan: item.region?.uSpan ?? null, vSpan: Number(event.target.value) || null } })} /></div></Field></>}</div></div>}
+                      {item.locatingType === "planeContact" && (
+                        <InterfaceRegionEditor
+                          item={item}
+                          face={geometryRefs.find((face) => item.geometryRefs.includes(face.id))}
+                          onChange={(region) => edit(index, { region })}
+                        />
+                      )}
                     </>
                   )}
                   {item.declarationMode === "staticGeometry" ? (
@@ -317,30 +436,26 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
                 ) : (
                   <div className="interface-geometry-refs">
                     <strong>关联几何</strong>
-                    <small>选择本零件已定义的语义面；接口 ID 将稳定引用这些几何基准。</small>
-                    <div className="face-binding-list">
+                    <small>选择一个本零件已定义的语义面；接口 ID 将稳定引用该几何基准。</small>
+                    <select
+                      value={item.geometryRefs.length === 1 ? item.geometryRefs[0] : ""}
+                      onChange={(event) => {
+                        const face = geometryRefs.find(({ id }) => id === event.target.value);
+                        edit(index, {
+                          geometryRefs: face ? [face.id] : [],
+                          ...(item.region?.mode === "rectangle"
+                            ? { region: { ...item.region, ...centeredRegionExpressions(face) } }
+                            : {}),
+                        });
+                      }}
+                    >
+                      <option value="">未选择</option>
                       {geometryRefs.map((face) => (
-                        <label key={face.id} className="face-binding-option">
-                          <input
-                            type="checkbox"
-                            checked={item.geometryRefs.includes(face.id)}
-                            onChange={() =>
-                              edit(index, {
-                                geometryRefs: item.geometryRefs.includes(face.id)
-                                  ? item.geometryRefs.filter(
-                                      (faceId) => faceId !== face.id,
-                                    )
-                                  : [...item.geometryRefs, face.id],
-                              })
-                            }
-                          />
-                          <span>
-                            <strong>{face.label}</strong>
-                            <code>{face.id}</code>
-                          </span>
-                        </label>
+                        <option key={face.id} value={face.id}>
+                          {face.label} · {face.id}
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
                 )}
                 <Field label="接口说明">
