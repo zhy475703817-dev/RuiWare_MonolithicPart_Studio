@@ -13,7 +13,6 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakePolygon,
     BRepBuilderAPI_MakeWire,
-    BRepBuilderAPI_Transform,
     BRepBuilderAPI_TransitionMode,
 )
 from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffset, BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_ThruSections
@@ -25,7 +24,7 @@ from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED
 from OCP.TopExp import TopExp, TopExp_Explorer
 from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
-from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Vec
 
 from template_core.sweep_frames import path_frames, segment_start_frames
 
@@ -560,17 +559,7 @@ def _sheet_single_bend(arguments):
     if not wire_builder.IsDone():
         raise RuntimeError("Sheet bend profile wire construction failed")
     face = BRepBuilderAPI_MakeFace(wire_builder.Wire()).Face()
-    shape = BRepPrimAPI_MakePrism(face, gp_Vec(0, width, 0)).Shape()
-    # A recipe may place several formed tabs on one blank. Default placement
-    # preserves the existing single-bend contract and historical packages.
-    offsets = tuple(float(arguments.get("translate" + axis, 0)) for axis in "XYZ")
-    if not all(math.isfinite(value) for value in offsets):
-        raise RuntimeError("Sheet bend placement offsets must be finite")
-    if any(offsets):
-        placement = gp_Trsf()
-        placement.SetTranslation(gp_Vec(*offsets))
-        shape = BRepBuilderAPI_Transform(shape, placement, True).Shape()
-    return shape
+    return BRepPrimAPI_MakePrism(face, gp_Vec(0, width, 0)).Shape()
 
 
 def _line_intersection_2d(

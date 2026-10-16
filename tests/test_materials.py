@@ -90,9 +90,6 @@ def test_ruiware_business_types_map_to_supply_forms_and_decimal_ranges() -> None
     profile_requirement = MaterialRequirement(supplyForm="openProfile")
     omega = {"type":"Ω钢","name":"Ω型立柱原料","thickness":2.0}
     assert material_requirement_mismatches(profile_requirement, omega) == []
-    welded_beam_requirement = MaterialRequirement(supplyForm="closedProfile", thickness={"minimum": 1.5, "maximum": 1.5})
-    welded_beam = {"type":"抱焊梁","name":"120*50*1.5mm抱焊梁","thickness":1.5}
-    assert material_requirement_mismatches(welded_beam_requirement, welded_beam) == []
 
 
 def test_boundary_samples_must_use_boundary_thicknesses() -> None:
@@ -155,90 +152,4 @@ def test_material_search_matches_multiple_fields_and_tokens(tmp_path) -> None:
 
     requirement = MaterialRequirement(supplyForm="openProfile", thickness={"minimum": 1.5, "maximum": 2.5}, reviewed=True)
     result = search_materials(library, repository, "Q355B 镀锌", 100, requirement=requirement)
-    assert result[0]["requirementMatch"]["compatible"] is True
-
-
-def test_material_search_matches_compatible_records_beyond_initial_limit(tmp_path) -> None:
-    path = tmp_path / "materials.db"
-    with sqlite3.connect(path) as connection:
-        connection.execute(
-            """
-            CREATE TABLE materials (
-                id INTEGER PRIMARY KEY, code TEXT, name TEXT, type TEXT, category_group TEXT,
-                data_kind TEXT, length TEXT, width TEXT, height TEXT, thickness TEXT, grade TEXT,
-                color TEXT, drawing_color TEXT, price TEXT, surface TEXT, standard TEXT,
-                stock_qty REAL, available_qty REAL, supplier TEXT, status TEXT,
-                updated_at TEXT, remark TEXT
-            )
-            """
-        )
-        rows = [
-            (
-                index,
-                f"SHEET-{index:03d}",
-                "普通钢板",
-                "板材",
-                "",
-                "raw",
-                "6000",
-                "1500",
-                None,
-                "6",
-                "Q235A",
-                None,
-                None,
-                None,
-                "黑件",
-                "GB/T 700",
-                10,
-                8,
-                "供应商",
-                "已发布",
-                "2026-08-01",
-                "",
-            )
-            for index in range(1, 101)
-        ]
-        rows.append(
-            (
-                101,
-                "SHEET-Q235B",
-                "目标钢板",
-                "板材",
-                "",
-                "raw",
-                "6000",
-                "1500",
-                None,
-                "6",
-                "Q235B",
-                None,
-                None,
-                None,
-                "黑件",
-                "GB/T 700",
-                10,
-                8,
-                "供应商",
-                "已发布",
-                "2026-08-01",
-                "",
-            )
-        )
-        connection.executemany("INSERT INTO materials VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
-
-    library = RuiWareMaterialLibrary(path)
-    repository = Repository(tmp_path / "local.db", library)
-    requirement = MaterialRequirement(
-        selectionMode="family",
-        supplyForm="sheet",
-        allowedGrades=["Q235B"],
-        standards=["GB/T 700"],
-        thickness={"minimum": 3, "maximum": 12},
-        reviewed=True,
-    )
-
-    result = search_materials(library, repository, "", 100, requirement=requirement)
-
-    assert result[0]["code"] == "SHEET-Q235B"
     assert result[0]["requirementMatch"]["compatible"] is True

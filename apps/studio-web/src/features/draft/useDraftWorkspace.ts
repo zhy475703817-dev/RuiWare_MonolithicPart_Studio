@@ -275,23 +275,6 @@ export function useDraftWorkspace() {
     onDraftChanged: (change) => void syncCurrentDraft(change),
   });
 
-  // Backend agents may update a draft without emitting the browser SSE event.
-  // Reconcile on focus/visibility changes and periodically while the workspace is visible.
-  useEffect(() => {
-    if (!draft?.id) return;
-    const refreshFromRemote = () => {
-      if (document.visibilityState === "visible") void syncCurrentDraft();
-    };
-    window.addEventListener("focus", refreshFromRemote);
-    document.addEventListener("visibilitychange", refreshFromRemote);
-    const timer = window.setInterval(refreshFromRemote, 15000);
-    return () => {
-      window.removeEventListener("focus", refreshFromRemote);
-      document.removeEventListener("visibilitychange", refreshFromRemote);
-      window.clearInterval(timer);
-    };
-  }, [draft?.id]);
-
   useEffect(() => {
     if (stage !== "material" || !draft?.materialRequirements[0]) return;
     const timer = window.setTimeout(() => {
@@ -595,7 +578,12 @@ export function useDraftWorkspace() {
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setVersions(await api.versions(saved.id));
-      setNotice(`V${result.version.version} 已发布并冻结`);
+      const remoteNotice = result.remoteSync.status === "uploaded"
+        ? "，已同步到共享模板库"
+        : result.remoteSync.status === "failed"
+          ? "，但共享模板同步失败，本地版本仍已保存"
+          : "，共享模板同步未配置";
+      setNotice(`V${result.version.version} 已发布并冻结${remoteNotice}`);
     } catch (errorValue) {
       await showRevisionConflict(errorValue, saved.id);
     } finally {

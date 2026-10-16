@@ -2,6 +2,7 @@ import { Archive, Braces, CheckCircle2, LoaderCircle, PackageCheck } from "lucid
 import { Field, PanelTitle } from "../../../../components/ui/FormParts";
 import type { Draft, PublishedVersion, StageValidation } from "../../../../types";
 import { ReconstructionGuidePanel } from "./ReconstructionGuidePanel";
+import { SharedTemplatesPanel } from "./SharedTemplatesPanel";
 
 type AdmissionStageProps = {
   draft: Draft;
@@ -105,6 +106,7 @@ export function AdmissionStage({
         </button>
       </div>
       <ReconstructionGuidePanel draftId={draft.id} revision={draft.revision} />
+      <SharedTemplatesPanel />
       <div className="panel">
         <PanelTitle
           icon={Archive}
