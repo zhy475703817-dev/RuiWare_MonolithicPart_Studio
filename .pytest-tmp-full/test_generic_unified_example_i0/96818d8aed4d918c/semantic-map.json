@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "inputHash": "96818d8aed4d918c17f945653edbd35345b8400de73b9bee5076405406124334",
+  "semanticFaces": [
+    {
+      "semanticFaceId": "part.face.front",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.back",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.left",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.right",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.start",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.end",
+      "sourceEntityId": null,
+      "locator": null,
+      "resolvedSupport": null,
+      "resolution": "legacy-host-frame",
+      "operationIds": [
+        "body.main"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "part.body",
+      "sourceOperation": "body.main"
+    }
+  ]
+}

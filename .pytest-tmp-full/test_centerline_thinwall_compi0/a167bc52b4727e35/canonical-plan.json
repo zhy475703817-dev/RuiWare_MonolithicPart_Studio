@@ -1,0 +1,91 @@
+{
+  "version": "3.0",
+  "inputHash": "a167bc52b4727e356a01c7eec6ab37d7f947c6f1d7851e48baf524ba1ded7745",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "sketch.centerline_thinwall_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "thickness": 2.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "centerlineThinWall",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "wall.left",
+              "role": "section.centerline.left",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": 30.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": -30.0
+              }
+            },
+            {
+              "id": "wall.base",
+              "role": "section.centerline.base",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": -30.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": -30.0
+              }
+            },
+            {
+              "id": "wall.right",
+              "role": "section.centerline.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": -30.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": 30.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.thinwall",
+              "operation": "add",
+              "boundaryRefs": [
+                "wall.left",
+                "wall.base",
+                "wall.right"
+              ],
+              "closed": true,
+              "area": 440.0
+            }
+          ],
+          "topologySignature": "add:wall.left,wall.base,wall.right",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

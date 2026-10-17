@@ -1,0 +1,590 @@
+{
+  "version": "3.0",
+  "inputHash": "600fd59496eb2fec0674f275a517011bdd04eb38eed014bcd19f98954140881e",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "solid.sweep",
+      "arguments": {
+        "pathPoints": "-100.0:0.0:0.0;0.0:0.0:0.0;8.715574274765814:0.0:0.38053019082543926;17.36481776669304:0.0:1.5192246987791975;25.881904510252074:0.0:3.4074173710931746;34.20201433256688:0.0:6.03073792140917;42.261826174069945:0.0:9.369221296335013;49.999999999999986:0.0:13.397459621556123;57.35764363510461:0.0:18.084795571100827;64.27876096865394:0.0:23.395555688102192;70.71067811865476:0.0:29.289321881345245;76.60444431189781:0.0:35.72123903134607;81.91520442889917:0.0:42.642356364895385;86.60254037844386:0.0:50.0;90.63077870366499:0.0:57.73817382593006;93.96926207859083:0.0:65.79798566743312;96.59258262890683:0.0:74.1180954897479;98.4807753012208:0.0:82.63518223330696;99.61946980917456:0.0:91.2844257252342;100.0:0.0:100.0",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right",
+        "pathSegmentKinds": [
+          "line",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc",
+          "arc"
+        ],
+        "pathSegmentGeometryIds": [
+          "path.line",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc",
+          "path.arc"
+        ],
+        "pathSegments": [
+          {
+            "geometryId": "path.line",
+            "geometryType": "line",
+            "orderIndex": 0,
+            "forward": true,
+            "plane": "XY",
+            "mappedPlane": "XZ",
+            "segmentIndex": 0,
+            "start": [
+              -100.0,
+              0.0,
+              0.0
+            ],
+            "end": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "forward": true,
+            "plane": "XY",
+            "mappedPlane": "XZ",
+            "segmentIndex": 0,
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "end": [
+              100.0,
+              0.0,
+              100.0
+            ],
+            "center": [
+              0.0,
+              0.0,
+              100.0
+            ],
+            "radius": 100.0,
+            "startAngle": -1.5707963267948966,
+            "endAngle": 0.0,
+            "largeArc": false,
+            "sweepDirection": "ccw",
+            "sweepAngle": 1.5707963267948966,
+            "authoredStartAngle": -1.5707963267948966,
+            "authoredEndAngle": 0.0,
+            "authoredLargeArc": false,
+            "authoredSweepDirection": "ccw"
+          }
+        ],
+        "pathSampledSegments": [
+          {
+            "geometryId": "path.line",
+            "geometryType": "line",
+            "orderIndex": 0,
+            "sampleIndex": 0,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 0,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              1.0,
+              6.123233995736766e-17
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 1,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9961946980917455,
+              0.08715574274765814
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 2,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.984807753012208,
+              0.17364817766693041
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 3,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9659258262890683,
+              0.25881904510252074
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 4,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9396926207859083,
+              0.3420201433256688
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 5,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.9063077870366499,
+              0.42261826174069944
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 6,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.8660254037844387,
+              0.4999999999999999
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 7,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.8191520442889918,
+              0.573576436351046
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 8,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.766044443118978,
+              0.6427876096865394
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 9,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.7071067811865476,
+              0.7071067811865476
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 10,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.6427876096865393,
+              0.766044443118978
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 11,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.5735764363510462,
+              0.8191520442889918
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 12,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.5,
+              0.8660254037844386
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 13,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.4226182617406994,
+              0.9063077870366499
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 14,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.34202014332566877,
+              0.9396926207859083
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 15,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.2588190451025209,
+              0.9659258262890682
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 16,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.17364817766693036,
+              0.984807753012208
+            ]
+          },
+          {
+            "geometryId": "path.arc",
+            "geometryType": "arc",
+            "orderIndex": 1,
+            "sampleIndex": 17,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.08715574274765807,
+              0.9961946980917455
+            ]
+          }
+        ],
+        "pathSegmentTangents": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            6.123233995736766e-17
+          ],
+          [
+            0.9961946980917455,
+            0.0,
+            0.08715574274765814
+          ],
+          [
+            0.984807753012208,
+            0.0,
+            0.17364817766693041
+          ],
+          [
+            0.9659258262890683,
+            0.0,
+            0.25881904510252074
+          ],
+          [
+            0.9396926207859083,
+            0.0,
+            0.3420201433256688
+          ],
+          [
+            0.9063077870366499,
+            0.0,
+            0.42261826174069944
+          ],
+          [
+            0.8660254037844387,
+            0.0,
+            0.4999999999999999
+          ],
+          [
+            0.8191520442889918,
+            0.0,
+            0.573576436351046
+          ],
+          [
+            0.766044443118978,
+            0.0,
+            0.6427876096865394
+          ],
+          [
+            0.7071067811865476,
+            0.0,
+            0.7071067811865476
+          ],
+          [
+            0.6427876096865393,
+            0.0,
+            0.766044443118978
+          ],
+          [
+            0.5735764363510462,
+            0.0,
+            0.8191520442889918
+          ],
+          [
+            0.5,
+            0.0,
+            0.8660254037844386
+          ],
+          [
+            0.4226182617406994,
+            0.0,
+            0.9063077870366499
+          ],
+          [
+            0.34202014332566877,
+            0.0,
+            0.9396926207859083
+          ],
+          [
+            0.2588190451025209,
+            0.0,
+            0.9659258262890682
+          ],
+          [
+            0.17364817766693036,
+            0.0,
+            0.984807753012208
+          ],
+          [
+            0.08715574274765807,
+            0.0,
+            0.9961946980917455
+          ]
+        ],
+        "pathStationTangents": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            6.123233995736766e-17
+          ],
+          [
+            0.9961946980917455,
+            0.0,
+            0.08715574274765814
+          ],
+          [
+            0.984807753012208,
+            0.0,
+            0.17364817766693041
+          ],
+          [
+            0.9659258262890683,
+            0.0,
+            0.25881904510252074
+          ],
+          [
+            0.9396926207859083,
+            0.0,
+            0.3420201433256688
+          ],
+          [
+            0.9063077870366499,
+            0.0,
+            0.42261826174069944
+          ],
+          [
+            0.8660254037844387,
+            0.0,
+            0.4999999999999999
+          ],
+          [
+            0.8191520442889918,
+            0.0,
+            0.573576436351046
+          ],
+          [
+            0.766044443118978,
+            0.0,
+            0.6427876096865394
+          ],
+          [
+            0.7071067811865476,
+            0.0,
+            0.7071067811865476
+          ],
+          [
+            0.6427876096865393,
+            0.0,
+            0.766044443118978
+          ],
+          [
+            0.5735764363510462,
+            0.0,
+            0.8191520442889918
+          ],
+          [
+            0.5,
+            0.0,
+            0.8660254037844386
+          ],
+          [
+            0.4226182617406994,
+            0.0,
+            0.9063077870366499
+          ],
+          [
+            0.34202014332566877,
+            0.0,
+            0.9396926207859083
+          ],
+          [
+            0.2588190451025209,
+            0.0,
+            0.9659258262890682
+          ],
+          [
+            0.17364817766693036,
+            0.0,
+            0.984807753012208
+          ],
+          [
+            0.08715574274765807,
+            0.0,
+            0.9961946980917455
+          ],
+          [
+            -0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "pathPlane": "XY",
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "multiRegion",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "outer",
+              "role": "section.outer",
+              "type": "circle",
+              "construction": false,
+              "center": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "radius": 20.0
+            },
+            {
+              "id": "inner",
+              "role": "section.inner",
+              "type": "circle",
+              "construction": false,
+              "center": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "radius": 10.0
+            }
+          ],
+          "regions": [
+            {
+              "id": "add",
+              "operation": "add",
+              "boundaryRefs": [
+                "outer"
+              ],
+              "closed": true,
+              "area": 1256.6370614359173
+            },
+            {
+              "id": "cut",
+              "operation": "subtract",
+              "boundaryRefs": [
+                "inner"
+              ],
+              "closed": true,
+              "area": 314.1592653589793
+            }
+          ],
+          "topologySignature": "add:outer|subtract:inner",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

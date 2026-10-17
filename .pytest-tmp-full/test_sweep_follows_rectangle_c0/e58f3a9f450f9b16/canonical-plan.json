@@ -1,0 +1,122 @@
+{
+  "version": "3.0",
+  "inputHash": "e58f3a9f450f9b16cd2ef4d65a2e7a8abfa261b1c79d47f3b4bb1e218170964b",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "solid.sweep",
+      "arguments": {
+        "pathPoints": "0.0:0.0:0.0;0.0:0.0:100.0",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right",
+        "pathSegmentKinds": [
+          "line"
+        ],
+        "pathSegmentGeometryIds": [
+          "path.1"
+        ],
+        "pathSegments": [
+          {
+            "geometryId": "path.1",
+            "geometryType": "line",
+            "orderIndex": 0,
+            "forward": true,
+            "plane": "XY",
+            "mappedPlane": "XZ",
+            "segmentIndex": 0,
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "end": [
+              0.0,
+              0.0,
+              100.0
+            ]
+          }
+        ],
+        "pathSampledSegments": [
+          {
+            "geometryId": "path.1",
+            "geometryType": "line",
+            "orderIndex": 0,
+            "sampleIndex": 0,
+            "disconnectedJoin": false,
+            "tangent2d": [
+              0.0,
+              1.0
+            ]
+          }
+        ],
+        "pathSegmentTangents": [
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "pathStationTangents": [
+          [
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "pathPlane": "XY",
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "multiRegion",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "outer",
+              "role": "section.outer",
+              "type": "circle",
+              "construction": false,
+              "center": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "radius": 20.0
+            }
+          ],
+          "regions": [
+            {
+              "id": "region.outer",
+              "operation": "add",
+              "boundaryRefs": [
+                "outer"
+              ],
+              "closed": true,
+              "area": 1256.6370614359173
+            }
+          ],
+          "topologySignature": "add:outer",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}
