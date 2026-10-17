@@ -1,0 +1,130 @@
+{
+  "version": "1.0",
+  "inputHash": "3f8a54705a987419683844278e1782b2830aaaf688ce5f3e1e4df66c1ebb03e3",
+  "semanticFaces": [
+    {
+      "semanticFaceId": "part.face.u.left.inner",
+      "sourceEntityId": "edge.u.left.inner",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.u.left.inner",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -50.0,
+          -25.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main",
+        "cut.holes.u.inner.part_face_u_left_inner.001"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.u.right.inner",
+      "sourceEntityId": "edge.u.right.inner",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.u.right.inner",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -50.0,
+          25.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main",
+        "cut.holes.u.inner.part_face_u_right_inner.001"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "part.body",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.referenceFrame",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.start",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.end",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "feature.holes.u.inner.part_face_u_left_inner.001.center",
+      "sourceOperation": "cut.holes.u.inner.part_face_u_left_inner.001"
+    },
+    {
+      "id": "feature.holes.u.inner.part_face_u_left_inner.001.wall",
+      "sourceOperation": "cut.holes.u.inner.part_face_u_left_inner.001"
+    },
+    {
+      "id": "feature.holes.u.inner.part_face_u_right_inner.001.center",
+      "sourceOperation": "cut.holes.u.inner.part_face_u_right_inner.001"
+    },
+    {
+      "id": "feature.holes.u.inner.part_face_u_right_inner.001.wall",
+      "sourceOperation": "cut.holes.u.inner.part_face_u_right_inner.001"
+    }
+  ]
+}

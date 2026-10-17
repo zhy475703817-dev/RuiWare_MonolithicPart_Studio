@@ -1,9 +1,14 @@
 import sqlite3
+import hashlib
+import io
+import json
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
+from app.services import workflow
 from app.repository import Repository
 from template_core.material import RuiWareMaterialLibrary
 from template_core.models import TemplateDraft
@@ -83,11 +88,42 @@ def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch) -> N
     draft = client.put(f"/api/v1/template-drafts/{draft['id']}", json=draft).json()
     validation = client.get(f"{stage_path}/admission/validate").json()
     assert validation["complete"] is True
+    uploaded = {}
+
+    class InspectingStorage:
+        def list_templates(self):
+            return []
+
+        def upload_package(self, package_path, publication, metadata):
+            uploaded.update(content=package_path.read_bytes(), metadata=metadata)
+            return {"objectKey": f"publishers/test/{publication.id}/template.rwpart"}
+
+    monkeypatch.setattr(workflow, "build_remote_storage", lambda: InspectingStorage())
     released = client.post(f"/api/v1/template-drafts/{draft['id']}/publish")
     assert released.status_code == 200, released.text
     assert released.json()["draft"]["lifecycleStatus"] == "published"
     assert released.json()["version"]["version"] == 1
     assert client.get(f"/api/v1/template-drafts/{draft['id']}/versions").json()[0]["sourceRevision"] > 1
+    stl = next(item for item in compiled.json()["artifacts"] if item["kind"] == "stl")
+    model_bytes = (artifact_root / stl["url"].removeprefix("/artifacts/")).read_bytes()
+    assert len(model_bytes) > 84
+    with zipfile.ZipFile(io.BytesIO(uploaded["content"])) as package:
+        outputs = json.loads(package.read("outputs.json"))
+        packaged_stl = next(item for item in outputs["artifacts"] if item["kind"] == "stl")
+        assert package.read(packaged_stl["packagePath"]) == model_bytes
+        assert packaged_stl["size"] == len(model_bytes)
+        assert packaged_stl["sha256"] == hashlib.sha256(model_bytes).hexdigest() == stl["sha256"]
+        assert outputs["inputHash"] == compiled.json()["inputHash"]
+        manifest = json.loads(package.read("manifest.json"))
+        assert manifest["revision"] == released.json()["version"]["sourceRevision"] == released.json()["draft"]["revision"]
+        assert manifest["unitSystem"] == "mm-kg-s"
+        assert manifest["coordinateSystem"] == "right-handed-z-up"
+    assert uploaded["metadata"]["sha256"] == hashlib.sha256(uploaded["content"]).hexdigest()
+    assert uploaded["metadata"]["size"] == len(uploaded["content"])
+    assert released.json()["remoteSync"]["status"] == "uploaded"
+    downloaded = client.get(f"/api/v1/template-drafts/{draft['id']}/source-package")
+    assert downloaded.status_code == 200
+    assert downloaded.content == uploaded["content"]
 
 
 def test_upstream_change_invalidates_downstream(tmp_path) -> None:

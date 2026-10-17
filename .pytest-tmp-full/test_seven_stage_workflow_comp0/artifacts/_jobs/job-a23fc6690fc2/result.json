@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "inputHash": "130fb77e9a140d56d06ce6279dcdc58e7e4ffb953be4bdca65b840bbf89bec21",
+  "diagnostics": [],
+  "metrics": {
+    "valid": true,
+    "volume": 4949090.266,
+    "solidCount": 1,
+    "operationCount": 4
+  },
+  "artifacts": [
+    {
+      "kind": "step",
+      "url": "/artifacts/130fb77e9a140d56/model.step",
+      "sha256": "82919423b4d6bd7ad57de25049e05116aeb3f80402af89b2f03511fad6eac371",
+      "packagePath": null,
+      "size": null
+    },
+    {
+      "kind": "stl",
+      "url": "/artifacts/130fb77e9a140d56/preview.stl",
+      "sha256": "d9e26999309dccb986e3229a2f31fb535e2470ea58fd4edfa1871a4cb3628a2e",
+      "packagePath": null,
+      "size": null
+    },
+    {
+      "kind": "plan",
+      "url": "/artifacts/130fb77e9a140d56/canonical-plan.json",
+      "sha256": "08bd55f1f68e05be3356d2f3fd82f4eb5b6efac992665220ac631e738a392643",
+      "packagePath": null,
+      "size": null
+    },
+    {
+      "kind": "semanticMap",
+      "url": "/artifacts/130fb77e9a140d56/semantic-map.json",
+      "sha256": "1378fea81cb494d46108a0b74527ac3bf68c735afea55bc8d4765b77725f4566",
+      "packagePath": null,
+      "size": null
+    },
+    {
+      "kind": "diagnostics",
+      "url": "/artifacts/130fb77e9a140d56/diagnostics.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "packagePath": null,
+      "size": null
+    }
+  ]
+}

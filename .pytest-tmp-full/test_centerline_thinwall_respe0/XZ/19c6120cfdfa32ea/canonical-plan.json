@@ -1,0 +1,106 @@
+{
+  "version": "3.0",
+  "inputHash": "19c6120cfdfa32eae60f9dcc9870bc4e80aac4cd8480b85399be8fead7019ac8",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "sketch.centerline_thinwall_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "thickness": 2.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "centerlineThinWall",
+          "plane": "XZ",
+          "primitives": [
+            {
+              "id": "edge.bottom",
+              "role": "section.edge.bottom",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": -25.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": -25.0
+              }
+            },
+            {
+              "id": "edge.right",
+              "role": "section.edge.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": -25.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.top",
+              "role": "section.edge.top",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": 25.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.left",
+              "role": "section.edge.left",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": 25.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": -25.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.thinwall",
+              "operation": "add",
+              "boundaryRefs": [
+                "edge.bottom",
+                "edge.right",
+                "edge.top",
+                "edge.left"
+              ],
+              "closed": true,
+              "area": 600.0
+            }
+          ],
+          "topologySignature": "add:edge.bottom,edge.right,edge.top,edge.left",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

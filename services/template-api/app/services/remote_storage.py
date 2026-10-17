@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import zipfile
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,6 +22,20 @@ class RemoteTemplateStorage(Protocol):
 
 class RemoteStorageIntegrityError(RuntimeError):
     pass
+
+
+def _package_geometry_error(content: bytes) -> str | None:
+    """Return a stable reason when a package cannot provide its published STL."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            info = archive.getinfo("geometry/preview.stl")
+            if info.file_size <= 0:
+                return "empty geometry/preview.stl"
+            if not archive.read(info):
+                return "empty geometry/preview.stl"
+    except (OSError, KeyError, RuntimeError, ValueError, zipfile.BadZipFile) as error:
+        return str(error) or "invalid rwpart zip"
+    return None
 
 
 def _publication_identity(metadata: dict[str, Any]) -> tuple[Any, ...]:
@@ -130,7 +145,8 @@ def sync_published_package(
 ) -> dict[str, Any]:
     if storage is None:
         return {"status": "disabled", "reason": "REMOTE_STORAGE_NOT_CONFIGURED"}
-    content_hash = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    content = package_path.read_bytes()
+    content_hash = hashlib.sha256(content).hexdigest()
     metadata = {
         "publicationId": publication.id,
         "templateId": publication.templateId,
@@ -142,6 +158,9 @@ def sync_published_package(
         "sha256": content_hash,
         "size": package_path.stat().st_size,
     }
+    package_error = _package_geometry_error(content)
+    if package_error is not None:
+        return {"status": "failed", "errorCode": "REMOTE_PACKAGE_INVALID", "error": package_error, **metadata}
     try:
         existing = next(
             (item for item in storage.list_templates() if _publication_identity(item) == _publication_identity(metadata)),
