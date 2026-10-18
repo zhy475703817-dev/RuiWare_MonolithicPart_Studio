@@ -26,4 +26,10 @@ python scripts/sync-shared-components.py
 python scripts/sync-shared-components.py --upload
 ```
 
-必须对含有实际构件数据的工作区执行，或通过 `--root` 指定它。脚本先验证所有已发布包、检查共享 ID 冲突，再上传缺失包并重新下载核验 SHA256。存在不同文件或其他命名空间的同 ID 时会拒绝覆盖；重复执行不会生成重复发布版本。不会修改平台数据库。
+必须对含有实际构件数据的工作区执行，或通过 `--root` 指定它。先执行 `python scripts/export-component-deliverables.py` 生成包含模型的交付包。共享同步读取 `deliverables/components`，验证所有已发布包、检查共享 ID 冲突，再上传缺失包并重新下载核验 SHA256。其他命名空间的同 ID 会拒绝覆盖；重复执行不会生成重复发布版本。不会修改平台数据库。
+
+## STL 模型
+
+新生成的 `.rwpart` 在根目录包含 `preview.stl`；`manifest.json.previewModel` 记录文件名、格式、大小和 SHA256；`outputs.json` 中 STL URL 为 `package://preview.stl`。组件导入器应解压该文件并创建模型 URL，不能把旧包中的 `/artifacts/...` 当作组件服务器上的模型路径。
+
+既有共享包补齐 STL 后，使用 `python scripts/sync-shared-components.py --update-existing --upload`。仅允许更新当前发布命名空间、相同模板 ID 的包；替换前将旧远端包及元数据校验备份到本地 `ruiware-backups/shared-stl-*`，模板版本、修订与参数保持不变。
