@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sqlite3
 import zipfile
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,12 @@ def exporter(tmp_path):
     source = tmp_path / "artifacts/packages/TEST-001-r2.rwpart"
     with zipfile.ZipFile(source, "w") as archive:
         archive.writestr("manifest.json", json.dumps({"code": "TEST-001", "revision": 2}))
+    artifact = tmp_path / "artifacts/test/preview.stl"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"test stl mesh")
+    stl_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    with zipfile.ZipFile(source, "a") as archive:
+        archive.writestr("outputs.json", json.dumps({"artifacts": [{"kind": "stl", "url": "/artifacts/test/preview.stl", "sha256": stl_hash}]}))
     return module
 
 
@@ -36,6 +43,10 @@ def test_export_is_idempotent_and_does_not_touch_database(exporter):
     target = exporter.ROOT / "deliverables/components/TEST-001.rwpart"
     index = target.parent / "manifest.json"
     first = index.read_bytes(), target.stat().st_mtime_ns
+    with zipfile.ZipFile(target) as archive:
+        assert archive.read("preview.stl") == b"test stl mesh"
+        assert json.loads(archive.read("manifest.json"))["previewModel"]["sha256"] == hashlib.sha256(b"test stl mesh").hexdigest()
+        assert json.loads(archive.read("outputs.json"))["artifacts"][0]["url"] == "package://preview.stl"
     exporter.export()
     assert first == (index.read_bytes(), target.stat().st_mtime_ns)
     assert database.read_bytes() == before
@@ -52,6 +63,7 @@ def test_revision_mismatch_blocks_export(exporter):
     source = exporter.ROOT / "artifacts/packages/TEST-001-r2.rwpart"
     with zipfile.ZipFile(source, "w") as archive:
         archive.writestr("manifest.json", json.dumps({"code": "TEST-001", "revision": 1}))
+        archive.writestr("outputs.json", json.dumps({"artifacts": []}))
     with pytest.raises(RuntimeError, match="revision mismatch"):
         exporter.export()
 

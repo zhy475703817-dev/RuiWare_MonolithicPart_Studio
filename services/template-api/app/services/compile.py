@@ -17,6 +17,7 @@ from template_core.registries import TEMPLATE_AUTHORING_REGISTRY
 from template_core.sketch_solver import solve_semantic_sketch
 
 from .reconstruction_document import build_reconstruction_guide
+from .package_assets import embed_preview_stl
 
 LIB_ROOT = PLATFORM_ROOT / "libs" / "python"
 WORKER_ROOT = PLATFORM_ROOT / "services" / "cad-worker"
@@ -69,6 +70,7 @@ def write_source_package(
             source = attachment_root / item.sha256 / item.filename
             if source.exists():
                 archive.write(source, f"assets/{item.id}/{item.filename}")
+    embed_preview_stl(target, artifact_root)
     return target
 
 

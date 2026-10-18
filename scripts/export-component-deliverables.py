@@ -5,8 +5,12 @@ from pathlib import Path
 import shutil
 import sqlite3
 import zipfile
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.path.insert(0, str(ROOT / "services/template-api"))
+from app.services.package_assets import embed_preview_stl
 CODES = {
     "RW-TPL-0001", "RW-LINK-ROD-001", "RW-LINK-ROD-002",
     "RW-COLUMN-CLAW-001", "RW-CROSS-BEAM-001", "RW-BOX-WELDED-BEAM-001",
@@ -61,8 +65,14 @@ def export():
     index = []
     for code, draft, source, source_revision in prepared:
         target = output / f"{code}.rwpart"
-        if not target.exists() or source.read_bytes() != target.read_bytes():
-            shutil.copyfile(source, target)
+        with tempfile.TemporaryDirectory(dir=output) as staging:
+            staged = Path(staging) / target.name
+            shutil.copyfile(source, staged)
+            model = embed_preview_stl(staged, ROOT / "artifacts")
+            if model is None:
+                raise RuntimeError(f"Missing portable STL preview: {code}")
+            if not target.exists() or staged.read_bytes() != target.read_bytes():
+                shutil.copyfile(staged, target)
         index.append({"code": code, "name": draft["name"], "revision": source_revision,
                       "file": target.name, "bytes": target.stat().st_size,
                       "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})

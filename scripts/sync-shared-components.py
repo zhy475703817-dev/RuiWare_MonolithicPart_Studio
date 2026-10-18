@@ -37,9 +37,7 @@ def prepare(root: Path):
         code = draft["code"]
         if code not in CODES or code in selected:
             continue
-        path = (root / url.lstrip("/")).resolve()
-        if not path.is_relative_to((root / "artifacts/packages").resolve()):
-            raise RuntimeError(f"Unexpected package path: {code}")
+        path = (root / "deliverables/components" / f"{code}.rwpart").resolve()
         with zipfile.ZipFile(path) as archive:
             if archive.testzip():
                 raise RuntimeError(f"Corrupt package: {code}")
@@ -76,17 +74,16 @@ def main():
     for code, (_, publication, checksum) in selected.items():
         previous = existing.get(publication.id)
         expected_key = f"{settings.prefix}/{publication.id}/template.rwpart"
-        if previous and (previous.get("objectKey") != expected_key or previous.get("sha256") != checksum):
+        if previous and previous.get("objectKey") != expected_key:
             raise RuntimeError(f"Remote collision, refusing overwrite: {code}")
     for code, (path, publication, checksum) in sorted(selected.items()):
         previous = existing.get(publication.id)
         if not args.upload:
             print(f"{code}: V{publication.version} R{publication.sourceRevision} " + ("already shared" if previous else "ready to upload"), flush=True)
             continue
-        if not previous:
-            result = sync_published_package(storage, path, publication)
-            if result["status"] != "uploaded":
-                raise RuntimeError(f"Upload failed: {code}")
+        result = sync_published_package(storage, path, publication)
+        if result["status"] != "uploaded":
+            raise RuntimeError(f"Upload failed: {code}")
         content, metadata = storage.download_package(publication.id)
         if hashlib.sha256(content).hexdigest() != checksum or metadata.get("code") != code:
             raise RuntimeError(f"Remote round-trip mismatch: {code}")

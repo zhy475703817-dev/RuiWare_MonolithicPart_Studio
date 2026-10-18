@@ -116,6 +116,7 @@ def test_source_package_contains_guide_and_manifest_hash(tmp_path, monkeypatch) 
     with zipfile.ZipFile(package_path) as archive:
         guide = archive.read("template-reconstruction-guide.md")
         manifest = json.loads(archive.read("manifest.json"))
+        assert "previewModel" not in manifest
     assert manifest["reconstructionGuide"]["filename"] == "template-reconstruction-guide.md"
     assert manifest["reconstructionGuide"]["sha256"] == hashlib.sha256(guide).hexdigest()
 
