@@ -1,0 +1,134 @@
+{
+  "version": "3.0",
+  "inputHash": "41e22a748b76de5cd336088c4ea1c5ae1b9333edc555d2c1a92ced07b3158940",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "profile.open_profile_tube_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "thickness": 2.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "centerlineThinWall",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "wall.left",
+              "role": "section.centerline.left",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": 30.0
+              },
+              "end": {
+                "x": -50.0,
+                "y": -30.0
+              }
+            },
+            {
+              "id": "wall.base",
+              "role": "section.centerline.base",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": -30.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": -30.0
+              }
+            },
+            {
+              "id": "wall.right",
+              "role": "section.centerline.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 50.0,
+                "y": -30.0
+              },
+              "end": {
+                "x": 50.0,
+                "y": 30.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.thinwall",
+              "operation": "add",
+              "boundaryRefs": [
+                "wall.left",
+                "wall.base",
+                "wall.right"
+              ],
+              "closed": true,
+              "area": 440.0
+            }
+          ],
+          "topologySignature": "add:wall.left,wall.base,wall.right",
+          "thickness": 2.0
+        },
+        "semanticFaces": [
+          {
+            "semanticFaceId": "part.face.wall.right",
+            "sourceOperationId": "body.main",
+            "hostFrame": "positiveX",
+            "locator": {
+              "kind": "profileEdge",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "wall.right",
+              "capSide": null
+            }
+          }
+        ]
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    },
+    {
+      "id": "cut.holes.main.part_face_wall_right.001",
+      "operator": "machining.circular_through_hole",
+      "arguments": {
+        "x": 0,
+        "diameter": 10,
+        "z": 500.0,
+        "semanticFaceId": "part.face.wall.right",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "wall.right",
+          "capSide": null
+        },
+        "resolvedSourceEntityId": "wall.right",
+        "hostFrame": "positiveX",
+        "hostFace": "positiveX",
+        "uStart": -30.0,
+        "uSpan": 60.0,
+        "vStart": 0.0,
+        "vSpan": 1000.0,
+        "polygonVertices": []
+      },
+      "semanticOutputs": [
+        "feature.holes.main.part_face_wall_right.001.center",
+        "feature.holes.main.part_face_wall_right.001.wall"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

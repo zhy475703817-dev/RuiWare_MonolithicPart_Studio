@@ -699,12 +699,13 @@ export type PublishResult = {
   version: PublishedVersion;
   validation: StageValidation;
   remoteSync: {
-    status: "uploaded" | "failed" | "disabled";
+    status: "uploaded" | "duplicate" | "failed" | "disabled";
     publicationId?: string;
     objectKey?: string;
     sha256?: string;
     errorCode?: string;
     reason?: string;
+    duplicateOf?: string;
   };
 };
 export type SharedTemplate = {

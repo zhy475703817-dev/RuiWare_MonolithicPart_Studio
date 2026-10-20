@@ -1,0 +1,179 @@
+{
+  "version": "3.0",
+  "inputHash": "5f60b437ed918d55fbe17cc694aa687bd8922b041bca018d3d46b969604b1199",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "profile.open_profile_tube_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "closedRegion",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "edge.bottom",
+              "role": "section.edge.bottom",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -40.000000000036664,
+                "y": -25.0
+              },
+              "end": {
+                "x": 40.000000000036664,
+                "y": -25.0
+              }
+            },
+            {
+              "id": "edge.right",
+              "role": "section.edge.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 40.00000000010332,
+                "y": -25.0
+              },
+              "end": {
+                "x": 40.000000000153385,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.top",
+              "role": "section.edge.top",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 40.00000000017995,
+                "y": 25.0
+              },
+              "end": {
+                "x": -40.00000000017995,
+                "y": 25.0
+              }
+            },
+            {
+              "id": "edge.left",
+              "role": "section.edge.left",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -40.000000000153385,
+                "y": 25.0
+              },
+              "end": {
+                "x": -40.00000000010332,
+                "y": -25.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.main",
+              "operation": "add",
+              "boundaryRefs": [
+                "edge.bottom",
+                "edge.right",
+                "edge.top",
+                "edge.left"
+              ],
+              "closed": true,
+              "area": 4000.0000000101663
+            }
+          ],
+          "topologySignature": "add:edge.bottom,edge.right,edge.top,edge.left",
+          "thickness": 2.0
+        },
+        "semanticFaces": [
+          {
+            "semanticFaceId": "part.face.front",
+            "sourceOperationId": "body.main",
+            "hostFrame": "negativeY",
+            "locator": {
+              "kind": "profileEdge",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "edge.bottom",
+              "capSide": null
+            }
+          },
+          {
+            "semanticFaceId": "part.face.back",
+            "sourceOperationId": "body.main",
+            "hostFrame": "positiveY",
+            "locator": {
+              "kind": "profileEdge",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "edge.top",
+              "capSide": null
+            }
+          },
+          {
+            "semanticFaceId": "part.face.left",
+            "sourceOperationId": "body.main",
+            "hostFrame": "negativeX",
+            "locator": {
+              "kind": "profileEdge",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "edge.left",
+              "capSide": null
+            }
+          },
+          {
+            "semanticFaceId": "part.face.right",
+            "sourceOperationId": "body.main",
+            "hostFrame": "positiveX",
+            "locator": {
+              "kind": "profileEdge",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "edge.right",
+              "capSide": null
+            }
+          },
+          {
+            "semanticFaceId": "part.endFace.start",
+            "sourceOperationId": "body.main",
+            "hostFrame": "negativeZ",
+            "locator": {
+              "kind": "profileRegion",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "section.region.main",
+              "capSide": "start"
+            }
+          },
+          {
+            "semanticFaceId": "part.endFace.end",
+            "sourceOperationId": "body.main",
+            "hostFrame": "positiveZ",
+            "locator": {
+              "kind": "profileRegion",
+              "operationId": "body.main",
+              "profileSketchId": "sketch.section.main",
+              "sourceEntityId": "section.region.main",
+              "capSide": "end"
+            }
+          }
+        ]
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

@@ -545,6 +545,9 @@ Template API
 
 - `template-reconstruction-guide.md`：面向人工复现和问题定位的详细模板说明书。
 - `manifest.json.reconstructionGuide`：说明书文件名和 SHA-256，用于确认包内文档未被替换或损坏。
+- `geometry/preview.stl`：发布时成功 CAD 编译生成的真实零件模型；`outputs.json` 对应 STL artifact 记录 `packagePath`、字节数 `size` 和模型 SHA-256，同时保留本地兼容字段 `url`。
+
+共享模板消费者应从 ZIP 内按 `packagePath` 读取 STL，不依赖发布者机器上的 `/artifacts/...` 地址。旧包保持不变；没有 `packagePath` 的 artifact 属于旧格式。发布流程在草稿/发布版本状态变更前核对编译输入哈希、STL 文件及其 SHA-256，再生成包；草稿的已发布状态和版本登记在同一个 SQLite 事务中提交，避免只写入一半。发布包采用不可覆盖的文件名，远程同步在上传前再次确认 ZIP 含非空 STL，并使用最终 `.rwpart` 的整包 SHA-256 与大小。
 
 ## 10. 跨模块契约 `packages/contracts`
 

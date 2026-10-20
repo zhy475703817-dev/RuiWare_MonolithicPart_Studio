@@ -1,0 +1,77 @@
+{
+  "version": "3.0",
+  "inputHash": "ae511d6e7f49feccc08597859cf03c2c5c488bbff7dc12cec6400ec2dee81f2b",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "profile.open_profile_tube_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "multiRegion",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "circle.outer",
+              "role": "section.outer",
+              "type": "circle",
+              "construction": false,
+              "center": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "radius": 50.0
+            },
+            {
+              "id": "circle.inner",
+              "role": "section.inner",
+              "type": "circle",
+              "construction": false,
+              "center": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "radius": 30.0
+            }
+          ],
+          "regions": [
+            {
+              "id": "region.outer",
+              "operation": "add",
+              "boundaryRefs": [
+                "circle.outer"
+              ],
+              "closed": true,
+              "area": 7853.981633974483
+            },
+            {
+              "id": "region.inner",
+              "operation": "subtract",
+              "boundaryRefs": [
+                "circle.inner"
+              ],
+              "closed": true,
+              "area": 2827.4333882308138
+            }
+          ],
+          "topologySignature": "add:circle.outer|subtract:circle.inner",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}

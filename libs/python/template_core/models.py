@@ -406,6 +406,8 @@ class Artifact(BaseModel):
     kind: Literal["step", "stl", "plan", "diagnostics", "semanticMap"]
     url: str
     sha256: str
+    packagePath: str | None = None
+    size: int | None = Field(default=None, ge=0)
 
 
 class GeometryMetrics(BaseModel):

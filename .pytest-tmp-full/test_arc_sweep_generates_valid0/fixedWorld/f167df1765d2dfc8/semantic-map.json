@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "inputHash": "f167df1765d2dfc826af640378d923b3e277bbf8fc6f3f182f6773150b1a8197",
+  "semanticFaces": [],
+  "interfaces": [
+    {
+      "id": "part.body",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.referenceFrame",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.start",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.end",
+      "sourceOperation": "body.main"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "version": "3.0",
+  "inputHash": "3992f991336c226e55eb33e02e637119271d6d6eaa1c786fc8cc1358ab22e5ef",
+  "operations": [
+    {
+      "id": "body.main",
+      "operator": "sketch.centerline_thinwall_extrude",
+      "arguments": {
+        "length": 1000.0,
+        "thickness": 2.0,
+        "profileSketchId": "sketch.section.main",
+        "sketch": {
+          "id": "sketch.section.main",
+          "profileMode": "centerlineThinWall",
+          "plane": "XY",
+          "primitives": [
+            {
+              "id": "wall.base",
+              "role": "section.centerline.base",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": -50.0,
+                "y": 0.0
+              },
+              "end": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            {
+              "id": "wall.corner",
+              "role": "section.centerline.corner",
+              "type": "arc",
+              "construction": false,
+              "start": {
+                "x": 1.2246467991473533e-15,
+                "y": 0.0
+              },
+              "end": {
+                "x": 20.0,
+                "y": 20.0
+              },
+              "center": {
+                "x": 0.0,
+                "y": 20.0
+              },
+              "radius": 20.0,
+              "startAngle": -90.0,
+              "endAngle": 0.0,
+              "largeArc": false
+            },
+            {
+              "id": "wall.right",
+              "role": "section.centerline.right",
+              "type": "line",
+              "construction": false,
+              "start": {
+                "x": 20.0,
+                "y": 20.0
+              },
+              "end": {
+                "x": 20.0,
+                "y": 70.0
+              }
+            }
+          ],
+          "regions": [
+            {
+              "id": "section.region.thinwall",
+              "operation": "add",
+              "boundaryRefs": [
+                "wall.base",
+                "wall.corner",
+                "wall.right"
+              ],
+              "closed": true,
+              "area": 256.5685424949238
+            }
+          ],
+          "topologySignature": "add:wall.base,wall.corner,wall.right",
+          "thickness": 2.0
+        }
+      },
+      "semanticOutputs": [
+        "part.body",
+        "part.referenceFrame",
+        "part.endFace.start",
+        "part.endFace.end"
+      ]
+    }
+  ],
+  "materialSnapshot": {
+    "record": {
+      "code": "Q345"
+    }
+  },
+  "diagnostics": []
+}
