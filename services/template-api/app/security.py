@@ -67,6 +67,16 @@ def signed_session(session_id: str) -> str:
     return _signed_session(session_id)
 
 
+def require_public_api_key(request: Request) -> None:
+    """Authenticate read-only integrations without exposing MinIO credentials."""
+    configured_key = os.getenv("RUIWARE_PUBLIC_API_KEY", "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=503, detail={"code": "PUBLIC_API_NOT_CONFIGURED"})
+    supplied_key = request.headers.get("X-RuiWare-API-Key", "")
+    if not supplied_key or not hmac.compare_digest(supplied_key, configured_key):
+        raise HTTPException(status_code=401, detail={"code": "PUBLIC_API_KEY_INVALID"})
+
+
 def authenticate(request: Request) -> tuple[Principal, bool]:
     """从服务端可验证的凭据生成身份；不信任 actor/source 请求头。"""
     authorization = request.headers.get("Authorization", "")

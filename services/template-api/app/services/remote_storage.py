@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import zipfile
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,6 +22,39 @@ class RemoteTemplateStorage(Protocol):
 
 class RemoteStorageIntegrityError(RuntimeError):
     pass
+
+
+def _package_geometry_error(content: bytes) -> str | None:
+    """Return a stable reason when a package cannot provide its published STL."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            info = archive.getinfo("geometry/preview.stl")
+            if info.file_size <= 0:
+                return "empty geometry/preview.stl"
+            if not archive.read(info):
+                return "empty geometry/preview.stl"
+    except (OSError, KeyError, RuntimeError, ValueError, zipfile.BadZipFile) as error:
+        return str(error) or "invalid rwpart zip"
+    return None
+
+
+def _publication_identity(metadata: dict[str, Any]) -> tuple[Any, ...]:
+    values = (metadata.get("code"), metadata.get("version"), metadata.get("sourceRevision"))
+    if any(value is None for value in values):
+        return ("publicationId", metadata.get("publicationId"))
+    return values
+
+
+def _deduplicate_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for template in sorted(templates, key=lambda value: value.get("createdAt", ""), reverse=True):
+        identity = _publication_identity(template)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(template)
+    return unique
 
 
 def _object_key(prefix: str, publication_id: str, filename: str) -> str:
@@ -68,7 +102,7 @@ class MinioTemplateStorage:
             finally:
                 response.close()
                 response.release_conn()
-        return sorted(templates, key=lambda value: value.get("createdAt", ""), reverse=True)
+        return _deduplicate_templates(templates)
 
     def download_package(self, publication_id: str) -> tuple[bytes, dict[str, Any]]:
         metadata = next((item for item in self.list_templates() if item.get("publicationId") == publication_id), None)
@@ -113,7 +147,8 @@ def sync_published_package(
 ) -> dict[str, Any]:
     if storage is None:
         return {"status": "disabled", "reason": "REMOTE_STORAGE_NOT_CONFIGURED"}
-    content_hash = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    content = package_path.read_bytes()
+    content_hash = hashlib.sha256(content).hexdigest()
     metadata = {
         "publicationId": publication.id,
         "templateId": publication.templateId,
@@ -125,7 +160,16 @@ def sync_published_package(
         "sha256": content_hash,
         "size": package_path.stat().st_size,
     }
+    package_error = _package_geometry_error(content)
+    if package_error is not None:
+        return {"status": "failed", "errorCode": "REMOTE_PACKAGE_INVALID", "error": package_error, **metadata}
     try:
+        existing = next(
+            (item for item in storage.list_templates() if _publication_identity(item) == _publication_identity(metadata)),
+            None,
+        )
+        if existing is not None:
+            return {"status": "duplicate", "duplicateOf": existing.get("publicationId"), **metadata}
         remote = storage.upload_package(package_path, publication, metadata)
     except Exception:
         return {"status": "failed", "errorCode": "REMOTE_STORAGE_UNAVAILABLE", **metadata}

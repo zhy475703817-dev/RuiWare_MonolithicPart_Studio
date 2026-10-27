@@ -92,7 +92,7 @@ from .services.operations import (  # noqa: E402
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
-from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
+from .security import bind_request, release_request, current_owner_id, require_public_api_key, signed_session  # noqa: E402
 from .event_stream import stream_draft_events  # noqa: E402
 from .services.remote_storage import RemoteStorageIntegrityError, build_remote_storage  # noqa: E402
 

@@ -20,6 +20,7 @@ artifacts/*
 !artifacts/.gitkeep
 
 # Local-only working data and private configuration
+.pytest-tmp-full/
 .pnpm-store-local/
 .specstory/
 ruiware-backups/

@@ -1,10 +1,15 @@
 param(
     [int]$ApiPort = 8010,
     [int]$WebPort = 5173,
+    [string]$ApiHost = '127.0.0.1',
     [string]$MaterialDatabase = $env:RUIWARE_MATERIAL_DB
 )
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ApiHostFromEnvironment = $env:RUIWARE_API_HOST
+if ($ApiHostFromEnvironment) {
+    $ApiHost = $ApiHostFromEnvironment
+}
 $ProjectSitePackages = Join-Path $ProjectRoot '.venv\Lib\site-packages'
 $PythonCandidates = @()
 $VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
@@ -59,15 +64,9 @@ Write-Host "Python runtime: $PythonExecutable"
 function Test-LocalPort {
     param([int]$Port)
     try {
-        $client = [System.Net.Sockets.TcpClient]::new()
-        $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
-        if (-not $pending.AsyncWaitHandle.WaitOne(500)) { return $false }
-        $client.EndConnect($pending)
-        return $true
+        return [bool](Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $Port -ErrorAction Stop)
     } catch {
         return $false
-    } finally {
-        if ($client) { $client.Dispose() }
     }
 }
 
@@ -80,7 +79,7 @@ function Wait-HttpReady {
     do {
         try {
             $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
                 return
             }
         } catch {
@@ -118,7 +117,7 @@ foreach ($candidate in $bunCandidates) {
 }
 $NodeExecutable = (Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
 if (-not $NodeExecutable) {
-    $runtimeNode = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+    $runtimeNode = 'C:\Users\Min\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
     if (Test-Path -LiteralPath $runtimeNode) { $NodeExecutable = $runtimeNode }
 }
 $ViteCli = Get-ChildItem (Join-Path $ProjectRoot 'apps\studio-web\node_modules\.pnpm') -Directory -Filter 'vite@*' -ErrorAction SilentlyContinue |
@@ -130,7 +129,7 @@ if (-not $BunExecutable -and -not ($NodeExecutable -and $ViteCli)) {
 
 if (-not (Test-LocalPort $ApiPort)) {
     Start-Process -FilePath $PythonExecutable `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', '127.0.0.1', '--port', $ApiPort) `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort) `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $ProjectRoot 'api.out.log') `

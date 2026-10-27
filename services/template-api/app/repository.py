@@ -649,6 +649,125 @@ class Repository:
             createdAt=created_at, sourcePackageUrl=source_package_url, compileResult=result,
         )
 
+    def publish_atomic(
+        self,
+        draft: TemplateDraft,
+        result: CompileResult,
+        source_package_url: str,
+        *,
+        expected_revision: int,
+    ) -> tuple[TemplateDraft, PublishedVersion]:
+        """Persist the published draft and its version in one SQLite transaction."""
+        draft_id = draft.id
+        if not draft_id:
+            raise ValueError("published draft must have an id")
+        if not self.code_is_unique(draft.code, draft_id):
+            raise DuplicateCodeError(draft.code)
+        event: DraftChangedEvent | None = None
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT payload_json FROM template_drafts WHERE id = ?",
+                (draft_id,),
+            ).fetchone()
+            existing = self._parse_draft(row["payload_json"]) if row else None
+            if existing is None:
+                raise KeyError(draft_id)
+            if existing.revision != expected_revision:
+                raise RevisionConflictError(
+                    f"expected revision {expected_revision}, current revision {existing.revision}"
+                )
+            now = _now()
+            saved = draft.model_copy(
+                update={
+                    "revision": existing.revision + 1,
+                    "createdAt": existing.createdAt or now,
+                    "updatedAt": now,
+                    "id": draft_id,
+                }
+            )
+            payload = saved.model_dump_json()
+            connection.execute(
+                """
+                UPDATE template_drafts
+                SET name = ?, revision = ?, payload_json = ?, updated_at = ?, archived_at = NULL
+                WHERE id = ?
+                """,
+                (saved.name, saved.revision, payload, now, draft_id),
+            )
+            connection.execute(
+                "INSERT INTO draft_revisions VALUES (?, ?, ?, ?, ?)",
+                (draft_id, saved.revision, payload, now, "publish"),
+            )
+            summary = summarize_draft_change(
+                existing,
+                saved,
+                from_revision=existing.revision,
+                affected_stages=[],
+            )
+            principal = current_principal()
+            event_cursor = connection.execute(
+                """
+                INSERT INTO draft_events
+                    (draft_id, revision, actor, source, operation, session_id, created_at, summary_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    draft_id,
+                    saved.revision,
+                    principal.actor if principal else "system",
+                    principal.source if principal else "system",
+                    "publish",
+                    principal.session_id if principal else None,
+                    now,
+                    json.dumps(summary, ensure_ascii=False),
+                ),
+            )
+            event = DraftChangedEvent(
+                id=int(event_cursor.lastrowid),
+                draft_id=draft_id,
+                revision=saved.revision,
+                actor=principal.actor if principal else "system",
+                source=principal.source if principal else "system",
+                operation="publish",
+                session_id=principal.session_id if principal else None,
+                created_at=now,
+                summary=summary,
+            )
+            version_row = connection.execute(
+                "SELECT COALESCE(MAX(version), 0) AS value FROM template_versions WHERE template_id = ?",
+                (draft_id,),
+            ).fetchone()
+            version = int(version_row["value"]) + 1
+            version_id = f"version-{uuid.uuid4().hex[:12]}"
+            connection.execute(
+                "INSERT INTO template_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    version_id,
+                    draft_id,
+                    version,
+                    saved.revision,
+                    payload,
+                    result.model_dump_json(),
+                    source_package_url,
+                    now,
+                ),
+            )
+        if event is not None:
+            publish_draft_changed(event)
+        publication = PublishedVersion(
+            id=version_id,
+            templateId=draft_id,
+            version=version,
+            sourceRevision=saved.revision,
+            code=saved.code,
+            name=saved.name,
+            createdAt=now,
+            sourcePackageUrl=source_package_url,
+            compileResult=result,
+        )
+        return saved, publication
+
     def list_versions(self, draft_id: str) -> list[PublishedVersion]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -664,3 +783,9 @@ class Repository:
                 compileResult=CompileResult.model_validate_json(row["compile_json"]),
             ))
         return versions
+
+    def has_published_package(self, package_name: str) -> bool:
+        """Return whether a package filename is already referenced by a publication."""
+        with self.connect() as connection:
+            rows = connection.execute("SELECT source_package_url FROM template_versions").fetchall()
+        return any(Path(str(row["source_package_url"])).name == package_name for row in rows)
