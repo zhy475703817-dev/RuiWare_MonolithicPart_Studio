@@ -18,3 +18,19 @@ data/*.db
 ruiware.db
 artifacts/*
 !artifacts/.gitkeep
+
+# Local-only working data and private configuration
+.pytest-tmp-full/
+.pnpm-store-local/
+.specstory/
+ruiware-backups/
+CONVERSATION-HANDOFF.md
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+data/pytest-*/
+*.db-wal
+*.db-shm
+sync-github.log

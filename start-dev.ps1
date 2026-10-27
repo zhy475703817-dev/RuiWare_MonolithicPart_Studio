@@ -10,10 +10,56 @@ $ApiHostFromEnvironment = $env:RUIWARE_API_HOST
 if ($ApiHostFromEnvironment) {
     $ApiHost = $ApiHostFromEnvironment
 }
-$PythonExecutable = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $PythonExecutable)) {
-    throw 'Missing .venv. Install the Python dependencies described in README.md first.'
+$ProjectSitePackages = Join-Path $ProjectRoot '.venv\Lib\site-packages'
+$PythonCandidates = @()
+$VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath $VenvPython) {
+    $PythonCandidates += [pscustomobject]@{ Path = $VenvPython; UseProjectPackages = $false }
 }
+$PathPython = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+if ($PathPython) {
+    $PythonCandidates += [pscustomobject]@{ Path = $PathPython; UseProjectPackages = $true }
+}
+$CodexPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+if (Test-Path -LiteralPath $CodexPython) {
+    $PythonCandidates += [pscustomobject]@{ Path = $CodexPython; UseProjectPackages = $true }
+}
+
+function Get-PythonPathForCandidate {
+    param([bool]$UseProjectPackages)
+    if (-not $UseProjectPackages) { return $script:OriginalPythonPath }
+    $paths = @()
+    if (Test-Path -LiteralPath $script:ProjectSitePackages) { $paths += $script:ProjectSitePackages }
+    if ($script:OriginalPythonPath) { $paths += $script:OriginalPythonPath }
+    return ($paths -join [IO.Path]::PathSeparator)
+}
+
+function Test-PythonCandidate {
+    param([pscustomobject]$Candidate)
+    $previousPythonPath = $env:PYTHONPATH
+    $candidatePythonPath = Get-PythonPathForCandidate $Candidate.UseProjectPackages
+    if ($candidatePythonPath) { $env:PYTHONPATH = $candidatePythonPath }
+    else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+    try {
+        $null = & $Candidate.Path -c "import fastapi, uvicorn, pydantic, OCP, minio; import sys; sys.path.insert(0, r'$ProjectRoot\services\template-api'); import app.main" 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        if ($null -ne $previousPythonPath) { $env:PYTHONPATH = $previousPythonPath }
+        else { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+    }
+}
+
+$OriginalPythonPath = $env:PYTHONPATH
+$SelectedPython = $PythonCandidates | Where-Object { Test-PythonCandidate $_ } | Select-Object -First 1
+if (-not $SelectedPython) {
+    throw 'No usable Python runtime found (MinIO is required). Install project dependencies with python -m pip install -e .[test] using Python 3.12.'
+}
+$PythonExecutable = $SelectedPython.Path
+$env:PYTHONPATH = Get-PythonPathForCandidate $SelectedPython.UseProjectPackages
+if (-not $env:PYTHONPATH) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+Write-Host "Python runtime: $PythonExecutable"
 
 function Test-LocalPort {
     param([int]$Port)
@@ -110,6 +156,17 @@ if (-not (Test-LocalPort $WebPort)) {
 
 Wait-HttpReady "http://127.0.0.1:$ApiPort/docs"
 Wait-HttpReady "http://127.0.0.1:$WebPort/"
+
+$activeHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/health"
+if (-not $activeHealth.workspaceRoot) {
+    throw 'An older API is already running on this port. Restart the RuiWare API to load the current code.'
+}
+if ([IO.Path]::GetFullPath($activeHealth.workspaceRoot) -ne [IO.Path]::GetFullPath($ProjectRoot)) {
+    Write-Warning "Port $ApiPort is serving another workspace: $($activeHealth.workspaceRoot). No data was copied. Use that workspace or choose different API/Web ports."
+}
+if (-not $activeHealth.sharedTemplatesAvailable) {
+    Write-Warning 'Shared templates are unavailable. Check the MinIO dependency and RUIWARE_MINIO_* environment configuration.'
+}
 
 Write-Host "Template API: http://127.0.0.1:$ApiPort"
 Write-Host "Template Studio: http://127.0.0.1:$WebPort"

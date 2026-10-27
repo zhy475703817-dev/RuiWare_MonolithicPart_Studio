@@ -1,0 +1,68 @@
+{
+  "components": [
+    {
+      "code": "RW-BOX-WELDED-BEAM-001",
+      "name": "标准化抱焊梁模板",
+      "revision": 27,
+      "file": "RW-BOX-WELDED-BEAM-001.rwpart",
+      "bytes": 22913,
+      "sha256": "8eda5920b4bd01ed17654cff2b03263fb96651f3eea712aabb0c5febd0f1b519"
+    },
+    {
+      "code": "RW-COLUMN-CLAW-001",
+      "name": "立柱挂爪模板",
+      "revision": 29,
+      "file": "RW-COLUMN-CLAW-001.rwpart",
+      "bytes": 41160,
+      "sha256": "25b40530be746a7c435489e17abbd7f932e030535d78b1687a3e7ba87fc68f42"
+    },
+    {
+      "code": "RW-CROSS-BEAM-001",
+      "name": "标准化跨梁模板",
+      "revision": 23,
+      "file": "RW-CROSS-BEAM-001.rwpart",
+      "bytes": 23257,
+      "sha256": "bd0c53e782a2633793ed8e485c1e19c5dbd87a66899c898ac888d93753fc58a3"
+    },
+    {
+      "code": "RW-CROSS-BEAM-HOOK-001",
+      "name": "标准化跨梁挂钩模板",
+      "revision": 23,
+      "file": "RW-CROSS-BEAM-HOOK-001.rwpart",
+      "bytes": 21259,
+      "sha256": "6898f775481a140b11e0a45a58af414335bd2e29551815a003d8428647206c6c"
+    },
+    {
+      "code": "RW-LINK-ROD-001",
+      "name": "标准化单连接杆模板",
+      "revision": 36,
+      "file": "RW-LINK-ROD-001.rwpart",
+      "bytes": 27839,
+      "sha256": "29368c1eb3b7a96b15e2ccc46c3575bd1c1fc642045307f3c446950ec1dafc59"
+    },
+    {
+      "code": "RW-LINK-ROD-002",
+      "name": "中连接杆模板",
+      "revision": 25,
+      "file": "RW-LINK-ROD-002.rwpart",
+      "bytes": 27901,
+      "sha256": "784dc9434cd480b7c7c8b32bbbfe25d91f3369fdd8527b3330edc20cf6b422d4"
+    },
+    {
+      "code": "RW-MID-CROSS-BEAM-001",
+      "name": "标准化中横梁模板",
+      "revision": 24,
+      "file": "RW-MID-CROSS-BEAM-001.rwpart",
+      "bytes": 23215,
+      "sha256": "6b9b2b3d57014ea98d4dd93a4a403dfbf1b94e74fc156ddefd48f4337679d16e"
+    },
+    {
+      "code": "RW-TPL-0001",
+      "name": "Ω型立柱模板",
+      "revision": 23,
+      "file": "RW-TPL-0001.rwpart",
+      "bytes": 247256,
+      "sha256": "58bea86e9e5ee8090594a7857f754b37cc71648e24820de9a2a2d38ed0a6fba8"
+    }
+  ]
+}

@@ -1,91 +1,88 @@
+import hashlib
+
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
 
 
-class FakePublicStorage:
+METADATA = {
+    "publicationId": "published-1", "templateId": "template-1", "version": 2,
+    "code": "PART-001", "name": "Published part", "createdAt": "2026-10-20T00:00:00Z",
+    "sha256": hashlib.sha256(b"package").hexdigest(), "size": 7,
+    "objectKey": "publishers/private/published-1/template.rwpart", "sourceRevision": 3,
+}
+
+
+class Storage:
     def list_templates(self):
-        return [
-            {
-                "publicationId": "publication-1",
-                "templateId": "draft-1",
-                "version": 3,
-                "code": "TPL-001",
-                "name": "测试模板",
-                "createdAt": "2026-10-05T00:00:00Z",
-                "sha256": "a" * 64,
-                "size": 128,
-                "objectKey": "publishers/YHR/publication-1/template.rwpart",
-            }
-        ]
+        return [METADATA, {**METADATA, "publicationId": "published-2"}]
 
     def download_package(self, publication_id):
-        return b"package", self.list_templates()[0]
+        if publication_id != "published-1":
+            raise KeyError(publication_id)
+        return b"package", METADATA
 
 
-def _client(monkeypatch, key="public-test-key"):
-    monkeypatch.setenv("RUIWARE_PUBLIC_API_KEY", key)
-    monkeypatch.setattr(main, "build_remote_storage", lambda: FakePublicStorage())
-    return TestClient(main.app)
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUIWARE_PUBLIC_API_KEY", "test-public-key")
+    monkeypatch.setattr(main, "PUBLIC_API_KEY_FILE", tmp_path / "public-api.key")
+    monkeypatch.setattr(main, "build_remote_storage", Storage)
+    return TestClient(main.app, headers={"X-RuiWare-API-Key": "test-public-key"})
 
 
-def test_public_template_list_requires_api_key(monkeypatch):
-    client = _client(monkeypatch)
+@pytest.mark.parametrize("suffix", ["", "/published-1", "/published-1/download"])
+def test_all_public_routes_require_key(client, monkeypatch, suffix):
+    url = "/api/public/v1/templates" + suffix
+    for key in ("", "wrong-key"):
+        response = client.get(url, headers={"X-RuiWare-API-Key": key})
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "PUBLIC_API_KEY_INVALID"
+    monkeypatch.delenv("RUIWARE_PUBLIC_API_KEY")
+    assert client.get(url).status_code == 503
 
-    response = client.get("/api/public/v1/templates")
 
-    assert response.status_code == 401
-    assert response.json()["error"]["code"] == "PUBLIC_API_KEY_INVALID"
-
-
-def test_public_template_list_hides_storage_object_key(monkeypatch):
-    client = _client(monkeypatch)
-
-    response = client.get(
-        "/api/public/v1/templates",
-        headers={"X-RuiWare-API-Key": "public-test-key"},
-    )
-
+def test_public_library_contract_and_detail(client):
+    response = client.get("/api/public/v1/templates?limit=1")
     assert response.status_code == 200
-    assert response.json() == {
-        "items": [
-            {
-                "publicationId": "publication-1",
-                "templateId": "draft-1",
-                "version": 3,
-                "code": "TPL-001",
-                "name": "测试模板",
-                "createdAt": "2026-10-05T00:00:00Z",
-                "sha256": "a" * 64,
-                "size": 128,
-                "downloadUrl": "/api/public/v1/templates/publication-1/download",
-            }
-        ],
-        "count": 1,
-    }
+    body = response.json()
+    assert body["count"] == len(body["items"]) == 1
+    item = body["items"][0]
+    assert set(item) == set(METADATA) - {"objectKey", "sourceRevision"} | {"downloadUrl"}
+    assert item["downloadUrl"] == "/api/public/v1/templates/published-1/download"
+    assert client.get("/api/public/v1/templates/published-1").json() == item
+    assert client.get("/api/public/v1/templates/missing").status_code == 404
+    assert client.get("/api/public/v1/templates?limit=1001").status_code == 422
 
 
-def test_public_template_metadata_and_download_require_same_key(monkeypatch):
-    client = _client(monkeypatch)
-    headers = {"X-RuiWare-API-Key": "public-test-key"}
+def test_public_download_reuses_integrity_check(client, monkeypatch):
+    response = client.get("/api/public/v1/templates/published-1/download")
+    assert response.content == b"package"
+    assert response.headers["X-RuiWare-SHA256"] == METADATA["sha256"]
+    assert client.get("/api/public/v1/templates/missing/download").status_code == 404
 
-    metadata = client.get("/api/public/v1/templates/publication-1", headers=headers)
-    download = client.get("/api/public/v1/templates/publication-1/download", headers=headers)
+    def broken_download(self, publication_id):
+        raise main.RemoteStorageIntegrityError("private storage detail")
 
-    assert metadata.status_code == 200
-    assert metadata.json()["publicationId"] == "publication-1"
-    assert "objectKey" not in metadata.json()
-    assert download.status_code == 200
-    assert download.content == b"package"
-    assert download.headers["x-ruiware-sha256"] == "a" * 64
+    monkeypatch.setattr(Storage, "download_package", broken_download)
+    response = client.get("/api/public/v1/templates/published-1/download")
+    assert response.status_code == 502
+    assert "private storage detail" not in response.text
 
 
-def test_public_api_reports_missing_configuration(monkeypatch):
-    monkeypatch.delenv("RUIWARE_PUBLIC_API_KEY", raising=False)
-    response = TestClient(main.app).get(
-        "/api/public/v1/templates",
-        headers={"X-RuiWare-API-Key": "public-test-key"},
-    )
+def test_local_key_file_and_storage_errors(client, monkeypatch):
+    monkeypatch.delenv("RUIWARE_PUBLIC_API_KEY")
+    main.PUBLIC_API_KEY_FILE.write_text("test-public-key\n", encoding="utf-8")
+    assert client.get("/api/public/v1/templates").status_code == 200
+    monkeypatch.setattr(main, "build_remote_storage", lambda: None)
+    assert client.get("/api/public/v1/templates").json()["error"]["code"] == "REMOTE_STORAGE_NOT_CONFIGURED"
 
+    def unavailable(self):
+        raise TimeoutError("private storage detail")
+
+    monkeypatch.setattr(main, "build_remote_storage", Storage)
+    monkeypatch.setattr(Storage, "list_templates", unavailable)
+    response = client.get("/api/public/v1/templates")
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "PUBLIC_API_NOT_CONFIGURED"
+    assert "private storage detail" not in response.text

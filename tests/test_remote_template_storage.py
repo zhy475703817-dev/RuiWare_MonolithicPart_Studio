@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import zipfile
 
 from template_core.models import PublishedVersion
@@ -61,7 +62,7 @@ def test_remote_sync_uploads_package_with_stable_metadata(tmp_path):
 
     assert result["status"] == "uploaded"
     assert result["objectKey"] == "publishers/JJM/publication-1/template.rwpart"
-    assert result["sha256"] == "d26e6fb5806e2f1a3a1a5f4a3a0b3f6b0a2a9a5f2c2b2b6d7e4d6e0a5f7e1a1" or len(result["sha256"]) == 64
+    assert result["sha256"] == hashlib.sha256(package.read_bytes()).hexdigest()
     assert storage.calls[0][2]["publicationId"] == "publication-1"
 
 

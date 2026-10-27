@@ -66,6 +66,7 @@ def _object_key(prefix: str, publication_id: str, filename: str) -> str:
 class MinioTemplateStorage:
     def __init__(self, settings: RemoteStorageSettings):
         from minio import Minio
+        from urllib3 import PoolManager, Timeout
 
         self.settings = settings
         self.client = Minio(
@@ -73,6 +74,7 @@ class MinioTemplateStorage:
             access_key=settings.access_key,
             secret_key=settings.secret_key,
             secure=settings.secure,
+            http_client=PoolManager(timeout=Timeout(connect=5, read=20), retries=False),
         )
 
     def upload_package(self, package_path: Path, publication: PublishedVersion, metadata: dict[str, Any]) -> dict[str, Any]:

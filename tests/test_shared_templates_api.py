@@ -33,3 +33,21 @@ def test_shared_template_download_reports_integrity_failure(monkeypatch):
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "REMOTE_STORAGE_INTEGRITY_ERROR"
+
+
+def test_unconfigured_storage_does_not_claim_shared_success(monkeypatch):
+    monkeypatch.setattr(main, "build_remote_storage", lambda: None)
+    client = TestClient(main.app)
+    assert client.get("/api/v1/health").json()["sharedTemplatesAvailable"] is False
+    response = client.get("/api/v1/shared-templates")
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "REMOTE_STORAGE_NOT_CONFIGURED"
+
+
+def test_shared_download_has_attachment_and_hash_headers(monkeypatch):
+    monkeypatch.setattr(main, "build_remote_storage", lambda: FakeRemoteStorage())
+    response = TestClient(main.app).get("/api/v1/shared-templates/publication-1/download")
+    assert response.status_code == 200
+    assert response.content == b"package"
+    assert response.headers["X-RuiWare-SHA256"] == "hash"
+    assert "attachment;" in response.headers["Content-Disposition"]

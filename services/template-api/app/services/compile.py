@@ -19,6 +19,7 @@ from template_core.sketch_solver import solve_semantic_sketch
 
 from ..errors import api_error
 from .reconstruction_document import build_reconstruction_guide
+from .package_assets import embed_preview_stl
 
 LIB_ROOT = PLATFORM_ROOT / "libs" / "python"
 WORKER_ROOT = PLATFORM_ROOT / "services" / "cad-worker"
@@ -131,6 +132,8 @@ def write_source_package(
             temporary.unlink()
     finally:
         temporary.unlink(missing_ok=True)
+    if preview_stl_bytes is None:
+        embed_preview_stl(target, artifact_root)
     return target
 
 
