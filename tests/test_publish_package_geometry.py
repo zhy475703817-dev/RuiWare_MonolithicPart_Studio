@@ -129,7 +129,7 @@ def test_source_package_embeds_exact_stl_and_describes_package_contract(tmp_path
     attachment_hash = hashlib.sha256(attachment_bytes).hexdigest()
     attachment = SourceAttachment(id="spec-1", filename="spec.txt", mediaType="text/plain", size=len(attachment_bytes), sha256=attachment_hash, url="/uploads/spec.txt", createdAt="2026-10-17T00:00:00Z")
     draft.attachments = [attachment]
-    draft.interfaces = [PartInterface(id="mount", name="安装基准", geometryRefs=["part.face.front"], parameterRefs=["length"])]
+    draft.interfaces = [PartInterface(id="mount", name="安装基准", geometryRefs=["part.face.front"], parameterRefs=["length"], connectionProcesses=["bolted"])]
     source = attachment_root / attachment_hash / "spec.txt"
     source.parent.mkdir(parents=True)
     source.write_bytes(attachment_bytes)
@@ -163,7 +163,9 @@ def test_source_package_embeds_exact_stl_and_describes_package_contract(tmp_path
         assert manifest["schemaVersion"] == "3.0"
         assert manifest["attachments"] == [attachment.model_dump()]
         assert json.loads(archive.read("parameters.json"))["definitions"] == [p.model_dump() for p in draft.parameterDefinitions]
-        assert json.loads(archive.read("interfaces.json"))["interfaces"] == [i.model_dump() for i in draft.interfaces]
+        packaged_interfaces = json.loads(archive.read("interfaces.json"))["interfaces"]
+        assert packaged_interfaces == [i.model_dump() for i in draft.interfaces]
+        assert packaged_interfaces[0]["connectionProcesses"] == ["bolted"]
         assert archive.read("assets/spec-1/spec.txt") == attachment_bytes
         assert not any(name.endswith(".step") for name in archive.namelist())
     stl_artifact = next(item for item in outputs["artifacts"] if item["kind"] == "stl")

@@ -16,7 +16,6 @@ const csv = (value: string) =>
 type InterfaceEditorProps = {
   draft: Draft;
   change: (draft: Draft) => void;
-  save?: (draft?: Draft | null) => Promise<Draft | null | undefined>;
 };
 
 const defaultPlacement = (): NonNullable<PartInterface["region"]>["placement"] => ({
@@ -129,7 +128,7 @@ function InterfaceRegionEditor({
   );
 }
 
-export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
+export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
   const [preview, setPreview] = useState<CompileResult | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState("");
@@ -144,6 +143,12 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
     adjustable: "可调",
     processDatum: "工艺基准",
     other: "其他",
+  };
+  const connectionProcessLabels: Record<PartInterface["connectionProcesses"][number], string> = {
+    hookSnap: "挂钩卡接",
+    bolted: "螺栓连接",
+    welded: "焊接",
+    riveted: "铆钉",
   };
   const edit = (index: number, patch: Partial<PartInterface>) =>
     setItems(
@@ -166,6 +171,7 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
         referenceFrame: { originRef: geometryRefs[0]?.id || null, axis: "z" },
         parameterRefs: [],
         compatibilityTags: [],
+        connectionProcesses: [],
         description: "",
         required: true,
         reviewed: false,
@@ -177,11 +183,12 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
     try {
       const sample = draft.materialValidationSamples.find((item) => item.role === "nominal") || draft.materialValidationSamples[0];
       const materialSnapshot = { record: { code: sample?.materialCode || "preview", name: sample?.materialName || "预览材料", thickness: sample?.materialThickness }, provenance: { source: "interface-preview" } };
-      const source = save ? await save(draft) : draft;
-      if (!source) return;
-      const result = await api.compilePreview(source, materialSnapshot);
+      const [result, evaluation] = await Promise.all([
+        api.compilePreview(draft, materialSnapshot),
+        api.evaluatePreview(draft, { overrides: {}, material: materialSnapshot.record }),
+      ]);
       setPreview(result);
-      if (source.id) setPreviewEvaluation(await api.evaluate(source.id, { overrides: {} }));
+      setPreviewEvaluation(evaluation);
       if (!result.success) setPreviewError(result.diagnostics.map((item) => item.message).join("；") || "B-Rep 预览未通过");
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "预览生成失败");
@@ -424,6 +431,30 @@ export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
                         </option>
                       ))}
                     </select>
+                  </Field>
+                  <Field label="连接工艺定义" hint="可多选，用于定义该接口与其他接口连接时允许采用的工艺。">
+                    <div className="connection-process-options">
+                      {Object.entries(connectionProcessLabels).map(([value, label]) => {
+                        const process = value as PartInterface["connectionProcesses"][number];
+                        const selected = item.connectionProcesses ?? [];
+                        return (
+                          <label key={value}>
+                            <input
+                              type="checkbox"
+                              checked={selected.includes(process)}
+                              onChange={(event) =>
+                                edit(index, {
+                                  connectionProcesses: event.target.checked
+                                    ? [...selected, process]
+                                    : selected.filter((item) => item !== process),
+                                })
+                              }
+                            />
+                            {label}
+                          </label>
+                        );
+                      })}
+                    </div>
                   </Field>
                 </div>
                 {item.declarationMode === "featureDerived" ? (

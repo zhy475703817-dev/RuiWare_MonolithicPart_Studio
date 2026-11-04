@@ -138,6 +138,8 @@ export const api = {
   sharedTemplates: () => request<SharedTemplate[]>("/api/v1/shared-templates"),
   sharedTemplateDownloadUrl: (publicationId: string) => `/api/v1/shared-templates/${encodeURIComponent(publicationId)}/download`,
   evaluate: (id: string, input: EvaluationRequest) => request<TemplateEvaluation>(`/api/v1/template-drafts/${id}/evaluate`, json("POST", input)),
+  evaluatePreview: (draft: Draft, input: EvaluationRequest) =>
+    request<TemplateEvaluation>("/api/v1/evaluate-preview", json("POST", { draft, ...input })),
   uploadAttachment: (id: string, file: File, kind: string) => request<Draft>(`/api/v1/template-drafts/${id}/attachments?filename=${encodeURIComponent(file.name)}&kind=${encodeURIComponent(kind)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }),
   updateAttachment: (id: string, attachmentId: string, input: { description: string; kind?: string }) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, json("PATCH", input)),
   removeAttachment: (id: string, attachmentId: string) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, { method: "DELETE" }),

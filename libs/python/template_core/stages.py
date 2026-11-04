@@ -779,6 +779,8 @@ def validate_variants(
             interface_reasons.append(f"静态接口 {item.id} 只能关联一个语义面")
         if item.declarationMode == "featureDerived" and not item.sourceFeatureRuleId:
             interface_reasons.append(f"特征派生接口 {item.id} 未选择来源制造特征规则")
+        if not item.connectionProcesses:
+            interface_reasons.append(f"接口 {item.id} 未选择连接工艺")
         if item.required and not item.reviewed:
             interface_reasons.append(f"关键接口 {item.id} 尚未完成工程师复核")
     interfaces_complete = not interface_reasons
@@ -843,11 +845,13 @@ def validate_review(draft: TemplateDraft, compile_result: CompileResult | None, 
 
 def validate_admission(draft: TemplateDraft, review: StageValidation) -> StageValidation:
     upstream = all(getattr(draft.stageStatus, stage) == "complete" for stage in STAGE_ORDER[:-1])
+    connection_processes_complete = all(item.connectionProcesses for item in draft.interfaces)
     checks = [
         StageCheck(id="upstream-complete", label="前置阶段全部完成", passed=upstream, severity="error", path="stageStatus", message="模板信息至三维审查必须全部完成。"),
         StageCheck(id="review-current", label="当前几何通过审查", passed=review.complete, severity="error", path="review", message="当前输入必须有成功的CAD审查结果。"),
         StageCheck(id="reviewer", label="发布复核人已指定", passed=len(draft.admission.reviewer.strip()) >= 2, severity="error", path="admission.reviewer", message="请填写发布复核人。"),
         StageCheck(id="change-note", label="版本说明完整", passed=len(draft.admission.changeNote.strip()) >= 5, severity="error", path="admission.changeNote", message="请填写本版本的变更与适用范围。"),
+        StageCheck(id="interface-connection-processes", label="接口连接工艺已定义", passed=connection_processes_complete, severity="error", path="interfaces", message="每个接口必须至少选择一种连接工艺后才能发布。"),
     ]
     return _validation("admission", checks)
 

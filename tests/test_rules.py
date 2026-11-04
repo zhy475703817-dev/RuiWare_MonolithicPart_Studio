@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
 from template_core.metamodel import FeatureRule, ParameterDefinition, ParameterSource, PartInterface
-from template_core.models import SemanticSketchConstraint, SemanticSketchEntity, TemplateDraft
+from template_core.models import SemanticSketchConstraint, SemanticSketchEntity, StageValidation, TemplateDraft
 from template_core.rules import RuleEvaluationError, evaluate_expression, evaluate_template, expression_names, parameter_evaluation_order
-from template_core.stages import validate_stage
+from template_core.stages import validate_admission, validate_stage
 from template_core.sketch_solver import solve_semantic_sketch
 
 
@@ -86,6 +86,7 @@ def test_feature_derived_interface_tracks_resolved_feature_count() -> None:
         declarationMode="featureDerived",
         sourceFeatureRuleId="upright.mainHoleRow",
         interfaceType="connecting",
+        connectionProcesses=["bolted", "riveted"],
     )
     short.interfaces = [interface]
     long.interfaces = [interface]
@@ -98,6 +99,7 @@ def test_feature_derived_interface_tracks_resolved_feature_count() -> None:
     assert len(long_evaluation.resolvedInterfaces) == 12
     assert short_evaluation.resolvedInterfaces[0].id == "upright.connection.holeRow.part_face_front.001"
     assert short_evaluation.resolvedInterfaces[0].sourceFeatureId == "upright.mainHoleRow.part_face_front.001"
+    assert short_evaluation.resolvedInterfaces[0].connectionProcesses == ["bolted", "riveted"]
 
 
 def test_feature_derived_interface_requires_existing_feature_rule() -> None:
@@ -365,6 +367,40 @@ def test_contract_rejects_multiple_interface_geometry_references() -> None:
     check = next(item for item in result.checks if item.id == "interface-completeness")
     assert not check.passed
     assert "只能关联一个语义面" in check.message
+
+
+def test_contract_and_admission_require_interface_connection_processes() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口连接工艺",
+        "interfaces": [{
+            "id": "interface.connection",
+            "name": "连接接口",
+            "geometryRefs": ["part.face.front"],
+        }],
+        "admission": {"reviewer": "复核员", "changeNote": "补充接口连接工艺"},
+    })
+
+    contract = validate_stage("variants", draft)
+    completeness = next(item for item in contract.checks if item.id == "interface-completeness")
+    admission = validate_admission(
+        draft,
+        StageValidation(stage="review", complete=True, progress=100, checks=[]),
+    )
+    admission_process = next(item for item in admission.checks if item.id == "interface-connection-processes")
+
+    assert not completeness.passed
+    assert "未选择连接工艺" in completeness.message
+    assert not admission_process.passed
+
+    draft.interfaces[0].connectionProcesses = ["welded"]
+    assert next(
+        item
+        for item in validate_admission(
+            draft,
+            StageValidation(stage="review", complete=True, progress=100, checks=[]),
+        ).checks
+        if item.id == "interface-connection-processes"
+    ).passed
 
 
 def test_interface_rectangle_expressions_and_linear_placement_are_resolved() -> None:
@@ -768,6 +804,35 @@ def test_evaluation_api_previews_parameter_override_and_rule_output(tmp_path, mo
     assert result["values"]["holeCount"] == 12
     assert len(result["features"]) == 12
     assert result["features"][0]["sourceRuleId"] == "upright.mainHoleRow"
+
+
+def test_evaluation_preview_uses_unsaved_interfaces_without_creating_revision(tmp_path, monkeypatch) -> None:
+    import app.main as main
+    from app.repository import Repository
+    from template_core.material import RuiWareMaterialLibrary
+
+    repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "unused.db"))
+    monkeypatch.setattr(main, "repository", repository)
+    saved = repository.save_draft(omega_rule_draft())
+    preview = saved.model_copy(deep=True)
+    preview.interfaces = [PartInterface(
+        id="upright.connection.holeRow",
+        name="未保存连接孔接口",
+        declarationMode="featureDerived",
+        sourceFeatureRuleId="upright.mainHoleRow",
+        interfaceType="connecting",
+    )]
+
+    response = TestClient(main.app).post(
+        "/api/v1/evaluate-preview",
+        json={"draft": preview.model_dump(mode="json"), "overrides": {}},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["resolvedInterfaces"]) == 8
+    persisted = repository.get_draft(saved.id)
+    assert persisted.revision == saved.revision
+    assert persisted.interfaces == []
 
 
 def test_generic_unified_example_is_valid_and_compiles(tmp_path) -> None:
