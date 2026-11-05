@@ -94,6 +94,7 @@ from .services.write_context import parse_write_context  # noqa: E402
 from .security import bind_request, release_request, current_owner_id, require_public_api_key, signed_session  # noqa: E402
 from .event_stream import stream_draft_events  # noqa: E402
 from .services.remote_storage import RemoteStorageIntegrityError, build_remote_storage  # noqa: E402
+from .services.publish_duplicates import group_templates  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -142,6 +143,16 @@ class ProposalApplyRequest(ProposalPreviewRequest):
 class GuardedActionRequest(BaseModel):
     baseRevision: int | None = Field(default=None, ge=1)
     confirmed: bool = False
+
+
+class DuplicateDecision(BaseModel):
+    action: Literal["add", "replace"]
+    reviewToken: str = Field(min_length=64, max_length=64)
+    publicationIds: list[str] = Field(default_factory=list, max_length=100)
+
+
+class PublishRequest(GuardedActionRequest):
+    duplicateDecision: DuplicateDecision | None = None
 
 
 class EvaluationRequest(BaseModel):
@@ -662,7 +673,8 @@ def list_shared_templates():
     if storage is None:
         raise api_error("REMOTE_STORAGE_NOT_CONFIGURED", status_code=503, retryable=False)
     try:
-        return storage.list_templates()
+        # This authoring view imports parts; the public API retains both kinds.
+        return [item for item in storage.list_templates() if item.get("templateKind", "part") == "part"]
     except Exception as exc:
         raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503, context={"detail": str(exc)}) from exc
 
@@ -703,6 +715,7 @@ def _public_template_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "sha256": metadata.get("sha256"),
         "size": metadata.get("size"),
         "downloadUrl": f"/api/public/v1/templates/{quote(publication_id, safe='')}/download",
+        **{key: metadata[key] for key in ("templateKind", "schemaVersion", "engineeringStatus", "memberCount") if key in metadata},
     }
 
 
@@ -723,6 +736,17 @@ def list_public_templates(request: Request, limit: int = Query(default=100, ge=1
     except Exception as exc:
         raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503, context={"detail": str(exc)}) from exc
     return {"items": items, "count": len(items)}
+
+
+@app.get("/api/public/v1/template-groups")
+def list_public_template_groups(request: Request):
+    require_public_api_key(request)
+    try:
+        return group_templates(_public_storage_or_error())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503) from exc
 
 
 @app.get("/api/public/v1/templates/{publication_id}")
@@ -779,8 +803,9 @@ def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: 
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
-def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
+def publish_template(draft_id: str, request: Request, body: PublishRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
     expected_revision = context.base_revision
-    released, version, validation, remote_sync = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
+    decision = body.duplicateDecision.model_dump() if body and body.duplicateDecision else None
+    released, version, validation, remote_sync = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision, duplicate_decision=decision)
     return PublishResult(draft=released, version=version, validation=validation, remoteSync=remote_sync)

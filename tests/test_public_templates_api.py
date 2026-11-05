@@ -89,3 +89,36 @@ def test_public_api_reports_missing_configuration(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "PUBLIC_API_NOT_CONFIGURED"
+
+
+def test_public_component_metadata_retains_type_and_schema_without_storage_keys(monkeypatch):
+    storage = FakePublicStorage()
+    original = storage.list_templates()[0]
+    component = {**original, "templateKind": "component", "schemaVersion": "component-package-1.0",
+                 "memberCount": 2, "engineeringStatus": "incomplete"}
+    monkeypatch.setenv("RUIWARE_PUBLIC_API_KEY", "public-test-key")
+    monkeypatch.setattr(storage, "list_templates", lambda: [component])
+    monkeypatch.setattr(main, "build_remote_storage", lambda: storage)
+    response = TestClient(main.app).get('/api/public/v1/templates', headers={"X-RuiWare-API-Key": "public-test-key"})
+    assert response.status_code == 200
+    metadata = response.json()['items'][0]
+    assert metadata['templateKind'] == 'component'
+    assert metadata['schemaVersion'] == 'component-package-1.0'
+    assert metadata['memberCount'] == 2
+    assert 'objectKey' not in metadata
+
+
+def test_part_authoring_list_excludes_components_but_public_list_retains_them(monkeypatch):
+    storage = FakePublicStorage()
+    legacy = storage.list_templates()[0]
+    part = {**legacy, 'publicationId': 'part-2', 'templateKind': 'part'}
+    component = {**legacy, 'publicationId': 'component-1', 'templateKind': 'component'}
+    monkeypatch.setattr(storage, 'list_templates', lambda: [legacy, part, component])
+    monkeypatch.setattr(main, 'build_remote_storage', lambda: storage)
+    monkeypatch.setenv('RUIWARE_PUBLIC_API_KEY', 'public-test-key')
+    client = TestClient(main.app)
+    response = client.get('/api/v1/shared-templates')
+    assert response.status_code == 200
+    assert [item['publicationId'] for item in response.json()] == ['publication-1', 'part-2']
+    public = client.get('/api/public/v1/templates', headers={'X-RuiWare-API-Key': 'public-test-key'})
+    assert public.json()['count'] == 3

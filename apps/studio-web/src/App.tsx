@@ -15,6 +15,7 @@ import { api } from "./api";
 import { WorkspaceShell } from "./components/layout/WorkspaceShell";
 import { CheckList } from "./components/ui/FormParts";
 import { useDraftWorkspace } from "./features/draft/useDraftWorkspace";
+import { PublishComparisonDialog } from "./features/stages/review/admission/PublishComparisonDialog";
 import { GeometryStage, operatorDefaults, profileModeSketch } from "./features/stages/geometry";
 import { MaterialStage } from "./features/stages/material/MaterialStage";
 import { AdmissionStage } from "./features/stages/review/admission/AdmissionStage";
@@ -125,6 +126,10 @@ export default function App() {
     runCompile,
     checkPrerequisites,
     publish,
+    publishReview,
+    openPublishComparison,
+    cancelPublishReview,
+    confirmPublish,
     showError,
     reload,
   } = useDraftWorkspace();
@@ -312,6 +317,15 @@ export default function App() {
             </div>
           </aside>
         </div>
+      <PublishComparisonDialog
+        review={publishReview?.report ?? null}
+        phase={publishReview?.phase ?? "prompt"}
+        newName={draft.name}
+        busy={!!busy}
+        onCompare={openPublishComparison}
+        onCancel={cancelPublishReview}
+        onPublish={confirmPublish}
+      />
     </WorkspaceShell>
   );
 }

@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from template_core.models import PublishedVersion
 
@@ -18,6 +21,10 @@ class RemoteTemplateStorage(Protocol):
     def list_templates(self) -> list[dict[str, Any]]: ...
 
     def download_package(self, publication_id: str) -> tuple[bytes, dict[str, Any]]: ...
+
+    def replacement_status(self, metadata: dict[str, Any]) -> dict[str, Any]: ...
+
+    def delete_package(self, publication_id: str, expected_sha256: str) -> None: ...
 
 
 class RemoteStorageIntegrityError(RuntimeError):
@@ -39,17 +46,22 @@ def _package_geometry_error(content: bytes) -> str | None:
 
 
 def _publication_identity(metadata: dict[str, Any]) -> tuple[Any, ...]:
+    kind = metadata.get("templateKind", "part")
+    if kind == "component":
+        # Components can share codes/revisions across authors. Keep pinned release IDs.
+        return (kind, "publicationId", metadata.get("publicationId"))
     values = (metadata.get("code"), metadata.get("version"), metadata.get("sourceRevision"))
     if any(value is None for value in values):
-        return ("publicationId", metadata.get("publicationId"))
-    return values
+        return (kind, "publicationId", metadata.get("publicationId"))
+    return (kind, *values)
 
 
 def _deduplicate_templates(templates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     unique: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for template in sorted(templates, key=lambda value: value.get("createdAt", ""), reverse=True):
-        identity = _publication_identity(template)
+        # Distinct immutable publication IDs must remain independently addressable.
+        identity = (template.get("templateKind", "part"), template.get("publicationId"))
         if identity in seen:
             continue
         seen.add(identity)
@@ -127,6 +139,63 @@ class MinioTemplateStorage:
             raise RemoteStorageIntegrityError("remote package sha256 mismatch")
         return content, metadata
 
+    def replacement_status(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        publication_id = str(metadata.get("publicationId", ""))
+        if metadata.get("objectKey") != _object_key(self.settings.prefix, publication_id, "template.rwpart"):
+            return {"allowed": False, "reason": "OTHER_PUBLISHER_PACKAGE"}
+        if not os.environ.get("RUIWARE_REFERENCE_CHECK_URL"):
+            return {"allowed": False, "reason": "REFERENCE_STATUS_UNKNOWN"}
+        try:
+            status = self._reference_request(publication_id)
+            if not self._reference_matches(status, metadata):
+                return {"allowed": False, "reason": "REFERENCE_STATUS_UNKNOWN"}
+            if status["references"]:
+                return {"allowed": False, "reason": "PACKAGE_REFERENCED"}
+            if status.get("deletionGuardSupported") is not True:
+                return {"allowed": False, "reason": "REFERENCE_GUARD_UNAVAILABLE"}
+            return {"allowed": True, "reason": None}
+        except Exception:
+            return {"allowed": False, "reason": "REFERENCE_STATUS_UNKNOWN"}
+
+    def _reference_request(self, publication_id: str, suffix: str = "", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        endpoint = os.environ["RUIWARE_REFERENCE_CHECK_URL"].rstrip("/")
+        headers = {"Accept": "application/json"}
+        token = os.environ.get("RUIWARE_REFERENCE_CHECK_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode()
+            headers["Content-Type"] = "application/json"
+        request = Request(f"{endpoint}/{quote(publication_id, safe='')}{suffix}", headers=headers, data=data)
+        with urlopen(request, timeout=10) as response:
+            return json.load(response)
+
+    @staticmethod
+    def _reference_matches(status: dict[str, Any], metadata: dict[str, Any]) -> bool:
+        return status.get("authoritative") is True and status.get("publicationId") == metadata.get("publicationId") and status.get("sha256") == metadata.get("sha256") and isinstance(status.get("references"), list)
+
+    def delete_package(self, publication_id: str, expected_sha256: str) -> None:
+        _, metadata = self.download_package(publication_id)
+        if metadata.get("sha256") != expected_sha256:
+            raise RemoteStorageIntegrityError("replacement target changed")
+        status = self.replacement_status(metadata)
+        if not status["allowed"]:
+            raise PermissionError(status["reason"])
+        # The registry must atomically reject reservations for referenced versions
+        # and persistently block ALL new references until cleanup is completed.
+        reservation = self._reference_request(publication_id, "/deletion-guard", {"sha256": expected_sha256})
+        if not self._reference_matches(reservation, metadata) or reservation["references"] or reservation.get("reserved") is not True or not isinstance(reservation.get("deletionToken"), str) or not reservation["deletionToken"]:
+            raise PermissionError("REFERENCE_DELETION_RESERVATION_FAILED")
+        _, current = self.download_package(publication_id)
+        if current.get("sha256") != expected_sha256:
+            raise RemoteStorageIntegrityError("replacement target changed after reservation")
+        self.client.remove_object(self.settings.bucket, _object_key(self.settings.prefix, publication_id, "template.rwpart"))
+        self.client.remove_object(self.settings.bucket, _object_key(self.settings.prefix, publication_id, "metadata.json"))
+        completed = self._reference_request(publication_id, "/deletion-guard/complete", {"sha256": expected_sha256, "deletionToken": reservation["deletionToken"]})
+        if not self._reference_matches(completed, metadata) or completed["references"] or completed.get("completed") is not True or completed.get("deletionToken") != reservation["deletionToken"]:
+            raise RemoteStorageIntegrityError("deletion registry completion failed")
+
 
 def build_remote_storage() -> RemoteTemplateStorage | None:
     settings = remote_storage_settings()
@@ -142,12 +211,15 @@ def sync_published_package(
     storage: RemoteTemplateStorage | None,
     package_path: Path,
     publication: PublishedVersion,
+    *,
+    replacements: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if storage is None:
         return {"status": "disabled", "reason": "REMOTE_STORAGE_NOT_CONFIGURED"}
     content = package_path.read_bytes()
     content_hash = hashlib.sha256(content).hexdigest()
     metadata = {
+        "templateKind": "part",
         "publicationId": publication.id,
         "templateId": publication.templateId,
         "version": publication.version,
@@ -163,7 +235,7 @@ def sync_published_package(
         return {"status": "failed", "errorCode": "REMOTE_PACKAGE_INVALID", "error": package_error, **metadata}
     try:
         existing = next(
-            (item for item in storage.list_templates() if _publication_identity(item) == _publication_identity(metadata)),
+            (item for item in storage.list_templates() if item.get("publicationId") == publication.id and item.get("sha256") == content_hash),
             None,
         )
         if existing is not None:
@@ -171,4 +243,25 @@ def sync_published_package(
         remote = storage.upload_package(package_path, publication, metadata)
     except Exception:
         return {"status": "failed", "errorCode": "REMOTE_STORAGE_UNAVAILABLE", **metadata}
-    return {"status": "uploaded", **metadata, **remote}
+    result = {"status": "uploaded", **metadata, **remote}
+    if replacements:
+        result.update(replacedPublicationIds=[], cleanupFailures=[])
+        try:
+            uploaded, _ = storage.download_package(publication.id)
+            if hashlib.sha256(uploaded).hexdigest() != content_hash:
+                raise RemoteStorageIntegrityError("uploaded package verification failed")
+        except Exception:
+            return {**result, "cleanupFailures": [{"reason": "NEW_PACKAGE_VERIFICATION_FAILED"}]}
+        for item in replacements:
+            try:
+                _, current = storage.download_package(item["publicationId"])
+                if current.get("sha256") != item["sha256"]:
+                    raise RemoteStorageIntegrityError("replacement target changed")
+                status = storage.replacement_status(current)
+                if not status["allowed"]:
+                    raise PermissionError(status["reason"])
+                storage.delete_package(item["publicationId"], item["sha256"])
+                result["replacedPublicationIds"].append(item["publicationId"])
+            except Exception as error:
+                result["cleanupFailures"].append({"publicationId": item["publicationId"], "reason": str(error)})
+    return result

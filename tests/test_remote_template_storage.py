@@ -75,7 +75,7 @@ def test_remote_sync_failure_does_not_raise(tmp_path):
     assert result["errorCode"] == "REMOTE_STORAGE_UNAVAILABLE"
 
 
-def test_remote_sync_skips_existing_publication_identity(tmp_path):
+def test_remote_sync_does_not_skip_same_code_and_version_with_distinct_release_id(tmp_path):
     package = _package(tmp_path)
     storage = FakeStorage(
         templates=[
@@ -91,12 +91,11 @@ def test_remote_sync_skips_existing_publication_identity(tmp_path):
 
     result = sync_published_package(storage, package, _publication())
 
-    assert result["status"] == "duplicate"
-    assert result["duplicateOf"] == "existing-publication"
-    assert storage.calls == []
+    assert result["status"] == "uploaded"
+    assert len(storage.calls) == 1
 
 
-def test_shared_template_listing_keeps_latest_duplicate_identity():
+def test_shared_template_listing_keeps_every_original_release_id():
     templates = _deduplicate_templates(
         [
             {
@@ -116,4 +115,14 @@ def test_shared_template_listing_keeps_latest_duplicate_identity():
         ]
     )
 
-    assert [item["publicationId"] for item in templates] == ["newer"]
+    assert [item["publicationId"] for item in templates] == ["newer", "older"]
+
+
+def test_shared_bucket_never_deduplicates_components_as_parts_or_each_other():
+    common = {"code": "SAME", "version": 1, "sourceRevision": 1, "createdAt": "2026-10-24T00:00:00Z"}
+    templates = _deduplicate_templates([
+        {**common, "publicationId": "part-1"},
+        {**common, "publicationId": "component-1", "templateKind": "component", "templateId": "a"},
+        {**common, "publicationId": "component-2", "templateKind": "component", "templateId": "b"},
+    ])
+    assert {item["publicationId"] for item in templates} == {"part-1", "component-1", "component-2"}

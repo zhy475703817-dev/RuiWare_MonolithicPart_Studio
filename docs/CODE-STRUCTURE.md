@@ -695,12 +695,17 @@ STEP / STL / diagnostics / semantic-map
 
 - `services/template-api/app/config.py`：读取每台电脑本地的 MinIO 连接配置，不保存密钥。
 - `services/template-api/app/services/remote_storage.py`：MinIO 适配器，负责发布包上传、共享模板列表、下载和 SHA-256 完整性校验。
+- `services/template-api/app/services/package_similarity.py`：实际定义规范化、四类加权评分及字段差异。
+- `services/template-api/app/services/publish_duplicates.py`：发布前候选检查、确认令牌及对外只读分组。
+- `apps/studio-web/src/features/stages/review/admission/PublishComparisonDialog.tsx`：仅发现候选后展示提示及比较，选择新增或安全替换。
 - `services/template-api/app/services/workflow.py`：本地发布完成后调用远程同步；远程失败不会回滚本地发布。
 - `services/template-api/app/main.py`：提供共享模板列表、下载接口，并在发布响应中返回 `remoteSync` 状态。
 - `apps/studio-web/src/features/stages/review/admission/SharedTemplatesPanel.tsx`：发布页中的共享模板列表和下载入口。
 - `tests/test_remote_template_storage.py`、`tests/test_shared_templates_api.py`：验证远程同步降级、上传状态、共享列表、下载校验失败等行为。
 
 远程对象按 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录 `metadata.json` 存储。MinIO 凭据只通过本地环境变量配置，不提交 Git。
+
+发布前先检查远程定义；候选确认前不冻结版本。替换需要支持持久删除预留的权威引用服务；先上传校验新包，再清理旧包。配置、HTTP 契约及组件平台接入见 `docs/TEMPLATE-PACKAGE-DEDUPLICATION.md`。
 
 ## 对外模板只读 API
 
