@@ -255,6 +255,7 @@ def test_shared_upload_contains_stl_and_hashes_final_package(tmp_path):
 
 @pytest.fixture
 def publish_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "build_remote_storage", lambda: None)
     repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(tmp_path / "materials.db"))
     draft = repository.save_draft(TemplateDraft(id="draft-1", code="TPL-001", name="打包失败不发布"))
     artifact_root = tmp_path / "artifacts"

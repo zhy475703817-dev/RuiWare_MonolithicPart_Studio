@@ -26,6 +26,9 @@ class ApiErrorPayload(BaseModel):
 
 
 ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
+    "PUBLISH_DUPLICATES_FOUND": ("发现可能的旧版本模板包。", "请比较后选择新增模板包或替换旧版本。"),
+    "PUBLISH_REVIEW_STALE": ("比较结果已变化，请重新点击发布。", "请重新检查模板包。"),
+    "PUBLISH_REPLACEMENT_BLOCKED": ("所选模板包当前不能替换。", "请检查相似度、所属成员及引用状态，或选择新增模板包。"),
     "DRAFT_NOT_FOUND": ("模板草稿不存在。", "请刷新草稿列表，确认该模板是否已被归档或删除。"),
     "DRAFT_ARCHIVED_NOT_FOUND": ("归档草稿不存在。", "请确认草稿处于归档状态后再恢复。"),
     "DRAFT_REVISION_NOT_FOUND": ("草稿或修订不存在。", "请刷新修订列表后重试。"),
