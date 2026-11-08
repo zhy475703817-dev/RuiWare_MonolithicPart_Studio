@@ -128,6 +128,13 @@ def test_guarded_workflow_tools_forward_revision_and_confirmation():
     ]
 
 
+def test_publish_forwards_explicit_duplicate_review_decision():
+    client = FakeClient()
+    decision = {"action": "add", "reviewToken": "a" * 64}
+    McpApplication(client).call_tool("ruiware_publish_template", {"draftId": "draft-1", "baseRevision": 3, "confirmed": True, "duplicateDecision": decision})
+    assert client.calls[-1][2]["duplicateDecision"] == decision
+
+
 def test_api_errors_are_returned_to_agents_as_structured_payloads():
     class ErrorClient(FakeClient):
         def get(self, path):

@@ -20,6 +20,7 @@ from .context import nominal_material_context, validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
 from .reconstruction_document import build_reconstruction_guide
 from .remote_storage import RemoteTemplateStorage, build_remote_storage, sync_published_package
+from .publish_duplicates import check_publish_duplicates
 
 
 def write_source_package(repository: Repository, draft: TemplateDraft, artifact_root: Path = ARTIFACT_ROOT, attachment_root: Path = ATTACHMENT_ROOT) -> Path:
@@ -130,6 +131,7 @@ def publish_template(
     attachment_root: Path = ATTACHMENT_ROOT,
     expected_revision: int | None = None,
     remote_storage: RemoteTemplateStorage | None = None,
+    duplicate_decision: dict[str, Any] | None = None,
 ):
     draft = draft_or_404(repository, draft_id)
     ensure_draft_revision(draft, expected_revision)
@@ -159,6 +161,7 @@ def publish_template(
     package = None
     released = None
     version = None
+    storage = remote_storage if remote_storage is not None else build_remote_storage()
     try:
         package = write_source_package_service(
             candidate,
@@ -170,6 +173,7 @@ def publish_template(
             compile_result=latest,
             expected_input_hash=expected_input_hash,
         )
+        replacements = check_publish_duplicates(storage, package, duplicate_decision)
         released, version = repository.publish_atomic(
             candidate,
             latest,
@@ -183,8 +187,9 @@ def publish_template(
             raise
         raise api_error("PUBLISH_PACKAGE_FAILED", status_code=422, context={"detail": str(error)}) from error
     remote_sync = sync_published_package(
-        remote_storage if remote_storage is not None else build_remote_storage(),
+        storage,
         package,
         version,
+        replacements=replacements,
     )
     return released, version, validation, remote_sync
