@@ -59,4 +59,22 @@ describe("API workspace context", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/template-drafts/draft-1/reconstruction-guide?expectedRevision=12");
   });
+
+  it("evaluates an unsaved draft without saving a revision", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ values: {}, evaluationOrder: [], features: [], resolvedInterfaces: [], diagnostics: [], success: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const draft = { id: "draft-1", revision: 7, interfaces: [{ id: "interface.unsaved" }] } as any;
+
+    await api.evaluatePreview(draft, { overrides: {} });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/evaluate-preview");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      draft: { id: "draft-1", revision: 7, interfaces: [{ id: "interface.unsaved" }] },
+      overrides: {},
+    });
+  });
 });

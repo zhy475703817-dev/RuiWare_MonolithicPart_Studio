@@ -354,6 +354,7 @@ class PartInterface(BaseModel):
     region: InterfaceRegion | None = None
     parameterRefs: list[str] = Field(default_factory=list)
     compatibilityTags: list[str] = Field(default_factory=list)
+    connectionProcesses: list[Literal["hookSnap", "bolted", "welded", "riveted"]] = Field(default_factory=list)
     description: str = ""
     required: bool = False
     reviewed: bool = False
@@ -427,6 +428,7 @@ class ResolvedInterface(BaseModel):
     interfaceType: Literal["locating", "connecting", "supporting", "adjustable", "processDatum", "other"]
     geometryRefs: list[str] = Field(default_factory=list)
     parameterRefs: list[str] = Field(default_factory=list)
+    connectionProcesses: list[Literal["hookSnap", "bolted", "welded", "riveted"]] = Field(default_factory=list)
     region: ResolvedInterfaceRegion | None = None
     sourceFeatureRuleId: str | None = None
     sourceFeatureId: str | None = None

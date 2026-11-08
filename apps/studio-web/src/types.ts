@@ -414,6 +414,7 @@ export type PartInterface = {
   region?: InterfaceRegion | null;
   parameterRefs: string[];
   compatibilityTags: string[];
+  connectionProcesses: ("hookSnap" | "bolted" | "welded" | "riveted")[];
   description: string;
   required: boolean;
   reviewed: boolean;
@@ -447,6 +448,7 @@ export type ResolvedInterface = {
   interfaceType: PartInterface["interfaceType"];
   geometryRefs: string[];
   parameterRefs: string[];
+  connectionProcesses: PartInterface["connectionProcesses"];
   region?: { mode: "rectangle"; uStart: number; vStart: number; uSpan: number; vSpan: number } | null;
   sourceFeatureRuleId?: string | null;
   sourceFeatureId?: string | null;

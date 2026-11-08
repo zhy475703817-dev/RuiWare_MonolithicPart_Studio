@@ -629,6 +629,7 @@ def resolve_part_interfaces(
                             interfaceType=interface.interfaceType,
                             geometryRefs=[face_id] if face_id else interface.geometryRefs,
                             parameterRefs=interface.parameterRefs,
+                            connectionProcesses=interface.connectionProcesses,
                             region=region,
                         ))
                 else:
@@ -639,6 +640,7 @@ def resolve_part_interfaces(
                         interfaceType=interface.interfaceType,
                         geometryRefs=interface.geometryRefs,
                         parameterRefs=interface.parameterRefs,
+                        connectionProcesses=interface.connectionProcesses,
                     ))
             except RuleEvaluationError as error:
                 diagnostics.append(EvaluationDiagnostic(
@@ -673,6 +675,7 @@ def resolve_part_interfaces(
                         interfaceType=interface.interfaceType,
                         geometryRefs=[feature.semanticFaceId],
                         parameterRefs=interface.parameterRefs,
+                        connectionProcesses=interface.connectionProcesses,
                         region=region,
                         sourceFeatureRuleId=rule_id,
                         sourceFeatureId=feature.id,
