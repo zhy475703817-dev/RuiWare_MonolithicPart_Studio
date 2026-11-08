@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
-from template_core.metamodel import FeatureRule, ParameterDefinition, ParameterSource, PartInterface
+from template_core.metamodel import FeatureRule, MatingContract, ParameterDefinition, ParameterSource, PartInterface
 from template_core.models import SemanticSketchConstraint, SemanticSketchEntity, StageValidation, TemplateDraft
 from template_core.rules import RuleEvaluationError, evaluate_expression, evaluate_template, expression_names, parameter_evaluation_order
 from template_core.stages import validate_admission, validate_stage
@@ -75,6 +75,51 @@ def test_part_interface_declares_single_part_geometry() -> None:
     locating = PartInterface(id="upright.bottom.primary", name="主定位", interfaceType="locating", geometryRefs=["part.face.front"])
     assert locating.locatingType == "planeContact"
     assert locating.role == "primary"
+
+
+@pytest.mark.parametrize("mode", ["staticGeometry", "rectangle", "featureDerived"])
+@pytest.mark.parametrize("method", ["clearance-fit", "welded", "bolted"])
+def test_mating_contract_validates_and_survives_interface_resolution(mode, method) -> None:
+    mating = MatingContract.model_validate({
+        "version": 1,
+        "family": "pin-hole",
+        "role": "pin",
+        "connectionMethod": "clearance-fit",
+        "dimensions": {
+            "diameter": {
+                "nominal": 10,
+                "lowerTolerance": -0.02,
+                "upperTolerance": 0.02,
+                "unit": "mm",
+            },
+        },
+        "allowedRelations": ["同轴", "贴合"],
+        "capacity": 1,
+    })
+    if method != "clearance-fit":
+        mating = MatingContract.model_validate({**mating.model_dump(), "family": "plane-contact", "role": "surface", "connectionMethod": method, "dimensions": {}, "allowedRelations": ["贴合"]})
+    interface = PartInterface(
+        id="upright.connection.holeRow",
+        name="连接孔接口",
+        declarationMode="featureDerived" if mode == "featureDerived" else "staticGeometry",
+        sourceFeatureRuleId="upright.mainHoleRow",
+        interfaceType="connecting",
+        geometryRefs=["part.face.front"],
+        region={"mode": "rectangle", "uStartExpression": "0", "vStartExpression": "100", "uSpanExpression": "10", "vSpanExpression": "10"} if mode == "rectangle" else None,
+        mating=mating,
+        connectionProcesses=[method] if method != "clearance-fit" else ["bolted"],
+    )
+    draft = TemplateDraft(name="矩形区域接口") if mode == "rectangle" else omega_rule_draft()
+    evaluation = evaluate_template(draft.parameterDefinitions, draft.featureRules, interfaces=[interface])
+    assert evaluation.success
+    assert evaluation.resolvedInterfaces
+    assert all(item.mating == mating for item in evaluation.resolvedInterfaces)
+
+    with pytest.raises(ValueError, match="下偏差不能大于上偏差"):
+        MatingContract.model_validate({
+            **mating.model_dump(),
+            "dimensions": {"diameter": {"nominal": 10, "lowerTolerance": 0.1, "upperTolerance": 0.02, "unit": "mm"}},
+        })
 
 
 def test_feature_derived_interface_tracks_resolved_feature_count() -> None:

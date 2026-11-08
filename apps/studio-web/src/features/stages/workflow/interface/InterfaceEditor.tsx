@@ -4,6 +4,7 @@ import { api } from "../../../../api";
 import { Field, PanelTitle } from "../../../../components/ui/FormParts";
 import type { CompileResult, Draft, PartInterface, TemplateEvaluation } from "../../../../types";
 import { InterfacePreview3D } from "./InterfacePreview3D";
+import { MatingContractEditor } from "./MatingContractEditor";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 
@@ -432,7 +433,7 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
                       ))}
                     </select>
                   </Field>
-                  <Field label="连接工艺定义" hint="可多选，用于定义该接口与其他接口连接时允许采用的工艺。">
+                  <Field label="连接工艺定义" hint="可多选；面贴合契约要求的工艺会自动勾选并锁定。">
                     <div className="connection-process-options">
                       {Object.entries(connectionProcessLabels).map(([value, label]) => {
                         const process = value as PartInterface["connectionProcesses"][number];
@@ -442,6 +443,7 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
                             <input
                               type="checkbox"
                               checked={selected.includes(process)}
+                              disabled={item.mating?.family === "plane-contact" && item.mating.connectionMethod === process}
                               onChange={(event) =>
                                 edit(index, {
                                   connectionProcesses: event.target.checked
@@ -489,6 +491,13 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
                     </select>
                   </div>
                 )}
+                <MatingContractEditor value={item.mating} onChange={(mating) => edit(index, {
+                  mating,
+                  ...(mating?.family === "plane-contact" && (mating.connectionMethod === "welded" || mating.connectionMethod === "bolted") ? {
+                    connectionProcesses: Array.from(new Set([...item.connectionProcesses, mating.connectionMethod])),
+                    ...(item.interfaceType === "locating" ? { locatingType: "planeContact" as const } : {}),
+                  } : {}),
+                })} />
                 <Field label="接口说明">
                   <textarea
                     rows={2}

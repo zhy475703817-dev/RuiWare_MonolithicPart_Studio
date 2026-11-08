@@ -1,9 +1,44 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./client";
+import type { Draft } from "../types";
 
 describe("API workspace context", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("blocks contract saves before writing to an outdated backend", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ components: { schemas: { PartInterface: { properties: {} } } } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const draft = { id: "draft-1", interfaces: [{ id: "mount", mating: { version: 1 } }] } as unknown as Draft;
+    await expect(api.saveDraft(draft)).rejects.toThrow("已阻止保存");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/openapi.json");
+    expect(draft.interfaces[0].mating).toEqual({ version: 1 });
+  });
+
+  it("retains a saved contract and detects a response that drops it", async () => {
+    const draft = { id: "draft-1", interfaces: [{ id: "mount", mating: { version: 1 } }] } as unknown as Draft;
+    const schema = { components: { schemas: { PartInterface: { properties: { mating: {} } } } } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => schema })
+      .mockResolvedValueOnce({ ok: true, json: async () => draft })
+      .mockResolvedValueOnce({ ok: true, json: async () => schema })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...draft, interfaces: [{ id: "mount" }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.saveDraft(draft)).resolves.toEqual(draft);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).interfaces[0].mating).toEqual({ version: 1 });
+    await expect(api.saveDraft(draft)).rejects.toThrow("服务器未保留配合契约");
+    expect(draft.interfaces[0].mating).toEqual({ version: 1 });
+  });
+
+  it("saves legacy interfaces without a capability request", async () => {
+    const draft = { id: "draft-1", interfaces: [{ id: "mount", mating: null }] } as unknown as Draft;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => draft });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.saveDraft(draft)).resolves.toEqual(draft);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/template-drafts/draft-1");
   });
 
   it("sends the explicit duplicate decision with the reviewed revision", async () => {

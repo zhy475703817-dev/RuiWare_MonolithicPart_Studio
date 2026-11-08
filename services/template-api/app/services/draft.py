@@ -7,6 +7,7 @@ from typing import Literal
 
 from template_core.models import SourceAttachment, StageName, StageValidation, TemplateDraft
 from template_core.sketch_solver import solve_semantic_sketch
+from template_core.stages import stage_fingerprint
 
 from ..config import ATTACHMENT_ROOT
 from ..errors import api_error
@@ -47,10 +48,12 @@ def get_template_draft(repository: Repository, draft_id: str) -> TemplateDraft:
 def update_template_draft(repository: Repository, draft_id: str, draft: TemplateDraft) -> TemplateDraft:
     if draft.id not in (None, draft_id):
         raise api_error("DRAFT_ID_MISMATCH", status_code=409, context={"pathId": draft_id, "draftId": draft.id})
-    draft_or_404(repository, draft_id)
+    existing = draft_or_404(repository, draft_id)
     candidate = draft.model_copy(update={"id": draft_id})
-    solve = solve_semantic_sketch(candidate)
-    candidate = sync_sketch_seed_coordinates(candidate, solve)
+    # Only geometry edits may rewrite the sketch seed; contract saves must preserve it.
+    if stage_fingerprint("baseSketch", existing) != stage_fingerprint("baseSketch", candidate):
+        solve = solve_semantic_sketch(candidate)
+        candidate = sync_sketch_seed_coordinates(candidate, solve)
     return save_draft(repository, candidate, reason="manual-save")
 
 

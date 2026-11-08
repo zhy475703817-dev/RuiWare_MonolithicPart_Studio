@@ -401,6 +401,21 @@ export type InterfaceRegion = {
   placement: FeaturePlacement;
   maximumCount: number;
 };
+export type MatingDimension = {
+  nominal: number;
+  lowerTolerance: number;
+  upperTolerance: number;
+  unit: string;
+};
+export type MatingContract = {
+  version: 1;
+  family: string;
+  role: string;
+  connectionMethod: string;
+  dimensions: Record<string, MatingDimension>;
+  allowedRelations: string[];
+  capacity: number;
+};
 export type PartInterface = {
   id: string;
   name: string;
@@ -414,6 +429,7 @@ export type PartInterface = {
   region?: InterfaceRegion | null;
   parameterRefs: string[];
   compatibilityTags: string[];
+  mating?: MatingContract | null;
   connectionProcesses: ("hookSnap" | "bolted" | "welded" | "riveted")[];
   description: string;
   required: boolean;
@@ -449,6 +465,7 @@ export type ResolvedInterface = {
   geometryRefs: string[];
   parameterRefs: string[];
   connectionProcesses: PartInterface["connectionProcesses"];
+  mating?: MatingContract | null;
   region?: { mode: "rectangle"; uStart: number; vStart: number; uSpan: number; vSpan: number } | null;
   sourceFeatureRuleId?: string | null;
   sourceFeatureId?: string | null;

@@ -83,7 +83,7 @@ if (-not $BunExecutable -and -not ($NodeExecutable -and $ViteCli)) {
 
 if (-not (Test-LocalPort $ApiPort)) {
     Start-Process -FilePath $PythonExecutable `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort) `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort, '--reload', '--reload-dir', 'services/template-api', '--reload-dir', 'libs/python') `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $ProjectRoot 'api.out.log') `
