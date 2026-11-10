@@ -1,6 +1,8 @@
 import { Archive, Braces, CheckCircle2, LoaderCircle, PackageCheck } from "lucide-react";
 import { Field, PanelTitle } from "../../../../components/ui/FormParts";
 import type { Draft, PublishedVersion, StageValidation } from "../../../../types";
+import { ReconstructionGuidePanel } from "./ReconstructionGuidePanel";
+import { SharedTemplatesPanel } from "./SharedTemplatesPanel";
 
 type AdmissionStageProps = {
   draft: Draft;
@@ -103,6 +105,8 @@ export function AdmissionStage({
           {draft.lifecycleStatus === "published" ? "当前修订已发布" : "发布模板版本"}
         </button>
       </div>
+      <ReconstructionGuidePanel draftId={draft.id} revision={draft.revision} />
+      <SharedTemplatesPanel />
       <div className="panel">
         <PanelTitle
           icon={Archive}

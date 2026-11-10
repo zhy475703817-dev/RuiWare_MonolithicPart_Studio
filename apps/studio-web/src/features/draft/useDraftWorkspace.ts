@@ -6,6 +6,8 @@ import { hydratePreflightFromDraft, runStagePreflight, STAGE_PREFLIGHT_ORDER, ty
 import type {
   CompileResult,
   Draft,
+  DuplicateDecision,
+  PublishReview,
   Material,
   MaterialValidationSample,
   PublishedVersion,
@@ -68,6 +70,9 @@ export function useDraftWorkspace() {
   const [loadError, setLoadError] = useState<ErrorNotice | null>(null);
   const [syncConflict, setSyncConflict] = useState<DraftSyncConflict | null>(null);
   const [remoteChange, setRemoteChange] = useState<DraftChangedEvent | null>(null);
+  const [publishReview, setPublishReview] = useState<{ draftId: string; revision: number; report: PublishReview; phase: "prompt" | "compare" } | null>(null);
+
+  useEffect(() => { setPublishReview(null); }, [draft?.id, draft?.revision, dirty]);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -568,23 +573,46 @@ export function useDraftWorkspace() {
     }
   }
 
-  async function publish() {
+  async function performPublish(duplicateDecision?: DuplicateDecision) {
     if (!draft?.id) return;
+    if (duplicateDecision && (!publishReview || dirty || publishReview.draftId !== draft.id || publishReview.revision !== draft.revision)) {
+      setPublishReview(null);
+      showNotice("模板已修改，请重新点击发布并比较。");
+      return;
+    }
     const saved = dirty ? await save() : draft;
     if (!saved?.id) return;
     setBusy("publish");
     try {
-      const result = await api.publish(saved.id, saved.revision);
+      const result = await api.publish(saved.id, saved.revision, duplicateDecision);
+      setPublishReview(null);
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setVersions(await api.versions(saved.id));
-      setNotice(`V${result.version.version} 已发布并冻结`);
+      const remoteNotice = result.remoteSync.cleanupFailures?.length
+        ? "，新包已上传，旧包清理未全部完成，请检查共享模板库"
+        : result.remoteSync.replacedPublicationIds?.length
+          ? `，已同步并替换 ${result.remoteSync.replacedPublicationIds.length} 个旧版本`
+        : result.remoteSync.status === "uploaded"
+        ? "，已同步到共享模板库"
+        : result.remoteSync.status === "duplicate"
+          ? "，共享模板库已有相同版本，未重复上传"
+          : result.remoteSync.status === "failed"
+            ? "，但共享模板同步失败，本地版本仍已保存"
+            : "，共享模板同步未配置";
+      setNotice(`V${result.version.version} 已发布并冻结${remoteNotice}`);
     } catch (errorValue) {
+      if (errorValue instanceof ApiError && errorValue.code === "PUBLISH_DUPLICATES_FOUND") {
+        setPublishReview({ draftId: saved.id, revision: saved.revision, report: errorValue.context.review as PublishReview, phase: "prompt" });
+        return;
+      }
       await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
     }
   }
+
+  async function publish() { await performPublish(); }
 
   return {
     drafts,
@@ -628,6 +656,10 @@ export function useDraftWorkspace() {
     runCompile,
     checkPrerequisites,
     publish,
+    publishReview: publishReview && publishReview.draftId === draft?.id && publishReview.revision === draft?.revision && !dirty ? publishReview : null,
+    openPublishComparison: () => setPublishReview((review) => review ? { ...review, phase: "compare" } : null),
+    cancelPublishReview: () => setPublishReview(null),
+    confirmPublish: (decision: DuplicateDecision) => performPublish(decision),
     showError,
     reload: loadDrafts,
   };

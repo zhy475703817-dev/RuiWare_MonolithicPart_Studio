@@ -8,6 +8,7 @@ from typing import Literal
 from template_core.models import SourceAttachment, StageName, StageValidation, TemplateDraft
 from template_core.sketch_solver import solve_semantic_sketch
 
+from ..config import ATTACHMENT_ROOT
 from ..errors import api_error
 from ..repository import DuplicateCodeError, Repository
 from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, ensure_draft_revision, next_template_code, now, save_draft
@@ -161,6 +162,7 @@ def upload_template_attachment(
     content_type: str,
     body: bytes,
     kind: Literal["referenceImage", "drawing", "specification", "other"] = "other",
+    attachment_root: Path = ATTACHMENT_ROOT,
 ) -> TemplateDraft:
     draft = draft_or_404(repository, draft_id)
     safe_name = Path(filename).name
@@ -171,7 +173,7 @@ def upload_template_attachment(
     if len(body) > 20 * 1024 * 1024:
         raise api_error("ATTACHMENT_TOO_LARGE", status_code=413, context={"filename": safe_name, "size": len(body)})
     digest = hashlib.sha256(body).hexdigest()
-    target = attachment_target_path(safe_name, digest)
+    target = attachment_target_path(safe_name, digest, attachment_root)
     if not target.exists():
         target.write_bytes(body)
     attachment = SourceAttachment(

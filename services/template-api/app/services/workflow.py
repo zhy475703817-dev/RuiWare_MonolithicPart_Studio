@@ -12,20 +12,44 @@ from template_core.stages import STAGE_ORDER, sweep_preview_admission
 
 from ..ai_actions import AIModelProposal, ProposalError, apply_proposal, proposal_diff
 from ..config import ARTIFACT_ROOT, ATTACHMENT_ROOT
-from ..errors import api_error
+from ..errors import ApiError, api_error
 from ..repository import Repository
 from ._common import draft_or_404, ensure_draft_revision, save_draft
-from .compile import run_cad_worker as run_cad_worker_service, write_source_package as write_source_package_service
+from .compile import resolve_publish_preview_stl, run_cad_worker as run_cad_worker_service, write_source_package as write_source_package_service
 from .context import nominal_material_context, validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
+from .reconstruction_document import build_reconstruction_guide
+from .remote_storage import RemoteTemplateStorage, build_remote_storage, sync_published_package
+from .publish_duplicates import check_publish_duplicates
 
 
 def write_source_package(repository: Repository, draft: TemplateDraft, artifact_root: Path = ARTIFACT_ROOT, attachment_root: Path = ATTACHMENT_ROOT) -> Path:
     return write_source_package_service(draft, repository, artifact_root, attachment_root)
 
 
-def download_source_package(repository: Repository, draft_id: str) -> Path:
-    return write_source_package(repository, draft_or_404(repository, draft_id))
+def download_source_package(
+    repository: Repository,
+    draft_id: str,
+    artifact_root: Path = ARTIFACT_ROOT,
+    attachment_root: Path = ATTACHMENT_ROOT,
+) -> Path:
+    return write_source_package(
+        repository,
+        draft_or_404(repository, draft_id),
+        artifact_root,
+        attachment_root,
+    )
+
+
+def get_reconstruction_guide(
+    repository: Repository,
+    draft_id: str,
+    expected_revision: int | None = None,
+) -> str:
+    """读取当前草稿修订对应的 Markdown 重建说明书，不创建新修订。"""
+    draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
+    return build_reconstruction_guide(repository, draft)
 
 
 def compile_template_draft(
@@ -106,6 +130,8 @@ def publish_template(
     artifact_root: Path = ARTIFACT_ROOT,
     attachment_root: Path = ATTACHMENT_ROOT,
     expected_revision: int | None = None,
+    remote_storage: RemoteTemplateStorage | None = None,
+    duplicate_decision: dict[str, Any] | None = None,
 ):
     draft = draft_or_404(repository, draft_id)
     ensure_draft_revision(draft, expected_revision)
@@ -115,15 +141,55 @@ def publish_template(
     if not validation.complete:
         raise api_error("PUBLISH_VALIDATION_FAILED", status_code=422, fields=[check.model_dump() for check in validation.checks if not check.passed])
     latest = repository.latest_compile(draft_id)
-    if latest is None:
-        raise api_error("COMPILE_RECORD_MISSING", status_code=422)
+    nominal = nominal_material_context(repository, draft)
+    if nominal is None:
+        raise api_error("COMPILE_MISSING_MATERIAL", status_code=422)
+    expected_input_hash = lower_to_plan(
+        draft,
+        {"record": nominal["material"], "provenance": nominal["provenance"]},
+    ).inputHash
+    preview_stl_path = resolve_publish_preview_stl(latest, artifact_root, expected_input_hash)
     status = draft.stageStatus.model_copy(update={"admission": "complete"})
-    released = save_draft(
-        repository,
-        draft.model_copy(update={"stageStatus": status, "lifecycleStatus": "published"}),
-        reason="publish",
-        expected_revision=expected_revision,
+    next_revision = draft.revision + 1
+    candidate = draft.model_copy(
+        update={
+            "revision": next_revision,
+            "stageStatus": status,
+            "lifecycleStatus": "published",
+        }
     )
-    package = write_source_package_service(released, repository, artifact_root, attachment_root)
-    version = repository.publish(released, latest, f"/artifacts/packages/{package.name}")
-    return released, version, validation
+    package = None
+    released = None
+    version = None
+    storage = remote_storage if remote_storage is not None else build_remote_storage()
+    try:
+        package = write_source_package_service(
+            candidate,
+            repository,
+            artifact_root,
+            attachment_root,
+            preview_stl_path=preview_stl_path,
+            package_path=artifact_root / "packages" / f"{draft.code or draft.id}-r{next_revision}.rwpart",
+            compile_result=latest,
+            expected_input_hash=expected_input_hash,
+        )
+        replacements = check_publish_duplicates(storage, package, duplicate_decision)
+        released, version = repository.publish_atomic(
+            candidate,
+            latest,
+            f"/artifacts/packages/{package.name}",
+            expected_revision=draft.revision,
+        )
+    except Exception as error:
+        if package is not None and version is None:
+            package.unlink(missing_ok=True)
+        if isinstance(error, ApiError):
+            raise
+        raise api_error("PUBLISH_PACKAGE_FAILED", status_code=422, context={"detail": str(error)}) from error
+    remote_sync = sync_published_package(
+        storage,
+        package,
+        version,
+        replacements=replacements,
+    )
+    return released, version, validation, remote_sync

@@ -450,7 +450,10 @@ def validate_material(draft: TemplateDraft, sample_contexts: list[dict[str, Any]
     return _validation("material", checks)
 
 
-def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
+def validate_base_sketch(
+    draft: TemplateDraft,
+    sketch_solution: dict[str, Any] | None = None,
+) -> StageValidation:
     required, expression_syntax_valid = _geometry_parameter_references(draft)
     known_parameters = {item.id for item in draft.parameterDefinitions}
     expressions_valid = expression_syntax_valid and required <= known_parameters
@@ -492,7 +495,7 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         if draft.sketch.profileMode == "centerlineThinWall"
         else bool(draft.sketch.regions) and all(item.closed and set(item.boundaryRefs) <= entity_ids for item in draft.sketch.regions)
     )
-    sketch_solution = solve_semantic_sketch(draft)
+    sketch_solution = sketch_solution or solve_semantic_sketch(draft)
     supported_operators = {
         "profile.open_profile_tube_extrude",
         "sketch.region_extrude", "sketch.centerline_thinwall_extrude",
@@ -562,7 +565,10 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
     return _validation("baseSketch", checks)
 
 
-def validate_features(draft: TemplateDraft) -> StageValidation:
+def validate_features(
+    draft: TemplateDraft,
+    sketch_solution: dict[str, Any] | None = None,
+) -> StageValidation:
     feature_expressions: list[tuple[str, str]] = []
     for parameter in draft.parameterDefinitions:
         source = parameter.sourceDefinition
@@ -599,7 +605,7 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
         for item in evaluation.diagnostics
     )
     locator_ok, locator_message = _validate_semantic_face_locators(draft)
-    locator_cases_ok, locator_cases_message = _validate_semantic_face_locator_cases(draft)
+    locator_cases_ok, locator_cases_message = _validate_semantic_face_locator_cases(draft, sketch_solution)
     checks = [
         StageCheck(id="feature-review", label="制造特征规则已确认", passed=draft.featureRulesReviewed, severity="error", path="featureRulesReviewed", message="即使零件没有制造特征，也需确认规则集合为空。"),
         StageCheck(id="feature-count", label="制造特征规则已建立", passed=len(draft.featureRules) > 0, severity="warning", path="featureRules", message="当前为无制造特征零件。"),
@@ -612,7 +618,10 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
     return _validation("features", checks)
 
 
-def validate_variants(draft: TemplateDraft) -> StageValidation:
+def validate_variants(
+    draft: TemplateDraft,
+    sketch_solution: dict[str, Any] | None = None,
+) -> StageValidation:
     ids = [item.id for item in draft.parameterDefinitions]
     parameter_ids = set(ids)
     variant_ids = [item.id for item in draft.variants]
@@ -787,7 +796,7 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         if item.declarationMode == "featureDerived" and item.sourceFeatureRuleId in feature_rule_ids and item.id not in resolved_interface_sources:
             interface_reasons.append(f"特征派生接口 {item.id} 在标称参数下未生成任何实例")
     interfaces_complete = not interface_reasons
-    sketch_solution = solve_semantic_sketch(draft, all_numeric_values)
+    sketch_solution = sketch_solution or solve_semantic_sketch(draft, all_numeric_values)
     feasibility_reasons = [
         item.message for item in evaluation.diagnostics if item.severity == "error"
     ]
@@ -843,17 +852,26 @@ def validate_admission(draft: TemplateDraft, review: StageValidation) -> StageVa
     return _validation("admission", checks)
 
 
-def validate_stage(stage: StageName, draft: TemplateDraft, *, code_unique: bool = True, material_samples: list[dict[str, Any]] | None = None, compile_result: CompileResult | None = None, expected_hash: str | None = None) -> StageValidation:
+def validate_stage(
+    stage: StageName,
+    draft: TemplateDraft,
+    *,
+    code_unique: bool = True,
+    material_samples: list[dict[str, Any]] | None = None,
+    compile_result: CompileResult | None = None,
+    expected_hash: str | None = None,
+    sketch_solution: dict[str, Any] | None = None,
+) -> StageValidation:
     if stage == "templateInfo":
         return validate_template_info(draft, code_unique=code_unique)
     if stage == "material":
         return validate_material(draft, material_samples)
     if stage == "baseSketch":
-        return validate_base_sketch(draft)
+        return validate_base_sketch(draft, sketch_solution)
     if stage == "features":
-        return validate_features(draft)
+        return validate_features(draft, sketch_solution)
     if stage == "variants":
-        return validate_variants(draft)
+        return validate_variants(draft, sketch_solution)
     review = validate_review(draft, compile_result, expected_hash)
     return review if stage == "review" else validate_admission(draft, review)
 

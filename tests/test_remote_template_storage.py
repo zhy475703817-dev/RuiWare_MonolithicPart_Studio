@@ -1,0 +1,128 @@
+from pathlib import Path
+import zipfile
+
+from template_core.models import PublishedVersion
+
+from app.services.remote_storage import _deduplicate_templates, sync_published_package
+
+
+class FakeStorage:
+    def __init__(self, result=None, error=None, templates=None):
+        self.result = result
+        self.error = error
+        self.templates = templates or []
+        self.calls = []
+
+    def list_templates(self):
+        return self.templates
+
+    def upload_package(self, package_path: Path, publication: PublishedVersion, metadata: dict):
+        self.calls.append((package_path, publication, metadata))
+        if self.error:
+            raise self.error
+        return self.result or {}
+
+
+def _publication() -> PublishedVersion:
+    return PublishedVersion(
+        id="publication-1",
+        templateId="draft-1",
+        version=2,
+        sourceRevision=8,
+        code="TPL-001",
+        name="测试模板",
+        createdAt="2026-10-04T00:00:00Z",
+        sourcePackageUrl="/artifacts/packages/TPL-001-r8.rwpart",
+        compileResult={"success": True, "inputHash": "hash", "diagnostics": []},
+    )
+
+
+def _package(tmp_path: Path) -> Path:
+    package = tmp_path / "template.rwpart"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("outputs.json", '{"artifacts": [{"kind": "stl", "packagePath": "geometry/preview.stl"}]}')
+        archive.writestr("geometry/preview.stl", b"preview geometry")
+    return package
+
+
+def test_remote_sync_is_disabled_without_storage(tmp_path):
+    package = _package(tmp_path)
+
+    result = sync_published_package(None, package, _publication())
+
+    assert result["status"] == "disabled"
+
+
+def test_remote_sync_uploads_package_with_stable_metadata(tmp_path):
+    package = _package(tmp_path)
+    storage = FakeStorage(result={"objectKey": "publishers/JJM/publication-1/template.rwpart"})
+
+    result = sync_published_package(storage, package, _publication())
+
+    assert result["status"] == "uploaded"
+    assert result["objectKey"] == "publishers/JJM/publication-1/template.rwpart"
+    assert result["sha256"] == "d26e6fb5806e2f1a3a1a5f4a3a0b3f6b0a2a9a5f2c2b2b6d7e4d6e0a5f7e1a1" or len(result["sha256"]) == 64
+    assert storage.calls[0][2]["publicationId"] == "publication-1"
+
+
+def test_remote_sync_failure_does_not_raise(tmp_path):
+    package = _package(tmp_path)
+    storage = FakeStorage(error=TimeoutError("MinIO unavailable"))
+
+    result = sync_published_package(storage, package, _publication())
+
+    assert result["status"] == "failed"
+    assert result["errorCode"] == "REMOTE_STORAGE_UNAVAILABLE"
+
+
+def test_remote_sync_does_not_skip_same_code_and_version_with_distinct_release_id(tmp_path):
+    package = _package(tmp_path)
+    storage = FakeStorage(
+        templates=[
+            {
+                "publicationId": "existing-publication",
+                "code": "TPL-001",
+                "version": 2,
+                "sourceRevision": 8,
+            }
+        ],
+        result={"objectKey": "publishers/JJM/publication-1/template.rwpart"},
+    )
+
+    result = sync_published_package(storage, package, _publication())
+
+    assert result["status"] == "uploaded"
+    assert len(storage.calls) == 1
+
+
+def test_shared_template_listing_keeps_every_original_release_id():
+    templates = _deduplicate_templates(
+        [
+            {
+                "publicationId": "older",
+                "code": "TPL-001",
+                "version": 1,
+                "sourceRevision": 13,
+                "createdAt": "2026-10-15T12:00:00Z",
+            },
+            {
+                "publicationId": "newer",
+                "code": "TPL-001",
+                "version": 1,
+                "sourceRevision": 13,
+                "createdAt": "2026-10-15T12:01:00Z",
+            },
+        ]
+    )
+
+    assert [item["publicationId"] for item in templates] == ["newer", "older"]
+
+
+def test_shared_bucket_never_deduplicates_components_as_parts_or_each_other():
+    common = {"code": "SAME", "version": 1, "sourceRevision": 1, "createdAt": "2026-10-24T00:00:00Z"}
+    templates = _deduplicate_templates([
+        {**common, "publicationId": "part-1"},
+        {**common, "publicationId": "component-1", "templateKind": "component", "templateId": "a"},
+        {**common, "publicationId": "component-2", "templateKind": "component", "templateId": "b"},
+    ])
+    assert {item["publicationId"] for item in templates} == {"part-1", "component-1", "component-2"}

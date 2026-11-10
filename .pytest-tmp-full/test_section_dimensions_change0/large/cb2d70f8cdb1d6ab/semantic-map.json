@@ -1,0 +1,288 @@
+{
+  "version": "1.0",
+  "inputHash": "cb2d70f8cdb1d6ab5a287b116aa5885bead1400fabced463183534df00beed34",
+  "semanticFaces": [
+    {
+      "semanticFaceId": "part.face.front",
+      "sourceEntityId": "edge.bottom",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.bottom",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -79.99999999989012,
+          -25.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.back",
+      "sourceEntityId": "edge.top",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.top",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -79.99999999949992,
+          25.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.left",
+      "sourceEntityId": "edge.left",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.left",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -79.99999999953995,
+          -25.0,
+          0.0
+        ],
+        "uDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.right",
+      "sourceEntityId": "edge.right",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.right",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          79.99999999969005,
+          -25.0,
+          0.0
+        ],
+        "uDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.start",
+      "sourceEntityId": "section.region.main",
+      "locator": {
+        "kind": "profileRegion",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "section.region.main",
+        "capSide": "start"
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileRegion",
+        "capSide": "start",
+        "origin": [
+          -79.99999999989012,
+          -25.0,
+          -0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "normal": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.end",
+      "sourceEntityId": "section.region.main",
+      "locator": {
+        "kind": "profileRegion",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "section.region.main",
+        "capSide": "end"
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileRegion",
+        "capSide": "end",
+        "origin": [
+          -79.99999999989012,
+          -25.0,
+          1000.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "part.body",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.referenceFrame",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.start",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.end",
+      "sourceOperation": "body.main"
+    }
+  ]
+}

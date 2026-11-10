@@ -162,19 +162,42 @@ def _constraint_residuals(
     slices: dict[str, EntitySlice],
     parameters: dict[str, float],
     original: np.ndarray,
+    constraint_ids: set[str] | None = None,
 ) -> tuple[list[float], list[str]]:
     residuals: list[float] = []
     owners: list[str] = []
+    constraints = [
+        constraint
+        for constraint in draft.sketch.constraints
+        if constraint.enabled
+        and constraint.driving
+        and (constraint_ids is None or constraint.id in constraint_ids)
+    ]
+    referenced_ids = {
+        reference
+        for constraint in constraints
+        for reference in constraint.entityRefs
+        if reference in slices
+    }
+    state_geometries = {
+        entity_id: _geometry(state, item)
+        for entity_id, item in slices.items()
+        if entity_id in referenced_ids
+    }
+    original_geometries = {
+        entity_id: _geometry(original, item)
+        for entity_id, item in slices.items()
+        if entity_id in referenced_ids
+        and any(constraint.constraintType == "fixed" and entity_id in constraint.entityRefs for constraint in constraints)
+    }
 
     def add(owner: str, *values: float) -> None:
         residuals.extend(float(value) for value in values)
         owners.extend([owner] * len(values))
 
-    for constraint in draft.sketch.constraints:
-        if not constraint.enabled or not constraint.driving:
-            continue
+    for constraint in constraints:
         refs = [slices[reference] for reference in constraint.entityRefs if reference in slices]
-        geometries = [_geometry(state, item) for item in refs]
+        geometries = [state_geometries[item.entity.id] for item in refs]
         kind = constraint.constraintType
         if kind in {"coincident", "closed"}:
             endpoint_refs = list(getattr(constraint, "endpointRefs", None) or [])
@@ -237,7 +260,7 @@ def _constraint_residuals(
             add(constraint.id, math.atan2(math.sin(measured - target), math.cos(measured - target)))
         elif kind == "fixed":
             for item, geometry in zip(refs, geometries):
-                initial = _geometry(original, item)
+                initial = original_geometries[item.entity.id]
                 # A line is anchored by its midpoint so dimensional constraints may still change its length.
                 add(constraint.id, geometry["center"][0] - initial["center"][0], geometry["center"][1] - initial["center"][1])
                 if item.entity.geometryType == "arc":
@@ -300,24 +323,100 @@ def _solve_state(
     if not len(initial):
         return initial, 0, [], 0.0
 
-    def residual_function(state: np.ndarray) -> np.ndarray:
-        residuals, _ = _constraint_residuals(state, draft, slices, parameters, initial)
-        return np.asarray(residuals or [0.0], dtype=float)
+    def residual_function(
+        state: np.ndarray,
+        constraint_ids: set[str] | None = None,
+    ) -> tuple[np.ndarray, list[str]]:
+        residuals, owners = _constraint_residuals(
+            state,
+            draft,
+            slices,
+            parameters,
+            initial,
+            constraint_ids,
+        )
+        return np.asarray(residuals or [0.0], dtype=float), owners
 
-    def numerical_jacobian(state: np.ndarray, residual: np.ndarray) -> np.ndarray:
+    entity_constraints: dict[str, set[str]] = {}
+    for constraint in draft.sketch.constraints:
+        if constraint.enabled and constraint.driving:
+            for entity_id in constraint.entityRefs:
+                entity_constraints.setdefault(entity_id, set()).add(constraint.id)
+    column_entities: list[str | None] = [None] * len(initial)
+    for entity_id, item in slices.items():
+        column_entities[item.start:item.stop] = [entity_id] * (item.stop - item.start)
+    constraint_columns: dict[str, list[int]] = {}
+    for constraint in draft.sketch.constraints:
+        if not constraint.enabled or not constraint.driving:
+            continue
+        columns = [
+            column
+            for entity_id in constraint.entityRefs
+            if entity_id in slices
+            for column in range(slices[entity_id].start, slices[entity_id].stop)
+        ]
+        constraint_columns[constraint.id] = columns
+
+    conflicts = [set() for _ in range(len(initial))]
+    for columns in constraint_columns.values():
+        for column in columns:
+            conflicts[column].update(other for other in columns if other != column)
+    colors: list[list[int]] = []
+    assigned_colors: dict[int, int] = {}
+    active_columns = [column for column, related in enumerate(conflicts) if related]
+    for column in sorted(active_columns, key=lambda item: len(conflicts[item]), reverse=True):
+        unavailable = {assigned_colors[other] for other in conflicts[column] if other in assigned_colors}
+        color = next((index for index in range(len(colors)) if index not in unavailable), len(colors))
+        if color == len(colors):
+            colors.append([])
+        colors[color].append(column)
+        assigned_colors[column] = color
+
+    def numerical_jacobian(
+        state: np.ndarray,
+        residual: np.ndarray,
+        owners: list[str],
+    ) -> np.ndarray:
         jacobian = np.zeros((len(residual), len(state)), dtype=float)
-        for column in range(len(state)):
-            step = max(1e-7, abs(state[column]) * 1e-7)
+        owner_rows: dict[str, list[int]] = {}
+        for row, owner in enumerate(owners):
+            owner_rows.setdefault(owner, []).append(row)
+        for columns in colors:
+            affected = {
+                constraint_id
+                for column in columns
+                for constraint_id in entity_constraints.get(column_entities[column] or "", set())
+            }
             shifted = state.copy()
-            shifted[column] += step
-            jacobian[:, column] = (residual_function(shifted) - residual) / step
+            steps: dict[int, float] = {}
+            for column in columns:
+                step = max(1e-7, abs(state[column]) * 1e-7)
+                steps[column] = step
+                shifted[column] += step
+            shifted_residual, shifted_owners = residual_function(shifted, affected)
+            shifted_rows: dict[str, list[float]] = {}
+            for value, owner in zip(shifted_residual, shifted_owners):
+                shifted_rows.setdefault(owner, []).append(float(value))
+            for owner, values in shifted_rows.items():
+                rows = owner_rows.get(owner, [])
+                if len(rows) != len(values):
+                    raise ValueError(f"Constraint residual shape changed while solving: {owner}")
+                changed_columns = [
+                    column for column in columns if column in constraint_columns.get(owner, [])
+                ]
+                if len(changed_columns) != 1:
+                    raise ValueError(f"Constraint columns are not independently colored: {owner}")
+                column = changed_columns[0]
+                jacobian[rows, column] = (np.asarray(values) - residual[rows]) / steps[column]
         return jacobian
 
     state = initial.copy()
+    residual, owners = residual_function(state)
     damping = 1e-6
     for _ in range(250):
-        residual = residual_function(state)
-        jacobian = numerical_jacobian(state, residual)
+        if np.linalg.norm(residual, ord=np.inf) < 1e-9:
+            break
+        jacobian = numerical_jacobian(state, residual, owners)
         left = jacobian.T @ jacobian + damping * np.eye(len(state))
         right = -(jacobian.T @ residual)
         try:
@@ -325,17 +424,21 @@ def _solve_state(
         except np.linalg.LinAlgError:
             delta = np.linalg.lstsq(left, right, rcond=None)[0]
         candidate = state + delta
-        if np.linalg.norm(residual_function(candidate)) < np.linalg.norm(residual):
+        candidate_residual, candidate_owners = residual_function(candidate)
+        if np.linalg.norm(delta) < 1e-10:
+            break
+        if np.linalg.norm(candidate_residual) < np.linalg.norm(residual):
             state = candidate
+            residual, owners = candidate_residual, candidate_owners
             damping = max(1e-12, damping / 3)
-            if np.linalg.norm(delta) < 1e-10 or np.linalg.norm(residual_function(state), ord=np.inf) < 1e-9:
+            if np.linalg.norm(delta) < 1e-10 or np.linalg.norm(residual, ord=np.inf) < 1e-9:
                 break
         else:
             damping = min(1e12, damping * 10)
+            if damping >= 1e12:
+                break
 
-    residuals, owners = _constraint_residuals(state, draft, slices, parameters, initial)
-    residual_vector = np.asarray(residuals or [0.0], dtype=float)
-    jacobian = numerical_jacobian(state, residual_vector)
+    jacobian = numerical_jacobian(state, residual, owners)
     if owners:
         jacobian = jacobian[: len(owners), :]
     # Construction geometry is still part of the solved state: constraints
@@ -384,7 +487,7 @@ def _solve_state(
         if current_rank == previous_rank:
             redundant.append(owner)
         previous_rank = current_rank
-    maximum_residual = max((abs(value) for value in residuals), default=0.0)
+    maximum_residual = max((abs(value) for value in residual), default=0.0)
     return state, degrees_of_freedom, redundant, maximum_residual
 
 

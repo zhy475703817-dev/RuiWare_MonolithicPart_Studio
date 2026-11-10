@@ -151,9 +151,13 @@ def _path_points_from_sketch(path_sketch) -> str:
     return _sampled_path_payload(path_sketch).path_points
 
 
-def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
+def _precheck(
+    draft: TemplateDraft,
+    values: dict[str, Any],
+    sketch_solution: dict[str, Any] | None = None,
+) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
-    sketch_solution = solve_semantic_sketch(
+    sketch_solution = sketch_solution or solve_semantic_sketch(
         draft,
         {
             key: float(value)
@@ -241,17 +245,19 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
         external_context=external_context, semantic_faces=draft.geometryRecipe.semanticFaces,
         interfaces=draft.interfaces,
     )
-    diagnostics = _precheck(draft, evaluation.values)
+    numeric_values = {
+        key: float(value)
+        for key, value in evaluation.values.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    sketch_solution = solve_semantic_sketch(draft, numeric_values)
+    diagnostics = _precheck(draft, evaluation.values, sketch_solution)
     if draft.sweepPath is not None and any(item.operator == "solid.sweep" for item in draft.geometryRecipe.operations):
         topology = validate_sweep_path(draft.sweepPath)
         diagnostics.extend(
             Diagnostic(severity=item["severity"], code=item["code"], path=item["path"], message=item["message"])
             for item in topology["diagnostics"]
         )
-    sketch_solution = solve_semantic_sketch(
-        draft,
-        {key: float(value) for key, value in evaluation.values.items() if isinstance(value, (int, float)) and not isinstance(value, bool)},
-    )
     sketch_case = next((item for item in sketch_solution["cases"] if item["case"] == "nominal"), None)
     diagnostics.extend(
         Diagnostic(severity=item.severity, code=item.code, path=item.path, message=item.message)

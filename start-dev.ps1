@@ -1,10 +1,15 @@
 param(
     [int]$ApiPort = 8010,
     [int]$WebPort = 5173,
+    [string]$ApiHost = '127.0.0.1',
     [string]$MaterialDatabase = $env:RUIWARE_MATERIAL_DB
 )
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ApiHostFromEnvironment = $env:RUIWARE_API_HOST
+if ($ApiHostFromEnvironment) {
+    $ApiHost = $ApiHostFromEnvironment
+}
 $PythonExecutable = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     throw 'Missing .venv. Install the Python dependencies described in README.md first.'
@@ -78,7 +83,7 @@ if (-not $BunExecutable -and -not ($NodeExecutable -and $ViteCli)) {
 
 if (-not (Test-LocalPort $ApiPort)) {
     Start-Process -FilePath $PythonExecutable `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', '127.0.0.1', '--port', $ApiPort) `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort) `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $ProjectRoot 'api.out.log') `

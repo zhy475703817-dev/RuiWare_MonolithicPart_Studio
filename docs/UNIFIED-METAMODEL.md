@@ -177,7 +177,23 @@ interfaces.json
 variants.json
 outputs.json
 admission.json
+geometry/preview.stl
+template-reconstruction-guide.md
 assets/
 ```
 
 不存在某类数据时，对应的统一文件仍保存空集合，从而为后续 AI 智能设计提供稳定、可机器读取的格式。源包不输出旧版视图或重复表达同一语义的文件。
+
+发布生成的 `.rwpart` 是 ZIP 文件。`manifest.json` 保留模板声明的 `unitSystem` 与 `coordinateSystem`；包内 STL 直接取自本次发布所对应的成功 CAD 编译结果，不移动、旋转或缩放模型。消费者应使用 `outputs.json` 中 STL artifact 的 `packagePath` 读取包内模型，而不要依赖发布方本机的 artifact URL：
+
+```json
+{
+  "kind": "stl",
+  "url": "/artifacts/_jobs/job-id/preview.stl",
+  "packagePath": "geometry/preview.stl",
+  "sha256": "<STL 文件的 SHA-256>",
+  "size": 123456
+}
+```
+
+`url` 保留以兼容现有本地流程；`packagePath`、`size` 是新发布包的包内读取契约。旧 `.rwpart` 不会被改写，其 STL artifact 可能没有这两个字段，消费者应将其识别为旧格式，并按旧版本已有逻辑处理。发布会在写入包前验证成功编译、当前输入哈希、STL 非空及文件 SHA-256；草稿状态和版本登记使用同一个 SQLite 事务；远程上传前会再次验证 ZIP 内存在非空 `geometry/preview.stl`；最终 ZIP 的大小和 SHA-256 以该完整包重新计算。

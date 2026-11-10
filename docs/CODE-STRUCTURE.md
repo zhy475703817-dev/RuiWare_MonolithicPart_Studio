@@ -272,6 +272,8 @@ GUI 收到 draft.changed
 ### 3.15 发布阶段 `src/features/stages/review/admission`
 
 - `AdmissionStage.tsx`：最终准入、发布说明、版本发布和历史版本展示。
+- `ReconstructionGuidePanel.tsx`：读取当前修订的模板重建说明书，提供加载、错误提示、结构化预览和 Markdown 下载；不参与发布准入判断。
+- `MarkdownGuidePreview.tsx`：将说明书 Markdown 转换为标题、段落、提示、步骤和表格，面向工程人员阅读；不改变下载的原始 Markdown 内容。
 
 ## 4. 模板 API `services/template-api`
 
@@ -305,6 +307,7 @@ GUI 收到 draft.changed
 - `proposal.py`：提案应用过程中的草图坐标同步等辅助逻辑。
 - `orchestration.py`：目标任务计划与执行；组合阶段完成、参数/草图/材料修复、CAD 编译和发布检查。
 - `compile.py`：CAD Worker 进程调用、编译产物处理和 `.rwpart` 源包生成。
+- `reconstruction_document.py`：从待发布修订生成 UTF-8 Markdown 模板重建说明书；正文按零件用途、参数、材料、草图、几何、规则、复现流程和错误排查组织，技术附录保留参数原始定义、稳定 ID、表达式和阶段校验定位信息。
 - `workflow.py`：CAD 编译、编译预览、规则试算、发布版本和发布准入流程。
 - `write_context.py`：解析经过认证的 GUI/Agent 写入上下文，并对 Agent 强制检查 `baseRevision` 和 `confirmed`。
 
@@ -323,9 +326,19 @@ GUI 收到 draft.changed
 /evaluate                            参数和规则试算
 /proposals                           结构化提案预览和应用
 /publish                             发布
+/reconstruction-guide                读取当前修订的模板重建说明书
 /rollback                            回滚为新修订
 /audit-logs                          操作审计
 ```
+
+发布说明书接口为只读操作：
+
+```text
+GET /api/v1/template-drafts/{draft_id}/reconstruction-guide
+→ text/markdown; charset=utf-8
+```
+
+说明书从当前草稿修订实时生成，不创建新修订。正文面向工程人员阅读，技术附录面向机器复现和精确排错；发布页将 Markdown 解析为结构化内容后预览，下载仍保留完整原文。真正发布时，说明书由同一个冻结修订再次生成并写入 `.rwpart`，因此不会出现“页面看到的文档”和“最终包内文档”来自不同修订的问题。
 
 ## 5. 领域内核 `libs/python/template_core`
 
@@ -528,6 +541,14 @@ Template API
 - `artifacts/<inputHash>/`：STEP、STL、计划、诊断和语义映射。
 - `artifacts/packages/`：发布或下载使用的 `.rwpart` 源包。
 
+`.rwpart` 源包除原有 JSON、CAD 产物和附件外，还包含：
+
+- `template-reconstruction-guide.md`：面向人工复现和问题定位的详细模板说明书。
+- `manifest.json.reconstructionGuide`：说明书文件名和 SHA-256，用于确认包内文档未被替换或损坏。
+- `geometry/preview.stl`：发布时成功 CAD 编译生成的真实零件模型；`outputs.json` 对应 STL artifact 记录 `packagePath`、字节数 `size` 和模型 SHA-256，同时保留本地兼容字段 `url`。
+
+共享模板消费者应从 ZIP 内按 `packagePath` 读取 STL，不依赖发布者机器上的 `/artifacts/...` 地址。旧包保持不变；没有 `packagePath` 的 artifact 属于旧格式。发布流程在草稿/发布版本状态变更前核对编译输入哈希、STL 文件及其 SHA-256，再生成包；草稿的已发布状态和版本登记在同一个 SQLite 事务中提交，避免只写入一半。发布包采用不可覆盖的文件名，远程同步在上传前再次确认 ZIP 含非空 STL，并使用最终 `.rwpart` 的整包 SHA-256 与大小。
+
 ## 10. 跨模块契约 `packages/contracts`
 
 - `template-draft.schema.json`：模板草稿 JSON Schema。
@@ -669,3 +690,29 @@ STEP / STL / diagnostics / semantic-map
 - 补充共享工作区、身份分离、双重修订检查和统一错误结构。
 - 补充 `draft_events`、`draft_access`、`operation_audit` 等当前数据库表职责。
 - 补充 `sweep_path*`、语义面、CAD 算子分类、MCP 创建/回滚/审计工具和当前测试分布。
+- 增加模板重建说明书生成器、发布页预览/下载面板、只读说明书 API，以及 `.rwpart` 内说明书和校验摘要的结构说明。
+## 共享模板 MinIO
+
+- `services/template-api/app/config.py`：读取每台电脑本地的 MinIO 连接配置，不保存密钥。
+- `services/template-api/app/services/remote_storage.py`：MinIO 适配器，负责发布包上传、共享模板列表、下载和 SHA-256 完整性校验。
+- `services/template-api/app/services/package_similarity.py`：实际定义规范化、四类加权评分及字段差异。
+- `services/template-api/app/services/publish_duplicates.py`：发布前候选检查、确认令牌及对外只读分组。
+- `apps/studio-web/src/features/stages/review/admission/PublishComparisonDialog.tsx`：仅发现候选后展示提示及比较，选择新增或安全替换。
+- `services/template-api/app/services/workflow.py`：本地发布完成后调用远程同步；远程失败不会回滚本地发布。
+- `services/template-api/app/main.py`：提供共享模板列表、下载接口，并在发布响应中返回 `remoteSync` 状态。
+- `apps/studio-web/src/features/stages/review/admission/SharedTemplatesPanel.tsx`：发布页中的共享模板列表和下载入口。
+- `tests/test_remote_template_storage.py`、`tests/test_shared_templates_api.py`：验证远程同步降级、上传状态、共享列表、下载校验失败等行为。
+
+远程对象按 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录 `metadata.json` 存储。MinIO 凭据只通过本地环境变量配置，不提交 Git。
+
+发布前先检查远程定义；候选确认前不冻结版本。替换需要支持持久删除预留的权威引用服务；先上传校验新包，再清理旧包。配置、HTTP 契约及组件平台接入见 `docs/TEMPLATE-PACKAGE-DEDUPLICATION.md`。
+
+## 对外模板只读 API
+
+- `services/template-api/app/security.py`：通过 `RUIWARE_PUBLIC_API_KEY` 验证外部平台请求，不复用成员 MinIO 密钥。
+- `services/template-api/app/main.py`：提供 `/api/public/v1/templates` 列表、单个模板元数据和 `.rwpart` 下载接口；响应会隐藏 MinIO 对象路径。
+- `services/template-api/app/errors.py`：提供公开接口未配置和 API Key 无效的稳定错误码。
+- `start-dev.ps1`：通过 `RUIWARE_API_HOST` 配置 API 监听地址，默认仍为本机地址，避免开发环境意外暴露。
+- `tests/test_public_templates_api.py`：验证 API Key、元数据脱敏、下载和未配置错误。
+
+公开接口只读，不允许外部平台修改、发布或删除模板。正式部署时由 HTTPS 反向代理暴露 API，MinIO 的 `9000/9001` 端口保持私有。

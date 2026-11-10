@@ -698,4 +698,49 @@ export type PublishResult = {
   draft: Draft;
   version: PublishedVersion;
   validation: StageValidation;
+  remoteSync: {
+    status: "uploaded" | "duplicate" | "failed" | "disabled";
+    publicationId?: string;
+    objectKey?: string;
+    sha256?: string;
+    errorCode?: string;
+    reason?: string;
+    duplicateOf?: string;
+    replacedPublicationIds?: string[];
+    cleanupFailures?: { publicationId?: string; reason: string }[];
+  };
+};
+export type DuplicateDecision = {
+  action: "add" | "replace";
+  reviewToken: string;
+  publicationIds?: string[];
+};
+export type DuplicateCandidate = {
+  publicationId: string;
+  templateId?: string;
+  name: string;
+  code: string;
+  version: number;
+  createdAt?: string;
+  sha256: string;
+  level: "exact" | "high" | "suspected";
+  score: number;
+  scores: Record<"geometry" | "parameters" | "features" | "manufacturing", number>;
+  differences: { category: string; path: string; old: unknown; new: unknown }[];
+  differenceCount: number;
+  canReplace: boolean;
+  replacementBlockedReason?: string;
+};
+export type PublishReview = { reviewToken: string; candidates: DuplicateCandidate[] };
+export type SharedTemplate = {
+  publicationId: string;
+  templateId: string;
+  version: number;
+  sourceRevision: number;
+  code: string;
+  name: string;
+  createdAt: string;
+  sha256: string;
+  size: number;
+  objectKey: string;
 };

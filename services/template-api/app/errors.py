@@ -26,6 +26,9 @@ class ApiErrorPayload(BaseModel):
 
 
 ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
+    "PUBLISH_DUPLICATES_FOUND": ("发现可能的旧版本模板包。", "请比较后选择新增模板包或替换旧版本。"),
+    "PUBLISH_REVIEW_STALE": ("比较结果已变化，请重新点击发布。", "请重新检查模板包。"),
+    "PUBLISH_REPLACEMENT_BLOCKED": ("所选模板包当前不能替换。", "请检查相似度、所属成员及引用状态，或选择新增模板包。"),
     "DRAFT_NOT_FOUND": ("模板草稿不存在。", "请刷新草稿列表，确认该模板是否已被归档或删除。"),
     "DRAFT_ARCHIVED_NOT_FOUND": ("归档草稿不存在。", "请确认草稿处于归档状态后再恢复。"),
     "DRAFT_REVISION_NOT_FOUND": ("草稿或修订不存在。", "请刷新修订列表后重试。"),
@@ -65,6 +68,22 @@ ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
     "DRAFT_ACCESS_FORBIDDEN": ("当前会话无权访问该草稿。", "请切换到已授权的工作区或联系草稿负责人。"),
     "PUBLISH_ALREADY_PUBLISHED": ("当前修订已发布。", "请先修改模板并重新完成受影响阶段。"),
     "PUBLISH_VALIDATION_FAILED": ("发布准入校验未通过。", "请处理校验项后重新发布。"),
+    "PUBLISH_COMPILE_MISSING": ("缺少成功的 CAD 编译结果。", "请先完成当前草稿的 CAD 编译，再发布。"),
+    "PUBLISH_COMPILE_FAILED": ("CAD 编译未成功。", "请处理编译诊断后重新编译，再发布。"),
+    "PUBLISH_COMPILE_STALE": ("CAD 模型不是当前草稿生成的结果。", "请对当前草稿重新编译后再发布。"),
+    "PUBLISH_STL_MISSING": ("CAD 编译结果缺少 STL 模型。", "请重新执行 CAD 编译，生成有效 STL 后再发布。"),
+    "PUBLISH_STL_EMPTY": ("CAD 编译生成的 STL 为空。", "请检查几何实体和 CAD 编译结果后重试。"),
+    "PUBLISH_STL_PATH_INVALID": ("STL 产物路径不合法。", "请重新编译，不能使用外部路径或目录穿越路径。"),
+    "PUBLISH_STL_INTEGRITY_ERROR": ("STL 产物完整性校验失败。", "请重新编译当前草稿后再发布。"),
+    "PUBLISH_PACKAGE_FAILED": ("发布包生成失败。", "请检查 CAD 产物后重试，模板不会被标记为已发布。"),
+    "PUBLISH_PACKAGE_EXISTS": ("发布包已存在，不能覆盖。", "请使用新的修订号发布，旧发布包不会被覆盖。"),
+    "PUBLISH_PACKAGE_MISSING": ("已发布的模板包文件缺失。", "请从备份恢复原发布包，不能用当前草稿重新生成历史包。"),
+    "REMOTE_STORAGE_NOT_CONFIGURED": ("共享模板存储尚未配置。", "请配置 MinIO 连接信息后重试。"),
+    "REMOTE_STORAGE_UNAVAILABLE": ("共享模板暂时不可用。", "请检查 Tailscale 连接和 MinIO 服务后重试。"),
+    "REMOTE_STORAGE_INTEGRITY_ERROR": ("共享模板校验失败。", "请删除异常缓存并重新下载该模板。"),
+    "REMOTE_TEMPLATE_NOT_FOUND": ("共享模板不存在。", "请刷新共享模板列表后重试。"),
+    "PUBLIC_API_NOT_CONFIGURED": ("对外模板接口尚未配置。", "请在 API 服务环境变量中配置 RUIWARE_PUBLIC_API_KEY。"),
+    "PUBLIC_API_KEY_INVALID": ("对外模板接口密钥无效。", "请使用平台管理员发放的 API Key 后重试。"),
     "REQUEST_INVALID": ("请求数据格式不正确。", "请检查输入字段后重试。"),
     "UNEXPECTED_ERROR": ("服务处理请求时发生未知错误。", "请记录错误码和追踪号后联系维护人员。"),
 }
@@ -74,6 +93,7 @@ RETRYABLE_ERROR_CODES = {
     "MATERIAL_LIBRARY_UNAVAILABLE",
     "COMPILE_RECORD_MISSING",
     "UNEXPECTED_ERROR",
+    "REMOTE_STORAGE_UNAVAILABLE",
 }
 
 

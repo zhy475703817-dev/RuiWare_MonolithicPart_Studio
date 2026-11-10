@@ -2,11 +2,28 @@ import json
 import math
 
 import pytest
+import template_core.lowering as lowering_module
 
 from cad_worker.geometry import execute_plan
 from template_core.lowering import lower_to_plan
 from template_core.metamodel import FeatureRule, SemanticFaceDefinition
 from template_core.models import SweepPathSketch, TemplateDraft
+
+
+def test_lower_to_plan_solves_sketch_once(monkeypatch) -> None:
+    calls = 0
+    original_solve = lowering_module.solve_semantic_sketch
+
+    def count_solve(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_solve(*args, **kwargs)
+
+    monkeypatch.setattr(lowering_module, "solve_semantic_sketch", count_solve)
+
+    lower_to_plan(TemplateDraft(name="单次草图求解"), {"record": {"code": "Q345"}})
+
+    assert calls == 1
 
 
 def draft(hole_count: int = 4) -> TemplateDraft:

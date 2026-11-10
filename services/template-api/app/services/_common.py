@@ -73,7 +73,7 @@ def next_template_code(repository: Repository) -> str:
     return f"RW-TPL-{index:04d}"
 
 
-def attachment_target_path(filename: str, digest: str) -> Path:
-    directory = ATTACHMENT_ROOT / digest
+def attachment_target_path(filename: str, digest: str, attachment_root: Path = ATTACHMENT_ROOT) -> Path:
+    directory = attachment_root / digest
     directory.mkdir(parents=True, exist_ok=True)
     return directory / Path(filename).name

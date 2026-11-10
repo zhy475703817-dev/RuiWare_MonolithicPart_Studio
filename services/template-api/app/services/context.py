@@ -41,7 +41,13 @@ def material_sample_contexts(repository: Repository, draft: TemplateDraft) -> li
 
 
 def nominal_material_context(repository: Repository, draft: TemplateDraft) -> dict | None:
-    contexts = material_sample_contexts(repository, draft)
+    return _select_nominal_material_context(draft, material_sample_contexts(repository, draft))
+
+
+def _select_nominal_material_context(
+    draft: TemplateDraft,
+    contexts: list[dict[str, Any]],
+) -> dict | None:
     by_id = {item["sampleId"]: item for item in contexts}
     nominal = next((item for item in draft.materialValidationSamples if item.role == "nominal"), None)
     fallback = next((item for item in draft.materialValidationSamples if item.requiredForAdmission), None)
@@ -52,7 +58,7 @@ def nominal_material_context(repository: Repository, draft: TemplateDraft) -> di
 def build_stage_context(repository: Repository, draft: TemplateDraft) -> tuple[list[dict[str, Any]], CompileResult | None, str | None]:
     material_samples = material_sample_contexts(repository, draft)
     expected_hash = None
-    nominal = nominal_material_context(repository, draft)
+    nominal = _select_nominal_material_context(draft, material_samples)
     if nominal:
         expected_hash = lower_to_plan(draft, {"record": nominal["material"], "provenance": nominal["provenance"]}).inputHash
     latest = repository.latest_compile(draft.id) if draft.id else None
@@ -67,6 +73,9 @@ def _with_workflow_prerequisites(
     material_samples: list[dict[str, Any]],
     latest: CompileResult | None,
     expected_hash: str | None,
+    *,
+    code_unique: bool | None = None,
+    base_sketch_validation: StageValidation | None = None,
 ) -> StageValidation:
     index = STAGE_ORDER.index(stage)
     if index == 0:
@@ -81,10 +90,14 @@ def _with_workflow_prerequisites(
         # Recheck it instead of trusting a historical stageStatus flag.
         if required_stage != "baseSketch":
             continue
-        prerequisite_validation = validate_stage(
+        prerequisite_validation = base_sketch_validation or validate_stage(
             required_stage,
             draft,
-            code_unique=repository.code_is_unique(draft.code, draft.id),
+            code_unique=(
+                code_unique
+                if code_unique is not None
+                else repository.code_is_unique(draft.code, draft.id)
+            ),
             material_samples=material_samples,
             compile_result=latest,
             expected_hash=expected_hash,
@@ -116,10 +129,11 @@ def _with_workflow_prerequisites(
 
 def validate_stage_with_context(repository: Repository, stage: StageName, draft: TemplateDraft) -> StageValidation:
     material_samples, latest, expected_hash = build_stage_context(repository, draft)
+    code_unique = repository.code_is_unique(draft.code, draft.id)
     validation = validate_stage(
         stage,
         draft,
-        code_unique=repository.code_is_unique(draft.code, draft.id),
+        code_unique=code_unique,
         material_samples=material_samples,
         compile_result=latest,
         expected_hash=expected_hash,
@@ -132,4 +146,64 @@ def validate_stage_with_context(repository: Repository, stage: StageName, draft:
         material_samples,
         latest,
         expected_hash,
+        code_unique=code_unique,
     )
+
+
+def validate_stages_with_context(
+    repository: Repository,
+    stages: tuple[StageName, ...] | list[StageName],
+    draft: TemplateDraft,
+    sketch_solution: dict[str, Any] | None = None,
+    stage_inputs: tuple[list[dict[str, Any]], CompileResult | None] | None = None,
+) -> dict[StageName, StageValidation]:
+    """用同一份材料、编译和编码上下文完成多个阶段的说明书校验。"""
+    if stage_inputs is None:
+        material_samples, latest, expected_hash = build_stage_context(repository, draft)
+    else:
+        material_samples, latest = stage_inputs
+        expected_hash = None
+        nominal = _select_nominal_material_context(draft, material_samples)
+        if nominal:
+            expected_hash = lower_to_plan(
+                draft,
+                {"record": nominal["material"], "provenance": nominal["provenance"]},
+            ).inputHash
+    code_unique = repository.code_is_unique(draft.code, draft.id)
+    base_sketch_validation = None
+    if any(stage != "templateInfo" for stage in stages) and draft.stageStatus.baseSketch == "complete":
+        base_sketch_validation = validate_stage(
+            "baseSketch",
+            draft,
+            code_unique=code_unique,
+            material_samples=material_samples,
+            compile_result=latest,
+            expected_hash=expected_hash,
+            sketch_solution=sketch_solution,
+        )
+
+    validations: dict[StageName, StageValidation] = {}
+    for stage in stages:
+        validation = base_sketch_validation if stage == "baseSketch" else None
+        if validation is None:
+            validation = validate_stage(
+                stage,
+                draft,
+                code_unique=code_unique,
+                material_samples=material_samples,
+                compile_result=latest,
+                expected_hash=expected_hash,
+                sketch_solution=sketch_solution,
+            )
+        validations[stage] = _with_workflow_prerequisites(
+            repository,
+            stage,
+            draft,
+            validation,
+            material_samples,
+            latest,
+            expected_hash,
+            code_unique=code_unique,
+            base_sketch_validation=base_sketch_validation,
+        )
+    return validations

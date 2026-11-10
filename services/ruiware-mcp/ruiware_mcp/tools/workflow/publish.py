@@ -6,7 +6,10 @@ from ...core.responses import tool_result
 
 def execute(client: RuiWareApiClient, arguments: dict[str, Any]) -> dict[str, Any]:
     draft_id = arguments.get("draftId", "")
-    return tool_result(client.post(f"/template-drafts/{draft_id}/publish", {
+    payload = {
         "baseRevision": arguments["baseRevision"],
         "confirmed": arguments["confirmed"],
-    }))
+    }
+    if arguments.get("duplicateDecision") is not None:
+        payload["duplicateDecision"] = arguments["duplicateDecision"]
+    return tool_result(client.post(f"/template-drafts/{draft_id}/publish", payload))
