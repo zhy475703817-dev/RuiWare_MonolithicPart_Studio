@@ -32,7 +32,8 @@ def _material_database(path) -> None:
         )
 
 
-def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("mating_method", [None, "clearance-fit", "welded", "bolted"])
+def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch, mating_method) -> None:
     material_path = tmp_path / "materials.db"
     _material_database(material_path)
     repository = Repository(tmp_path / "platform.db", RuiWareMaterialLibrary(material_path))
@@ -76,7 +77,29 @@ def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch) -> N
     ]
     draft = client.put(f"/api/v1/template-drafts/{draft['id']}", json=draft).json()
     draft = client.post(f"{stage_path}/features/complete").json()["draft"]
+    mating = None
+    if mating_method:
+        mating = {
+            "version": 1, "family": "plane-contact", "role": "surface", "connectionMethod": mating_method,
+            "dimensions": {}, "allowedRelations": ["贴合"], "capacity": 1,
+        }
+        if mating_method == "clearance-fit":
+            mating.update(family="pin-hole", role="pin", dimensions={"diameter": {"nominal": 10, "lowerTolerance": -0.02, "upperTolerance": 0.02, "unit": "mm"}}, allowedRelations=["同轴", "贴合"])
+        draft["interfaces"] = [{
+            "id": "mount", "name": "安装基准", "geometryRefs": ["part.face.front"], "mating": mating,
+            "connectionProcesses": [mating_method if mating_method != "clearance-fit" else "bolted"],
+        }]
+        sketch = draft["sketch"]
+        saved = client.put(f"/api/v1/template-drafts/{draft['id']}", json=draft)
+        assert saved.status_code == 200, saved.text
+        draft = saved.json()
+        assert draft["sketch"] == sketch
+        assert all(draft["stageStatus"][stage] == "complete" for stage in ("templateInfo", "material", "baseSketch", "features"))
+        assert draft["interfaces"][0]["mating"] == mating
     draft = client.post(f"{stage_path}/variants/complete").json()["draft"]
+    assert draft["stageStatus"]["variants"] == "complete"
+    if mating:
+        assert draft["interfaces"][0]["mating"] == mating
 
     compiled = client.post(f"/api/v1/template-drafts/{draft['id']}/compile")
     assert compiled.status_code == 200
@@ -108,6 +131,8 @@ def test_seven_stage_workflow_compiles_and_publishes(tmp_path, monkeypatch) -> N
     model_bytes = (artifact_root / stl["url"].removeprefix("/artifacts/")).read_bytes()
     assert len(model_bytes) > 84
     with zipfile.ZipFile(io.BytesIO(uploaded["content"])) as package:
+        if mating:
+            assert json.loads(package.read("interfaces.json"))["interfaces"][0]["mating"] == mating
         outputs = json.loads(package.read("outputs.json"))
         packaged_stl = next(item for item in outputs["artifacts"] if item["kind"] == "stl")
         assert package.read(packaged_stl["packagePath"]) == model_bytes

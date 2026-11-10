@@ -163,6 +163,10 @@ class EvaluationRequest(BaseModel):
     projectZone: dict[str, object] = Field(default_factory=dict)
 
 
+class EvaluationPreviewRequest(EvaluationRequest):
+    draft: TemplateDraft
+
+
 class MaterialSearchRequest(BaseModel):
     search: str = Field(default="", max_length=80)
     limit: int = Field(default=100, ge=1, le=500)
@@ -644,6 +648,18 @@ def compile_template_draft(draft_id: str, request: Request, body: GuardedActionR
 def evaluate_template_draft(draft_id: str, request: EvaluationRequest):
     return evaluate_template_draft_service(
         get_template_draft_service(repository, draft_id),
+        request.overrides,
+        request.material,
+        request.product,
+        request.component,
+        request.projectZone,
+    )
+
+
+@app.post("/api/v1/evaluate-preview", response_model=TemplateEvaluation)
+def evaluate_template_preview(request: EvaluationPreviewRequest):
+    return evaluate_template_draft_service(
+        request.draft,
         request.overrides,
         request.material,
         request.product,

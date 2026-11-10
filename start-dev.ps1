@@ -46,8 +46,8 @@ function Wait-HttpReady {
 
 if (-not $MaterialDatabase) {
     $materialCandidates = @(
-        (Join-Path $ProjectRoot 'ruiware.db'),
-        (Join-Path (Split-Path -Parent $ProjectRoot) 'debug\debug\ruiware.db')
+        (Join-Path (Split-Path -Parent (Split-Path -Parent $ProjectRoot)) 'debug\debug\ruiware.db'),
+        (Join-Path $ProjectRoot 'ruiware.db')
     )
     $MaterialDatabase = $materialCandidates |
         Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
@@ -83,7 +83,7 @@ if (-not $BunExecutable -and -not ($NodeExecutable -and $ViteCli)) {
 
 if (-not (Test-LocalPort $ApiPort)) {
     Start-Process -FilePath $PythonExecutable `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort) `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', $ApiHost, '--port', $ApiPort, '--reload', '--reload-dir', 'services/template-api', '--reload-dir', 'libs/python') `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $ProjectRoot 'api.out.log') `

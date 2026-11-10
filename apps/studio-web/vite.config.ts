@@ -19,6 +19,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/openapi.json': 'http://127.0.0.1:8010',
       '/api': 'http://127.0.0.1:8010',
       '/artifacts': 'http://127.0.0.1:8010',
       '/uploads': 'http://127.0.0.1:8010',

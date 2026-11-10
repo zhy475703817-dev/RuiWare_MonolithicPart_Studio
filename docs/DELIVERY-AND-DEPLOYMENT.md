@@ -21,7 +21,7 @@ services/
 tests/                         # 需要可复现验证时保留
 data/platform.db               # 模板草稿、修订、版本元数据
 data/attachments/              # 模板引用的图片、图纸等证据
-ruiware.db                     # 只读材料库（默认从平台根目录读取）
+ruiware.db                     # 只读材料库（无外部完整库时的回退）
 bun.lock
 package.json
 pyproject.toml
@@ -30,7 +30,7 @@ README.md
 CONVERSATION-HANDOFF.md
 ```
 
-还必须提供平台根目录中的材料库：
+启动脚本会优先读取同级 RuiWare 运行包中的完整材料库；若不存在，再回退到平台根目录中的材料库：
 
 ```text
 template-engineering-platform/

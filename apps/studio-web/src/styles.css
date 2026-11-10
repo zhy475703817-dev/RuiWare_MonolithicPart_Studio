@@ -1882,6 +1882,18 @@ code {
   line-height: 1.45;
 }
 .interface-declaration-note strong { color: #246d83; white-space: nowrap; }
+.connection-process-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  min-height: 30px;
+  padding: 7px 8px;
+  border: 1px solid #d3d9de;
+  border-radius: 5px;
+  background: #fff;
+}
+.connection-process-options label { display: flex; align-items: center; gap: 5px; font-size: 8px; color: #4f5e67; }
+.connection-process-options input { width: auto; }
 .feature-derived-interface-note {
   display: grid;
   gap: 4px;

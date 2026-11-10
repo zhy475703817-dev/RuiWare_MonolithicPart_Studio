@@ -15,6 +15,18 @@ _FIELD_LABELS = {
     "interfaceType": "接口类型",
     "declarationMode": "声明方式",
     "connectionMethod": "连接方式",
+    "mating": "配合契约",
+    "version": "契约版本",
+    "family": "配合族",
+    "role": "角色",
+    "dimensions": "配合尺寸",
+    "nominal": "名义值",
+    "lowerTolerance": "下偏差",
+    "upperTolerance": "上偏差",
+    "unit": "单位",
+    "allowedRelations": "允许的装配关系",
+    "capacity": "连接容量",
+    "connectionProcesses": "连接工艺",
     "locationRole": "定位角色",
     "locatingRole": "定位角色",
     "geometryRefs": "几何基准",
@@ -40,6 +52,13 @@ _TYPE_LABELS = {
 _MODE_LABELS = {
     "staticGeometry": "固定几何声明",
     "featureDerived": "由制造特征自动派生",
+}
+
+_PROCESS_LABELS = {
+    "hookSnap": "挂钩卡接",
+    "bolted": "螺栓连接",
+    "welded": "焊接",
+    "riveted": "铆钉",
 }
 
 
@@ -78,6 +97,10 @@ def _declaration_mode(data: dict[str, Any]) -> str:
     return _MODE_LABELS.get(value, _display_value(value))
 
 
+def _connection_processes(data: dict[str, Any]) -> str:
+    return "、".join(_PROCESS_LABELS.get(item, str(item)) for item in data.get("connectionProcesses", [])) or "—"
+
+
 def _source_description(data: dict[str, Any]) -> str:
     geometry_refs = data.get("geometryRefs")
     rule_id = data.get("sourceRuleId") or data.get("sourceFeatureRuleId")
@@ -111,6 +134,7 @@ def _resolved_rows(items: list[Any]) -> list[list[str]]:
                 _display_value(data.get("id")),
                 _display_value(data.get("sourceInterfaceId")),
                 _interface_type(data),
+                _connection_processes(data),
                 _display_value(data.get("sourceFeatureId")),
                 _display_value(data.get("geometryRef") or data.get("geometryRefs")),
                 _display_value(data.get("referenceFrame")),
@@ -135,6 +159,7 @@ def build_interface_reference_lines(draft: Any, table: TableRenderer) -> list[st
                 _display_value(data.get("id")),
                 _interface_type(data),
                 _declaration_mode(data),
+                _connection_processes(data),
                 _source_description(data),
                 _display_value(data.get("parameterRefs")),
                 _display_value(data.get("critical")),
@@ -146,7 +171,7 @@ def build_interface_reference_lines(draft: Any, table: TableRenderer) -> list[st
             table(
                 ["定义项", "内容"],
                 [
-                    [_FIELD_LABELS.get(key, key), _display_value(value)]
+                    [_FIELD_LABELS.get(key, key), _connection_processes(data) if key == "connectionProcesses" else _display_value(value)]
                     for key, value in data.items()
                     if value is not None and value != "" and value != [] and value != {}
                 ],
@@ -154,7 +179,7 @@ def build_interface_reference_lines(draft: Any, table: TableRenderer) -> list[st
         )
 
     lines = table(
-        ["接口名称", "稳定 ID", "接口类型", "声明方式", "几何/规则来源", "关联参数", "关键", "已复核"],
+        ["接口名称", "稳定 ID", "接口类型", "声明方式", "连接工艺", "几何/规则来源", "关联参数", "关键", "已复核"],
         summary_rows,
     )
     lines.extend(["", "### 接口定义明细"])
@@ -169,7 +194,7 @@ def build_interface_reference_lines(draft: Any, table: TableRenderer) -> list[st
         lines.append("")
         lines.extend(
             table(
-                ["实例名称", "实例 ID", "来源接口", "类型", "来源特征", "几何基准", "局部参考系", "作用区域"],
+                ["实例名称", "实例 ID", "来源接口", "类型", "连接工艺", "来源特征", "几何基准", "局部参考系", "作用区域"],
                 _resolved_rows(resolved),
             )
         )
@@ -197,6 +222,8 @@ def build_interface_guide_lines(draft: Any, table: TableRenderer) -> list[str]:
                 "",
                 f"- 用途：{_interface_type(data)}。",
                 f"- 生成方式：{_declaration_mode(data)}。",
+                f"- 连接工艺：{_connection_processes(data)}。",
+                f"- 配合契约：{_display_value(data.get('mating'))}。",
                 f"- 几何或规则来源：{_source_description(data)}。",
                 f"- 关联参数：{_display_value(data.get('parameterRefs'))}。",
                 f"- 局部参考系：{_display_value(data.get('referenceFrame'))}。",
@@ -217,9 +244,9 @@ def build_interface_guide_lines(draft: Any, table: TableRenderer) -> list[str]:
         lines.append("")
         lines.extend(
             table(
-                ["实际接口", "来源定义", "来源特征", "几何基准", "局部参考系", "作用区域"],
+                ["实际接口", "来源定义", "连接工艺", "来源特征", "几何基准", "局部参考系", "作用区域"],
                 [
-                    [row[0], row[2], row[4], row[5], row[6], row[7]]
+                    [row[0], row[2], row[4], row[5], row[6], row[7], row[8]]
                     for row in _resolved_rows(resolved)
                 ],
             )
