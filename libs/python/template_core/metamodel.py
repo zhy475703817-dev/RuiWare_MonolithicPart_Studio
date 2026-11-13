@@ -339,6 +339,50 @@ class ResolvedInterfaceRegion(BaseModel):
     vSpan: float = Field(gt=0)
 
 
+class MatingDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    nominal: float = Field(strict=True, allow_inf_nan=False)
+    lowerTolerance: float = Field(strict=True, allow_inf_nan=False)
+    upperTolerance: float = Field(strict=True, allow_inf_nan=False)
+    unit: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_tolerances(self) -> "MatingDimension":
+        if self.lowerTolerance > self.upperTolerance:
+            raise ValueError("下偏差不能大于上偏差")
+        return self
+
+
+class MatingContract(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    version: int = Field(strict=True, ge=1, le=1)
+    family: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    connectionMethod: str = Field(min_length=1)
+    dimensions: dict[str, MatingDimension]
+    allowedRelations: list[str] = Field(min_length=1)
+    capacity: int = Field(strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def validate_names(self) -> "MatingContract":
+        if self.family == "plane-contact":
+            if self.connectionMethod not in {"welded", "bolted"}:
+                raise ValueError("面贴合契约的连接方式须为 welded（焊接）或 bolted（螺栓连接）")
+            if "贴合" not in self.allowedRelations:
+                raise ValueError("面贴合契约必须允许“贴合”装配关系")
+        elif not self.dimensions:
+            raise ValueError("非面贴合契约必须至少填写一个配合尺寸")
+        if any(not name.strip() or name != name.strip() for name in self.dimensions):
+            raise ValueError("尺寸名称不能为空或包含首尾空格")
+        if any(not relation.strip() or relation != relation.strip() for relation in self.allowedRelations):
+            raise ValueError("允许的装配关系不能为空或包含首尾空格")
+        if len(set(self.allowedRelations)) != len(self.allowedRelations):
+            raise ValueError("允许的装配关系不能重复")
+        return self
+
+
 class PartInterface(BaseModel):
     """A single-part declaration of stable geometry available to a future assembly."""
 
@@ -354,6 +398,8 @@ class PartInterface(BaseModel):
     region: InterfaceRegion | None = None
     parameterRefs: list[str] = Field(default_factory=list)
     compatibilityTags: list[str] = Field(default_factory=list)
+    mating: MatingContract | None = None
+    connectionProcesses: list[Literal["hookSnap", "bolted", "welded", "riveted"]] = Field(default_factory=list)
     description: str = ""
     required: bool = False
     reviewed: bool = False
@@ -368,6 +414,8 @@ class PartInterface(BaseModel):
             self.role = None
         if self.declarationMode == "staticGeometry":
             self.sourceFeatureRuleId = None
+        if self.mating and self.mating.family == "plane-contact" and self.mating.connectionMethod not in self.connectionProcesses:
+            raise ValueError("面贴合契约的连接方式必须包含在接口的连接工艺中")
         return self
 
 
@@ -427,6 +475,8 @@ class ResolvedInterface(BaseModel):
     interfaceType: Literal["locating", "connecting", "supporting", "adjustable", "processDatum", "other"]
     geometryRefs: list[str] = Field(default_factory=list)
     parameterRefs: list[str] = Field(default_factory=list)
+    mating: MatingContract | None = None
+    connectionProcesses: list[Literal["hookSnap", "bolted", "welded", "riveted"]] = Field(default_factory=list)
     region: ResolvedInterfaceRegion | None = None
     sourceFeatureRuleId: str | None = None
     sourceFeatureId: str | None = None

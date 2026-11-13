@@ -112,7 +112,20 @@ export const api = {
   setCurrentDraft: (draftId: string) => request<{ draftId: string }>("/api/v1/workspace/current-draft", json("PUT", { draftId })),
   currentDraft: () => request<{ draftId: string | null }>("/api/v1/workspace/current-draft"),
   createBlank: (name = "未命名零部件模板") => request<Draft>("/api/v1/template-drafts/blank", json("POST", { name })),
-  saveDraft: (draft: Draft) => request<Draft>(`/api/v1/template-drafts/${draft.id}`, json("PUT", draft)),
+  saveDraft: async (draft: Draft) => {
+    const contracts = draft.interfaces.filter((item) => item.mating);
+    if (contracts.length) {
+      const schema = await request<{ components?: { schemas?: { PartInterface?: { properties?: { mating?: unknown } } } } }>("/openapi.json");
+      if (!schema.components?.schemas?.PartInterface?.properties?.mating) {
+        throw new Error("后端尚未加载配合契约功能，已阻止保存以保护当前输入。请重启零部件模板 API 后重试；刷新页面前请先保留未保存的契约。");
+      }
+    }
+    const saved = await request<Draft>(`/api/v1/template-drafts/${draft.id}`, json("PUT", draft));
+    if (contracts.some((item) => !saved.interfaces.find((candidate) => candidate.id === item.id)?.mating)) {
+      throw new Error("服务器未保留配合契约，当前输入仍保留在编辑器中，未继续检查。请确认后端版本后重新保存。");
+    }
+    return saved;
+  },
   duplicateDraft: (id: string) => request<Draft>(`/api/v1/template-drafts/${id}/duplicate`, json("POST")),
   archiveDraft: (id: string) => request<void>(`/api/v1/template-drafts/${id}`, { method: "DELETE" }),
   revisions: (id: string) => request<RevisionEntry[]>(`/api/v1/template-drafts/${id}/revisions`),
@@ -139,6 +152,8 @@ export const api = {
   sharedTemplates: () => request<SharedTemplate[]>("/api/v1/shared-templates"),
   sharedTemplateDownloadUrl: (publicationId: string) => `/api/v1/shared-templates/${encodeURIComponent(publicationId)}/download`,
   evaluate: (id: string, input: EvaluationRequest) => request<TemplateEvaluation>(`/api/v1/template-drafts/${id}/evaluate`, json("POST", input)),
+  evaluatePreview: (draft: Draft, input: EvaluationRequest) =>
+    request<TemplateEvaluation>("/api/v1/evaluate-preview", json("POST", { draft, ...input })),
   uploadAttachment: (id: string, file: File, kind: string) => request<Draft>(`/api/v1/template-drafts/${id}/attachments?filename=${encodeURIComponent(file.name)}&kind=${encodeURIComponent(kind)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }),
   updateAttachment: (id: string, attachmentId: string, input: { description: string; kind?: string }) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, json("PATCH", input)),
   removeAttachment: (id: string, attachmentId: string) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, { method: "DELETE" }),

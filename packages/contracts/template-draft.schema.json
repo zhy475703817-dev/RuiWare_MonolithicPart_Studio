@@ -61,8 +61,38 @@
     },
     "parameterDefinitions": {"type": "array"}, "geometryRecipe": {"type": "object"},
     "featureRules": {"type": "array"}, "featureRulesReviewed": {"type": "boolean"},
-    "interfaces": {"type": "array"}, "variants": {"type": "array"},
+    "interfaces": {"type": "array", "items": {"type": "object", "properties": {"mating": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/mating"}]}}}}, "variants": {"type": "array"},
     "evidence": {"type": "array"}, "aiProposals": {"type": "array"}, "admission": {"type": "object"},
     "revision": {"type": "integer", "minimum": 1}, "createdAt": {"type": ["string", "null"]}, "updatedAt": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "matingDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nominal", "lowerTolerance", "upperTolerance", "unit"],
+      "properties": {
+        "nominal": {"type": "number"},
+        "lowerTolerance": {"type": "number"},
+        "upperTolerance": {"type": "number"},
+        "unit": {"type": "string", "minLength": 1, "pattern": "\\S"}
+      }
+    },
+    "mating": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "family", "role", "connectionMethod", "dimensions", "allowedRelations", "capacity"],
+      "properties": {
+        "version": {"const": 1, "type": "integer"},
+        "family": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "role": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "connectionMethod": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "dimensions": {"type": "object", "propertyNames": {"pattern": "^\\S(?:.*\\S)?$"}, "additionalProperties": {"$ref": "#/$defs/matingDimension"}},
+        "allowedRelations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^\\S(?:.*\\S)?$"}},
+        "capacity": {"type": "integer", "minimum": 1}
+      },
+      "if": {"properties": {"family": {"const": "plane-contact"}}, "required": ["family"]},
+      "then": {"properties": {"connectionMethod": {"enum": ["welded", "bolted"]}, "allowedRelations": {"contains": {"const": "贴合"}}}},
+      "else": {"properties": {"dimensions": {"minProperties": 1}}}
+    }
   }
 }
